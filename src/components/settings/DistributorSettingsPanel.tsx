@@ -28,7 +28,7 @@ interface FieldConfig {
 
 // Distributors with a real, working API adapter behind them. Everyone else
 // still runs on mock data until their API access is approved.
-const LIVE_DISTRIBUTORS: DistributorKey[] = ["INGRAM_MICRO"]
+const LIVE_DISTRIBUTORS: DistributorKey[] = ["INGRAM_MICRO", "TD_SYNNEX"]
 
 const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fields: FieldConfig[] }> = {
   INGRAM_MICRO: {
@@ -42,10 +42,10 @@ const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fi
   },
   TD_SYNNEX: {
     label: "TD Synnex",
-    note: "API Key + Partner ID. Good MSP pricing tiers.",
+    note: "OAuth 2.0 Client ID + Secret. No keyword search — exact part number lookup only.",
     fields: [
-      { key: "apiKey", label: "API Key" },
-      { key: "partnerId", label: "Partner ID" },
+      { key: "clientId", label: "Client ID" },
+      { key: "clientSecret", label: "Client Secret" },
     ],
   },
   DH: {

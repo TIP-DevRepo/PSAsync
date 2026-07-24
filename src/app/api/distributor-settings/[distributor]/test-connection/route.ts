@@ -12,7 +12,7 @@ const VALID_DISTRIBUTORS = ["INGRAM_MICRO", "TD_SYNNEX", "DH", "AMAZON_BUSINESS"
 // credentials are approved).
 const REQUIRED_FIELDS: Record<string, string[]> = {
   INGRAM_MICRO: ["clientId", "clientSecret", "apiKey"],
-  TD_SYNNEX: ["apiKey", "partnerId"],
+  TD_SYNNEX: ["clientId", "clientSecret"],
   DH: ["apiKey"],
   AMAZON_BUSINESS: ["clientId", "clientSecret"],
 }
