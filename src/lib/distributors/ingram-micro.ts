@@ -103,6 +103,7 @@ export const ingramMicroAdapter: DistributorAdapter = {
   key: "INGRAM_MICRO",
   label: "Ingram Micro",
   isLive: true,
+  supportsKeywordSearch: true,
 
   async testConnection(
     creds: DistributorCredentials,
@@ -145,6 +146,13 @@ export const ingramMicroAdapter: DistributorAdapter = {
         COUNTRY_CODE,
         { pageNumber: 1, pageSize: 10, keyword: [query] },
         (error: unknown, data: { catalog?: Array<Record<string, unknown>> }) => {
+          // A 404 here just means nothing matched the keyword — a normal
+          // empty search result, not a real failure
+          const status = (error as { status?: number })?.status
+          if (error && status === 404) {
+            resolve([])
+            return
+          }
           if (error) {
             reject(error)
             return

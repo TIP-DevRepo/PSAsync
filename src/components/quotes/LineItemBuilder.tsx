@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, Fragment } from "react"
 import { Button } from "@/components/ui/button"
 import { Tooltip } from "@heroui/react"
-import { Repeat, ToggleRight, SlidersHorizontal, GitBranch, Package, AlignLeft, GripVertical } from "lucide-react"
+import { Repeat, ToggleRight, SlidersHorizontal, GitBranch, Package, AlignLeft, GripVertical, ImageOff, Check, AlertTriangle } from "lucide-react"
 import { useFixedMenuPosition, useCloseOnOutsideClick, useCloseOnScroll } from "@/lib/useFixedMenu"
 import { Modal } from "@/components/Modal"
 import {
@@ -21,6 +21,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import { CSS } from "@dnd-kit/utilities"
 import type { DraggableAttributes } from "@dnd-kit/core"
 import type { SyntheticListenerMap } from "@dnd-kit/core/dist/hooks/utilities"
+import { DistributorProductGroup, DistributorOffer, DistributorKey } from "@/lib/distributors/types"
 
 // ─── Shared Types ─────────────────────────────────────────────────────────
 export type RecurringInterval = "MONTHLY" | "QUARTERLY" | "ANNUALLY"
@@ -57,17 +58,6 @@ export interface CatalogOption {
   cost: number
   taxable: boolean
   active: boolean
-}
-
-export interface DistributorResult {
-  id: string
-  distributorKey: string
-  distributorLabel: string
-  name: string
-  sku: string
-  price: number
-  cost: number
-  availability: number
 }
 
 const NO_SECTION = "__no_section__"
@@ -1008,13 +998,13 @@ export function LineItemBuilder({
               bundleName: addToBundleName ?? payload.bundleName,
             })
           }
-          onAddDistributor={(result, quantity) =>
+          onAddDistributor={(product, offer, quantity) =>
             onCreate(addModalSection === NO_SECTION ? null : addModalSection, {
-              name: result.name,
-              sku: result.sku,
-              description: `Via ${result.distributorLabel} (mock data — pending live distributor API)`,
-              unitPrice: result.price,
-              cost: result.cost,
+              name: product.name,
+              sku: offer.sku || product.partNumber,
+              description: `Via ${offer.distributorLabel}${offer.isMock ? " (mock data — pending live distributor API)" : ""}`,
+              unitPrice: offer.price,
+              cost: offer.cost,
               quantity,
               taxable: true,
               bundleName: addToBundleName ?? undefined,
@@ -1038,7 +1028,7 @@ function AddLineItemModal({
   onClose: () => void
   onAddCatalog: (item: CatalogOption, quantity: number) => void
   onAddAdhoc: (payload: Partial<LineItemBuilderItem>) => void
-  onAddDistributor: (result: DistributorResult, quantity: number) => void
+  onAddDistributor: (product: DistributorProductGroup, offer: DistributorOffer, quantity: number) => void
 }) {
   const [mode, setMode] = useState<"catalog" | "distributor" | "adhoc">("catalog")
   const [search, setSearch] = useState("")
@@ -1052,19 +1042,37 @@ function AddLineItemModal({
   })
 
   const [distQuery, setDistQuery] = useState("")
-  const [distResults, setDistResults] = useState<DistributorResult[]>([])
+  const [distProducts, setDistProducts] = useState<DistributorProductGroup[]>([])
   const [distMessage, setDistMessage] = useState("")
   const [distLoading, setDistLoading] = useState(false)
   const [distQty, setDistQty] = useState(1)
+  // Which distributor is selected per product id — defaults to the first
+  // found offer once results come in
+  const [selectedOffers, setSelectedOffers] = useState<Record<string, DistributorKey>>({})
 
   async function runDistributorSearch() {
     if (!distQuery.trim()) return
     setDistLoading(true)
     const res = await fetch(`/api/distributor-search?q=${encodeURIComponent(distQuery)}`)
     const data = await res.json()
-    setDistResults(data.results ?? [])
+    const products: DistributorProductGroup[] = data.products ?? []
+    setDistProducts(products)
     setDistMessage(data.message ?? "")
+    const defaults: Record<string, DistributorKey> = {}
+    products.forEach((p) => {
+      const firstFound = p.offers.find((o) => o.found)
+      if (firstFound) defaults[p.id] = firstFound.distributorKey
+    })
+    setSelectedOffers(defaults)
     setDistLoading(false)
+  }
+
+  function getSelectedOffer(product: DistributorProductGroup): DistributorOffer | undefined {
+    const selectedKey = selectedOffers[product.id]
+    return (
+      product.offers.find((o) => o.distributorKey === selectedKey) ??
+      product.offers.find((o) => o.found)
+    )
   }
 
   const filtered = catalog.filter(
@@ -1169,32 +1177,102 @@ function AddLineItemModal({
               </p>
             )}
 
-            <div className="max-h-64 overflow-y-auto space-y-1">
-              {distResults.map((r) => (
-                <div
-                  key={r.id}
-                  className="flex items-center justify-between rounded-md border p-2 text-sm"
-                >
-                  <div>
-                    <p className="font-medium">{r.name}</p>
-                    <p className="text-xs text-zinc-500">
-                      {r.distributorLabel} · {r.sku} · ${r.price.toFixed(2)} · {r.availability} in stock
-                    </p>
+            <div className="max-h-96 overflow-y-auto space-y-3">
+              {distProducts.map((product) => {
+                const selected = getSelectedOffer(product)
+                return (
+                  <div key={product.id} className="rounded-md border p-3">
+                    <div className="flex gap-3">
+                      <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center rounded-md bg-zinc-100 dark:bg-zinc-800 text-zinc-400">
+                        <ImageOff size={22} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-sm leading-snug">{product.name}</p>
+                        {product.manufacturer && (
+                          <p className="text-xs text-zinc-500">{product.manufacturer} · {product.partNumber}</p>
+                        )}
+                        <div className="mt-1 flex items-center gap-3">
+                          <span className="text-lg font-bold">
+                            {selected ? money(selected.price) : "—"}
+                          </span>
+                          {selected && (
+                            <span
+                              className={
+                                selected.availability > 0
+                                  ? "text-xs text-green-600"
+                                  : "text-xs text-amber-600"
+                              }
+                            >
+                              {selected.availability > 0
+                                ? `${selected.availability} in stock`
+                                : "Check availability"}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                      <Button
+                        size="sm"
+                        disabled={!selected}
+                        onClick={() => {
+                          if (!selected) return
+                          onAddDistributor(product, selected, distQty)
+                          onClose()
+                        }}
+                      >
+                        Add to Quote
+                      </Button>
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {product.offers.map((offer) => {
+                        const isSelected = selected?.distributorKey === offer.distributorKey
+                        if (!offer.found) {
+                          return (
+                            <div
+                              key={offer.distributorKey}
+                              className="flex w-24 flex-col items-center gap-0.5 rounded-md border border-dashed p-2 text-center opacity-60"
+                            >
+                              <span className="text-sm text-zinc-400">Not Found</span>
+                              <span className="text-xs text-zinc-400">{offer.distributorLabel}</span>
+                              <AlertTriangle size={13} className="text-amber-500 mt-0.5" />
+                            </div>
+                          )
+                        }
+                        return (
+                          <button
+                            key={offer.distributorKey}
+                            type="button"
+                            onClick={() =>
+                              setSelectedOffers((prev) => ({ ...prev, [product.id]: offer.distributorKey }))
+                            }
+                            className={`relative flex w-24 flex-col items-center gap-0.5 rounded-md border p-2 text-center transition-colors ${
+                              isSelected
+                                ? "border-green-400 bg-green-50 dark:bg-green-950/30"
+                                : "hover:border-zinc-400"
+                            }`}
+                          >
+                            <span className="text-sm font-semibold">{money(offer.price)}</span>
+                            <span className="text-xs text-zinc-500">{offer.distributorLabel}</span>
+                            {isSelected ? (
+                              <span className="absolute -bottom-1.5 -right-1.5 rounded-full bg-green-500 p-0.5 text-white">
+                                <Check size={11} />
+                              </span>
+                            ) : (
+                              <span className="mt-0.5 h-3 w-3 rounded-full border border-zinc-300" />
+                            )}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                  <Button
-                    size="sm"
-                    onClick={() => {
-                      onAddDistributor(r, distQty)
-                      onClose()
-                    }}
-                  >
-                    Add
-                  </Button>
-                </div>
-              ))}
+                )
+              })}
+              {distProducts.length === 0 && !distLoading && distQuery && (
+                <p className="text-sm text-zinc-500">No results yet — try searching above.</p>
+              )}
             </div>
 
-            {distResults.length > 0 && (
+            {distProducts.length > 0 && (
               <div className="flex items-center gap-2">
                 <label className="text-sm text-zinc-500">Qty</label>
                 <input

@@ -1,4 +1,4 @@
-import { DistributorKey, DistributorSearchResult } from "./types"
+import { DistributorKey, DistributorSearchResult, DistributorOffer } from "./types"
 
 const SAMPLE_PRODUCTS = [
   { name: "Dell Latitude 5450 Laptop", manufacturer: "Dell" },
@@ -10,6 +10,17 @@ const SAMPLE_PRODUCTS = [
   { name: "APC Smart-UPS 1500VA", manufacturer: "APC" },
 ]
 
+function seededNumber(seed: string, min: number, max: number) {
+  let hash = 0
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
+  }
+  return min + (hash % (max - min))
+}
+
+// Used only when NO live keyword-capable distributor is enabled at all —
+// generates standalone mock "products" from scratch so search still
+// returns something.
 export function generateMockResults(
   query: string,
   distributor: DistributorKey
@@ -37,4 +48,26 @@ export function generateMockResults(
       isMock: true,
     }
   })
+}
+
+// Used to attach a mock price/stock offer from a still-mock distributor
+// (D&H, Amazon Business) onto a REAL product a live distributor found —
+// seeded by the product's part number, so the same product always shows
+// the same mock price/stock instead of changing on every search.
+export function generateMockOffer(
+  partNumber: string,
+  distributor: DistributorKey
+): Omit<DistributorOffer, "distributorLabel"> {
+  const seed = `${partNumber}-${distributor}`
+  const price = seededNumber(seed, 2000, 50000) / 100
+  const cost = Math.round(price * 0.78 * 100) / 100
+  return {
+    distributorKey: distributor,
+    sku: `${distributor.slice(0, 3)}-${seededNumber(seed + "-sku", 10000, 99999)}`,
+    price,
+    cost,
+    availability: seededNumber(seed + "-avail", 0, 250),
+    found: true,
+    isMock: true,
+  }
 }

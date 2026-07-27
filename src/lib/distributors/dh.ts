@@ -10,6 +10,7 @@ export const dhAdapter: DistributorAdapter = {
   key: "DH",
   label: "D&H",
   isLive: false,
+  supportsKeywordSearch: true,
 
   async testConnection(creds: DistributorCredentials): Promise<TestConnectionResult> {
     // TODO once approved: D&H REST API call using apiKey to confirm access

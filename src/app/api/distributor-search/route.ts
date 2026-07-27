@@ -2,47 +2,13 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { getAdapter } from "@/lib/distributors/registry"
-import { DistributorKey } from "@/lib/distributors/types"
-
-const DISTRIBUTOR_LABELS: Record<string, string> = {
-  INGRAM_MICRO: "Ingram Micro",
-  TD_SYNNEX: "TD Synnex",
-  DH: "D&H",
-  AMAZON_BUSINESS: "Amazon Business",
-}
-
-// Deterministic pseudo-random number from a string, so the same search term
-// always returns the same mock results instead of changing every time
-function seededNumber(seed: string, min: number, max: number) {
-  let hash = 0
-  for (let i = 0; i < seed.length; i++) {
-    hash = (hash * 31 + seed.charCodeAt(i)) >>> 0
-  }
-  return min + (hash % (max - min))
-}
-
-const tiers = ["Standard", "Pro", "Enterprise"]
-
-function mockResultsFor(query: string, distributor: string) {
-  const count = seededNumber(`${query}-${distributor}-count`, 1, 3) // 1-2 results
-  return Array.from({ length: count }).map((_, i) => {
-    const seed = `${query}-${distributor}-${i}`
-    const price = seededNumber(seed, 2000, 50000) / 100 // $20.00 - $500.00
-    const cost = Math.round(price * 0.78 * 100) / 100 // mock ~22% margin
-    const tier = tiers[seededNumber(seed + "-tier", 0, tiers.length)]
-    return {
-      id: seed,
-      distributorKey: distributor,
-      distributorLabel: DISTRIBUTOR_LABELS[distributor] ?? distributor,
-      name: `${query} - ${tier}`,
-      sku: `${distributor.slice(0, 3)}-${seededNumber(seed + "-sku", 10000, 99999)}`,
-      price,
-      cost,
-      availability: seededNumber(seed + "-avail", 0, 250),
-      isMock: true,
-    }
-  })
-}
+import {
+  DistributorKey,
+  DISTRIBUTOR_LABELS,
+  DistributorProductGroup,
+  DistributorSearchResult,
+} from "@/lib/distributors/types"
+import { generateMockResults, generateMockOffer } from "@/lib/distributors/mock-data"
 
 export async function GET(req: NextRequest) {
   const session = await auth()
@@ -62,60 +28,182 @@ export async function GET(req: NextRequest) {
 
   if (enabled.length === 0) {
     return NextResponse.json({
-      mock: true,
-      distributors: [],
-      results: [],
+      products: [],
       message:
         "No distributors are enabled yet. Go to Settings → Integrations → Distributor Integrations to connect one.",
     })
   }
 
-  const resultsByDistributor = await Promise.all(
-    enabled.map(async (dist) => {
-      const key = dist.distributor as DistributorKey
-      const adapter = getAdapter(key)
+  const credsFor = (record: (typeof enabled)[number]) => ({
+    apiKey: record.apiKey ?? "",
+    clientId: record.clientId ?? "",
+    clientSecret: record.clientSecret ?? "",
+    partnerId: record.partnerId ?? "",
+  })
 
-      if (!adapter.isLive) {
-        return mockResultsFor(query, dist.distributor)
-      }
+  const liveRecords = enabled.filter((r) => getAdapter(r.distributor as DistributorKey).isLive)
+  const mockRecords = enabled.filter((r) => !getAdapter(r.distributor as DistributorKey).isLive)
 
+  // ─── Discovery pass — every LIVE distributor gets an equal shot at the
+  // raw typed query. Keyword-capable distributors (Ingram Micro) run a real
+  // keyword search. Non-keyword distributors (TD Synnex) treat the query as
+  // an exact part number — either it matches or it legitimately doesn't.
+  // No single distributor gates whether a product shows up at all anymore.
+  type Discovered = { result: DistributorSearchResult; sandboxMode: boolean }
+  const discovered: Discovered[] = []
+
+  await Promise.all(
+    liveRecords.map(async (record) => {
+      const distributorKey = record.distributor as DistributorKey
+      const adapter = getAdapter(distributorKey)
       try {
-        const creds = {
-          apiKey: dist.apiKey ?? "",
-          clientId: dist.clientId ?? "",
-          clientSecret: dist.clientSecret ?? "",
-          partnerId: dist.partnerId ?? "",
-        }
-        const liveResults = await adapter.search(query, creds, dist.sandboxMode)
-        return liveResults.map((r) => ({
-          id: `${r.distributor}-${r.sku}`,
-          distributorKey: r.distributor,
-          distributorLabel: DISTRIBUTOR_LABELS[r.distributor] ?? r.distributor,
-          name: r.name,
-          sku: r.sku,
-          price: r.msrp,
-          cost: r.cost,
-          availability: r.stock,
-          isMock: r.isMock,
-        }))
+        const results = await adapter.search(query, credsFor(record), record.sandboxMode)
+        results.forEach((result) => discovered.push({ result, sandboxMode: record.sandboxMode }))
       } catch (err) {
-        // If the live call fails, fall back to mock so the search UI
-        // still returns something instead of erroring out entirely
-        console.error(`${dist.distributor} live search failed:`, err)
-        return mockResultsFor(query, dist.distributor)
+        console.error(`${distributorKey} discovery search failed:`, err)
       }
     })
   )
 
-  const results = resultsByDistributor.flat()
-  const anyLiveResults = results.some((r) => !r.isMock)
+  // ─── Group discoveries into products, deduping by part number (falling
+  // back to SKU, then name, if a distributor didn't return one) ───
+  const products: DistributorProductGroup[] = []
+  const productByKey = new Map<string, DistributorProductGroup>()
 
-  return NextResponse.json({
-    mock: !anyLiveResults,
-    distributors: enabled.map((d) => DISTRIBUTOR_LABELS[d.distributor] ?? d.distributor),
-    results,
-    message: anyLiveResults
+  function keyFor(r: DistributorSearchResult) {
+    return (r.partNumber || r.sku || r.name).toLowerCase().trim()
+  }
+
+  for (const { result } of discovered) {
+    const key = keyFor(result)
+    let product = productByKey.get(key)
+    if (!product) {
+      product = {
+        id: key,
+        name: result.name,
+        manufacturer: result.manufacturer,
+        partNumber: result.partNumber || result.sku,
+        offers: [],
+      }
+      productByKey.set(key, product)
+      products.push(product)
+    }
+    if (product.offers.some((o) => o.distributorKey === result.distributor)) continue
+    product.offers.push({
+      distributorKey: result.distributor,
+      distributorLabel: DISTRIBUTOR_LABELS[result.distributor],
+      sku: result.sku,
+      price: result.cost,
+      cost: result.cost,
+      availability: result.stock,
+      found: true,
+      isMock: result.isMock,
+    })
+  }
+
+  // No live distributor connected at all — fall back to fully mock results
+  if (liveRecords.length === 0) {
+    for (const record of enabled) {
+      const mockItems = generateMockResults(query, record.distributor as DistributorKey)
+      for (const item of mockItems) {
+        products.push({
+          id: item.sku.toLowerCase(),
+          name: item.name,
+          manufacturer: item.manufacturer,
+          partNumber: item.sku,
+          offers: [
+            {
+              distributorKey: item.distributor,
+              distributorLabel: DISTRIBUTOR_LABELS[item.distributor],
+              sku: item.sku,
+              price: item.cost,
+              cost: item.cost,
+              availability: item.stock,
+              found: true,
+              isMock: true,
+            },
+          ],
+        })
+      }
+    }
+  }
+
+  // ─── Fill-in pass — for every product that WAS found, ask every live
+  // distributor that didn't already contribute an offer whether they carry
+  // that exact part too. This is what produces "Not Found" boxes alongside
+  // the distributors that did find it. ───
+  for (const record of liveRecords) {
+    const distributorKey = record.distributor as DistributorKey
+    const adapter = getAdapter(distributorKey)
+    const label = DISTRIBUTOR_LABELS[distributorKey]
+
+    const missing = products.filter((p) => !p.offers.some((o) => o.distributorKey === distributorKey))
+    if (missing.length === 0) continue
+
+    await Promise.all(
+      missing.map(async (product) => {
+        try {
+          const results = await adapter.search(product.partNumber, credsFor(record), record.sandboxMode)
+          const match = results[0]
+          product.offers.push(
+            match
+              ? {
+                  distributorKey,
+                  distributorLabel: label,
+                  sku: match.sku,
+                  price: match.cost,
+                  cost: match.cost,
+                  availability: match.stock,
+                  found: true,
+                  isMock: match.isMock,
+                }
+              : {
+                  distributorKey,
+                  distributorLabel: label,
+                  sku: "",
+                  price: 0,
+                  cost: 0,
+                  availability: 0,
+                  found: false,
+                  isMock: false,
+                }
+          )
+        } catch (err) {
+          console.error(`${distributorKey} fill-in lookup failed:`, err)
+          product.offers.push({
+            distributorKey,
+            distributorLabel: label,
+            sku: "",
+            price: 0,
+            cost: 0,
+            availability: 0,
+            found: false,
+            isMock: false,
+          })
+        }
+      })
+    )
+  }
+
+  // ─── Mock distributors (D&H, Amazon Business — not live yet) always
+  // attach a generated offer to every found product ───
+  for (const record of mockRecords) {
+    const distributorKey = record.distributor as DistributorKey
+    const label = DISTRIBUTOR_LABELS[distributorKey]
+    for (const product of products) {
+      if (product.offers.some((o) => o.distributorKey === distributorKey)) continue
+      const mockOffer = generateMockOffer(product.partNumber, distributorKey)
+      product.offers.push({ ...mockOffer, distributorLabel: label })
+    }
+  }
+
+  const anyLive = products.some((p) => p.offers.some((o) => o.found && !o.isMock))
+  const message =
+    products.length === 0
+      ? "No matches found across any connected distributor for that search."
+      : anyLive
       ? "Live results from connected distributors, mixed with mock data for distributors still pending API approval."
-      : "These are mock results — real distributor pricing/availability will replace this once Ingram/TD Synnex/D&H/Amazon approve API access.",
-  })
+      : "These are mock results — real distributor pricing/availability will replace this once your distributors approve API access."
+
+  return NextResponse.json({ products, message })
 }

@@ -58,6 +58,7 @@ export const tdSynnexAdapter: DistributorAdapter = {
   key: "TD_SYNNEX",
   label: "TD Synnex",
   isLive: true,
+  supportsKeywordSearch: false,
 
   async testConnection(
     creds: DistributorCredentials,

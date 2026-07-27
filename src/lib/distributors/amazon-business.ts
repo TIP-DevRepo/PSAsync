@@ -10,6 +10,7 @@ export const amazonBusinessAdapter: DistributorAdapter = {
   key: "AMAZON_BUSINESS",
   label: "Amazon Business",
   isLive: false,
+  supportsKeywordSearch: true,
 
   async testConnection(creds: DistributorCredentials): Promise<TestConnectionResult> {
     // TODO once approved: Login with Amazon (LWA) OAuth using clientId + clientSecret
