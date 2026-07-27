@@ -6,6 +6,34 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+  --color-brand-primary-50: var(--brand-primary-50);
+  --color-brand-primary-100: var(--brand-primary-100);
+  --color-brand-primary-200: var(--brand-primary-200);
+  --color-brand-primary-300: var(--brand-primary-300);
+  --color-brand-primary-400: var(--brand-primary-400);
+  --color-brand-primary-500: var(--brand-primary-500);
+  --color-brand-primary-600: var(--brand-primary-600);
+  --color-brand-primary-700: var(--brand-primary-700);
+  --color-brand-primary-800: var(--brand-primary-800);
+  --color-brand-primary-900: var(--brand-primary-900);
+  --color-brand-accent-50: var(--brand-accent-50);
+  --color-brand-accent-100: var(--brand-accent-100);
+  --color-brand-accent-200: var(--brand-accent-200);
+  --color-brand-accent-300: var(--brand-accent-300);
+  --color-brand-accent-400: var(--brand-accent-400);
+  --color-brand-accent-500: var(--brand-accent-500);
+  --color-brand-accent-600: var(--brand-accent-600);
+  --color-brand-accent-700: var(--brand-accent-700);
+  --color-brand-accent-800: var(--brand-accent-800);
+  --color-brand-accent-900: var(--brand-accent-900);
+  --color-success: var(--success);
+  --color-success-bg: var(--success-bg);
+  --color-warning: var(--warning);
+  --color-warning-bg: var(--warning-bg);
+  --color-danger: var(--danger);
+  --color-danger-bg: var(--danger-bg);
+  --color-info: var(--info);
+  --color-info-bg: var(--info-bg);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans);
@@ -50,24 +78,73 @@
 }
 
 :root {
+  /* ─── Brand base colors ───────────────────────────────────────────────
+     Overridden per-company at runtime by CompanyThemeProvider, which
+     injects each company's actual primaryColor/accentColor from Settings.
+     These are just fallback values used before that loads (or if a page
+     renders with no company context, e.g. the login screen). */
+  --brand-primary-base: oklch(0.55 0.18 255);
+  --brand-accent-base: oklch(0.6 0.15 300);
+
+  /* Full 50-900 scale generated from the one base color above, using
+     OKLCH color-mix so every step stays perceptually even. Lighter tints
+     mix toward white, darker shades mix toward black. This regenerates
+     automatically the instant --brand-primary-base/--brand-accent-base
+     change — no JS color math needed anywhere. */
+  --brand-primary-50: color-mix(in oklch, var(--brand-primary-base) 8%, white);
+  --brand-primary-100: color-mix(in oklch, var(--brand-primary-base) 16%, white);
+  --brand-primary-200: color-mix(in oklch, var(--brand-primary-base) 30%, white);
+  --brand-primary-300: color-mix(in oklch, var(--brand-primary-base) 45%, white);
+  --brand-primary-400: color-mix(in oklch, var(--brand-primary-base) 70%, white);
+  --brand-primary-500: var(--brand-primary-base);
+  --brand-primary-600: color-mix(in oklch, var(--brand-primary-base) 85%, black);
+  --brand-primary-700: color-mix(in oklch, var(--brand-primary-base) 70%, black);
+  --brand-primary-800: color-mix(in oklch, var(--brand-primary-base) 55%, black);
+  --brand-primary-900: color-mix(in oklch, var(--brand-primary-base) 40%, black);
+
+  --brand-accent-50: color-mix(in oklch, var(--brand-accent-base) 8%, white);
+  --brand-accent-100: color-mix(in oklch, var(--brand-accent-base) 16%, white);
+  --brand-accent-200: color-mix(in oklch, var(--brand-accent-base) 30%, white);
+  --brand-accent-300: color-mix(in oklch, var(--brand-accent-base) 45%, white);
+  --brand-accent-400: color-mix(in oklch, var(--brand-accent-base) 70%, white);
+  --brand-accent-500: var(--brand-accent-base);
+  --brand-accent-600: color-mix(in oklch, var(--brand-accent-base) 85%, black);
+  --brand-accent-700: color-mix(in oklch, var(--brand-accent-base) 70%, black);
+  --brand-accent-800: color-mix(in oklch, var(--brand-accent-base) 55%, black);
+  --brand-accent-900: color-mix(in oklch, var(--brand-accent-base) 40%, black);
+
+  /* ─── Semantic status colors ──────────────────────────────────────────
+     Fixed regardless of company branding — a success/error/warning
+     should mean the same thing everywhere. Replaces the ad-hoc
+     text-green-600/text-amber-600/text-red-600 classes used throughout
+     the app today with one real source of truth per status. */
+  --success: oklch(0.6 0.15 145);
+  --success-bg: oklch(0.96 0.03 145);
+  --warning: oklch(0.75 0.15 80);
+  --warning-bg: oklch(0.97 0.04 80);
+  --danger: oklch(0.6 0.22 25);
+  --danger-bg: oklch(0.96 0.03 25);
+  --info: oklch(0.6 0.15 235);
+  --info-bg: oklch(0.96 0.03 235);
+
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
+  --primary: var(--brand-primary-600);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
+  --accent: var(--brand-accent-100);
+  --accent-foreground: var(--brand-accent-700);
+  --destructive: var(--danger);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
+  --ring: var(--brand-primary-500);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -85,24 +162,35 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  /* Per our Dark Mode pattern reference: base on near-black, never pure
+     black, and desaturate accent colors ~20% so they don't vibrate
+     against the dark surface */
+  --background: oklch(0.16 0 0);
+  --foreground: oklch(0.96 0 0);
+  --card: oklch(0.21 0 0);
+  --card-foreground: oklch(0.96 0 0);
+  --popover: oklch(0.21 0 0);
+  --popover-foreground: oklch(0.96 0 0);
+  --primary: var(--brand-primary-400);
+  --primary-foreground: oklch(0.16 0 0);
   --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
+  --secondary-foreground: oklch(0.96 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
+  --accent: color-mix(in oklch, var(--brand-accent-base) 20%, oklch(0.269 0 0));
+  --accent-foreground: var(--brand-accent-300);
+  --destructive: var(--danger);
+  --success: oklch(0.65 0.13 145);
+  --success-bg: oklch(0.25 0.04 145);
+  --warning: oklch(0.78 0.13 80);
+  --warning-bg: oklch(0.27 0.05 80);
+  --danger: oklch(0.68 0.19 25);
+  --danger-bg: oklch(0.25 0.04 25);
+  --info: oklch(0.68 0.13 235);
+  --info-bg: oklch(0.25 0.04 235);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
+  --ring: var(--brand-primary-400);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
@@ -116,6 +204,16 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+@theme {
+  /* A defined, limited type scale — five sizes cover nearly every case.
+     Use these instead of reaching for arbitrary text-[13px] one-offs. */
+  --text-caption: 0.75rem;   /* 12px — timestamps, helper text, table meta */
+  --text-body: 0.875rem;     /* 14px — default body/UI text */
+  --text-body-lg: 1rem;      /* 16px — emphasized body, form labels */
+  --text-heading: 1.25rem;   /* 20px — section headings, card titles */
+  --text-display: 1.875rem;  /* 30px — page titles */
 }
 
 @layer base {
