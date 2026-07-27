@@ -261,7 +261,7 @@ function LineItemConfigIcons({ li }: { li: LineItemBuilderItem }) {
   return (
     <div className="grid grid-flow-col grid-rows-3 gap-1 w-fit">
       {configs.map(({ key, active, label, Icon, activeColor }) => (
-        <Tooltip key={key}>
+        <Tooltip key={key} delay={150} closeDelay={0}>
           <Tooltip.Trigger>
             <span className={active ? activeColor : "text-zinc-300 dark:text-zinc-700"}>
               <Icon size={13} />
