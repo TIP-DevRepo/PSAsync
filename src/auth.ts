@@ -101,12 +101,42 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     }),
   ],
   callbacks: {
-    async jwt({ token, user }) {
+    async jwt({ token, user, trigger }) {
       if (user) {
+        // Fresh sign-in — token starts from what authorize() already
+        // fetched, and we stamp when the role was last confirmed
         token.id = user.id
         token.role = (user as any).role
         token.companyId = (user as any).companyId
+        token.roleCheckedAt = Date.now()
+        return token
       }
+
+      // On every OTHER request, only re-check the database once the
+      // refresh window has passed (or if something explicitly asks for
+      // an immediate refresh via trigger === "update") — this is what
+      // makes role/permission changes take effect without requiring a
+      // logout/login, while still avoiding a DB hit on every request
+      const ROLE_REFRESH_INTERVAL_MS = 2 * 60 * 1000 // 2 minutes
+      const lastChecked = (token.roleCheckedAt as number | undefined) ?? 0
+      const dueForRefresh = Date.now() - lastChecked > ROLE_REFRESH_INTERVAL_MS
+
+      if (trigger === "update" || dueForRefresh) {
+        const current = await prisma.user.findUnique({
+          where: { id: token.id as string },
+          include: { role: true },
+        })
+
+        // Account deleted or deactivated since login — strip permissions
+        // immediately rather than leaving stale access in place
+        if (!current || !current.active) {
+          token.role = null
+        } else {
+          token.role = toSessionRole(current.role)
+        }
+        token.roleCheckedAt = Date.now()
+      }
+
       return token
     },
     async session({ session, token }) {
