@@ -34,12 +34,18 @@ export async function GET(req: NextRequest) {
     })
   }
 
-  const credsFor = (record: (typeof enabled)[number]) => ({
-    apiKey: record.apiKey ?? "",
-    clientId: record.clientId ?? "",
-    clientSecret: record.clientSecret ?? "",
-    partnerId: record.partnerId ?? "",
-  })
+  const credsFor = (record: (typeof enabled)[number]) => {
+    const prefix = record.activeEnvironment === "PRODUCTION" ? "production" : "sandbox"
+    const r = record as unknown as Record<string, string | null>
+    return {
+      apiKey: r[`${prefix}ApiKey`] ?? "",
+      clientId: r[`${prefix}ClientId`] ?? "",
+      clientSecret: r[`${prefix}ClientSecret`] ?? "",
+      partnerId: r[`${prefix}PartnerId`] ?? "",
+    }
+  }
+
+  const isSandboxFor = (record: (typeof enabled)[number]) => record.activeEnvironment !== "PRODUCTION"
 
   const liveRecords = enabled.filter((r) => getAdapter(r.distributor as DistributorKey).isLive)
   const mockRecords = enabled.filter((r) => !getAdapter(r.distributor as DistributorKey).isLive)
@@ -49,7 +55,7 @@ export async function GET(req: NextRequest) {
   // keyword search. Non-keyword distributors (TD Synnex) treat the query as
   // an exact part number — either it matches or it legitimately doesn't.
   // No single distributor gates whether a product shows up at all anymore.
-  type Discovered = { result: DistributorSearchResult; sandboxMode: boolean }
+  type Discovered = { result: DistributorSearchResult }
   const discovered: Discovered[] = []
 
   await Promise.all(
@@ -57,8 +63,8 @@ export async function GET(req: NextRequest) {
       const distributorKey = record.distributor as DistributorKey
       const adapter = getAdapter(distributorKey)
       try {
-        const results = await adapter.search(query, credsFor(record), record.sandboxMode)
-        results.forEach((result) => discovered.push({ result, sandboxMode: record.sandboxMode }))
+        const results = await adapter.search(query, credsFor(record), isSandboxFor(record))
+        results.forEach((result) => discovered.push({ result }))
       } catch (err) {
         console.error(`${distributorKey} discovery search failed:`, err)
       }
@@ -143,7 +149,7 @@ export async function GET(req: NextRequest) {
     await Promise.all(
       missing.map(async (product) => {
         try {
-          const results = await adapter.search(product.partNumber, credsFor(record), record.sandboxMode)
+          const results = await adapter.search(product.partNumber, credsFor(record), isSandboxFor(record))
           const match = results[0]
           product.offers.push(
             match

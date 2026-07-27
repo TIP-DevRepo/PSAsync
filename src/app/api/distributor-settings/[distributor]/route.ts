@@ -21,14 +21,29 @@ export async function PATCH(
   const body = await req.json()
   const companyId = session.user.companyId
 
-  const data = {
+  // Two independent things a save can do: update the credential fields for
+  // ONE environment (body.environment says which), and/or switch which
+  // environment is the active one (body.activeEnvironment). Either, both,
+  // or neither can be present in a single request.
+  const data: Record<string, unknown> = {
     enabled: body.enabled ?? false,
     priority: Number(body.priority) || 0,
-    apiKey: body.apiKey || null,
-    clientId: body.clientId || null,
-    clientSecret: body.clientSecret || null,
-    partnerId: body.partnerId || null,
-    sandboxMode: body.sandboxMode ?? true,
+  }
+
+  if (body.environment === "SANDBOX") {
+    data.sandboxApiKey = body.apiKey || null
+    data.sandboxClientId = body.clientId || null
+    data.sandboxClientSecret = body.clientSecret || null
+    data.sandboxPartnerId = body.partnerId || null
+  } else if (body.environment === "PRODUCTION") {
+    data.productionApiKey = body.apiKey || null
+    data.productionClientId = body.clientId || null
+    data.productionClientSecret = body.clientSecret || null
+    data.productionPartnerId = body.partnerId || null
+  }
+
+  if (body.activeEnvironment === "SANDBOX" || body.activeEnvironment === "PRODUCTION") {
+    data.activeEnvironment = body.activeEnvironment
   }
 
   const record = await prisma.distributorIntegration.upsert({
@@ -44,6 +59,7 @@ export async function PATCH(
       companyId,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       distributor: distributor as any,
+      activeEnvironment: (body.activeEnvironment ?? "SANDBOX") as "SANDBOX" | "PRODUCTION",
       ...data,
     },
   })

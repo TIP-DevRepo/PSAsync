@@ -4,20 +4,26 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 
 type DistributorKey = "INGRAM_MICRO" | "TD_SYNNEX" | "DH" | "AMAZON_BUSINESS"
+type Environment = "SANDBOX" | "PRODUCTION"
 
 interface DistributorSetting {
   id: string | null
   distributor: DistributorKey
   enabled: boolean
   priority: number
-  apiKey: string
-  clientId: string
-  clientSecret: string
-  partnerId: string
-  sandboxMode: boolean
-  lastSyncedAt: string | null
-  lastTestStatus: string | null
-  lastTestedAt: string | null
+  activeEnvironment: Environment
+  sandboxApiKey: string
+  sandboxClientId: string
+  sandboxClientSecret: string
+  sandboxPartnerId: string
+  sandboxLastTestStatus: string | null
+  sandboxLastTestedAt: string | null
+  productionApiKey: string
+  productionClientId: string
+  productionClientSecret: string
+  productionPartnerId: string
+  productionLastTestStatus: string | null
+  productionLastTestedAt: string | null
 }
 
 interface FieldConfig {
@@ -26,8 +32,6 @@ interface FieldConfig {
   hint?: string
 }
 
-// Distributors with a real, working API adapter behind them. Everyone else
-// still runs on mock data until their API access is approved.
 const LIVE_DISTRIBUTORS: DistributorKey[] = ["INGRAM_MICRO", "TD_SYNNEX"]
 
 const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fields: FieldConfig[] }> = {
@@ -63,34 +67,45 @@ const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fi
   },
 }
 
-const DISTRIBUTOR_ORDER: DistributorKey[] = [
-  "INGRAM_MICRO",
-  "TD_SYNNEX",
-  "DH",
-  "AMAZON_BUSINESS",
-]
+const DISTRIBUTOR_ORDER: DistributorKey[] = ["INGRAM_MICRO", "TD_SYNNEX", "DH", "AMAZON_BUSINESS"]
+
+function envField(env: Environment, field: string) {
+  const prefix = env === "SANDBOX" ? "sandbox" : "production"
+  return `${prefix}${field.charAt(0).toUpperCase()}${field.slice(1)}` as keyof DistributorSetting
+}
 
 export function DistributorSettingsPanel() {
   const [settings, setSettings] = useState<Record<DistributorKey, DistributorSetting> | null>(null)
   const [loading, setLoading] = useState(true)
   const [savingKey, setSavingKey] = useState<DistributorKey | null>(null)
   const [testingKey, setTestingKey] = useState<DistributorKey | null>(null)
-  const [testResults, setTestResults] = useState<Record<string, { success: boolean; status: string }>>({})
+  const [testResults, setTestResults] = useState<Record<string, { success: boolean; status: string; environment: Environment }>>({})
+  // Which environment's credential fields are currently being VIEWED/EDITED
+  // per distributor — independent from which one is actually active/in-use
+  const [viewingEnv, setViewingEnv] = useState<Record<DistributorKey, Environment>>({
+    INGRAM_MICRO: "SANDBOX",
+    TD_SYNNEX: "SANDBOX",
+    DH: "SANDBOX",
+    AMAZON_BUSINESS: "SANDBOX",
+  })
 
   useEffect(() => {
     fetch("/api/distributor-settings")
       .then((res) => res.json())
       .then((list: DistributorSetting[]) => {
         const map = {} as Record<DistributorKey, DistributorSetting>
+        const initialView = {} as Record<DistributorKey, Environment>
         list.forEach((d) => {
-          map[d.distributor] = { ...d, sandboxMode: d.sandboxMode ?? true }
+          map[d.distributor] = d
+          initialView[d.distributor] = d.activeEnvironment ?? "SANDBOX"
         })
         setSettings(map)
+        setViewingEnv(initialView)
         setLoading(false)
       })
   }, [])
 
-  function update(key: DistributorKey, field: string, value: string | number | boolean) {
+  function update(key: DistributorKey, field: keyof DistributorSetting, value: string | number | boolean) {
     if (!settings) return
     setSettings({
       ...settings,
@@ -103,17 +118,19 @@ export function DistributorSettingsPanel() {
     setSavingKey(key)
 
     const s = settings[key]
+    const env = viewingEnv[key]
+
     await fetch(`/api/distributor-settings/${key}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         enabled: s.enabled,
         priority: s.priority,
-        apiKey: s.apiKey,
-        clientId: s.clientId,
-        clientSecret: s.clientSecret,
-        partnerId: s.partnerId,
-        sandboxMode: s.sandboxMode,
+        environment: env,
+        apiKey: s[envField(env, "apiKey")],
+        clientId: s[envField(env, "clientId")],
+        clientSecret: s[envField(env, "clientSecret")],
+        partnerId: s[envField(env, "partnerId")],
       }),
     })
 
@@ -124,12 +141,41 @@ export function DistributorSettingsPanel() {
     await handleSave(key)
 
     setTestingKey(key)
+    const env = viewingEnv[key]
     const res = await fetch(`/api/distributor-settings/${key}/test-connection`, {
       method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ environment: env }),
     })
     const result = await res.json()
     setTestResults((prev) => ({ ...prev, [key]: result }))
     setTestingKey(null)
+  }
+
+  async function handleSetActive(key: DistributorKey, targetEnv: Environment) {
+    if (!settings) return
+    const current = settings[key].activeEnvironment
+
+    if (current === "PRODUCTION" && targetEnv === "SANDBOX") {
+      const confirmed = window.confirm(
+        `Switch ${DISTRIBUTOR_META[key].label} from Production to Sandbox?\n\n` +
+          `This distributor will stop returning real pricing/availability and start using sandbox (test) data everywhere it's used — quote builder searches, price lookups, everything.\n\n` +
+          `Continue?`
+      )
+      if (!confirmed) return
+    }
+
+    await fetch(`/api/distributor-settings/${key}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        enabled: settings[key].enabled,
+        priority: settings[key].priority,
+        activeEnvironment: targetEnv,
+      }),
+    })
+
+    update(key, "activeEnvironment", targetEnv)
   }
 
   if (loading || !settings) {
@@ -140,7 +186,7 @@ export function DistributorSettingsPanel() {
     <div className="space-y-6">
       <p className="text-sm text-zinc-500">
         Connect distributor accounts so you can search live pricing and availability
-        from the quote builder. Priority controls which distributor's results show
+        from the quote builder. Priority controls which distributor&apos;s results show
         first when searching all of them at once.
       </p>
 
@@ -149,6 +195,9 @@ export function DistributorSettingsPanel() {
         const meta = DISTRIBUTOR_META[key]
         const result = testResults[key]
         const isLive = LIVE_DISTRIBUTORS.includes(key)
+        const env = viewingEnv[key]
+        const lastTestStatus = s[envField(env, "lastTestStatus")] as string | null
+        const lastTestedAt = s[envField(env, "lastTestedAt")] as string | null
 
         return (
           <div key={key} className="rounded-md border p-4 space-y-3">
@@ -167,14 +216,49 @@ export function DistributorSettingsPanel() {
               </label>
             </div>
 
+            {isLive && (
+              <div className="flex items-center gap-1 rounded-md border p-1 w-fit text-xs">
+                {(["SANDBOX", "PRODUCTION"] as Environment[]).map((e) => {
+                  const isViewing = env === e
+                  const isActive = s.activeEnvironment === e
+                  return (
+                    <button
+                      key={e}
+                      type="button"
+                      onClick={() => setViewingEnv((prev) => ({ ...prev, [key]: e }))}
+                      className={`flex items-center gap-1.5 rounded px-2 py-1 ${
+                        isViewing ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900" : "text-zinc-500"
+                      }`}
+                    >
+                      {e === "SANDBOX" ? "Sandbox" : "Production"}
+                      {isActive && (
+                        <span className="rounded-full bg-green-500 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                          Active
+                        </span>
+                      )}
+                    </button>
+                  )
+                })}
+                {s.activeEnvironment !== env && (
+                  <button
+                    type="button"
+                    onClick={() => handleSetActive(key, env)}
+                    className="ml-1 rounded px-2 py-1 text-blue-600 hover:underline"
+                  >
+                    Set as Active
+                  </button>
+                )}
+              </div>
+            )}
+
             <div className="grid grid-cols-2 gap-3">
               {meta.fields.map((f) => (
                 <div key={f.key}>
                   <label className="block text-sm font-medium mb-1">{f.label}</label>
                   <input
                     type="password"
-                    value={s[f.key]}
-                    onChange={(e) => update(key, f.key, e.target.value)}
+                    value={(s[envField(env, f.key)] as string | null) ?? ""}
+                    onChange={(e) => update(key, envField(env, f.key), e.target.value)}
                     className="w-full rounded-md border px-3 py-2 text-sm"
                   />
                   {f.hint && <p className="text-xs text-zinc-500 mt-1">{f.hint}</p>}
@@ -193,25 +277,11 @@ export function DistributorSettingsPanel() {
               </div>
             </div>
 
-            {isLive && (
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={s.sandboxMode}
-                  onChange={(e) => update(key, "sandboxMode", e.target.checked)}
-                />
-                Sandbox Mode
-                <span className="text-xs text-zinc-500">
-                  (test against {meta.label}&apos;s sandbox before going live in production)
-                </span>
-              </label>
-            )}
-
             <div className="flex items-center justify-between pt-2">
               <p className="text-xs text-zinc-500">
-                {s.lastTestedAt
-                  ? `Last tested: ${new Date(s.lastTestedAt).toLocaleString()}`
-                  : "Never tested"}
+                {lastTestedAt
+                  ? `Last tested (${env === "SANDBOX" ? "Sandbox" : "Production"}): ${new Date(lastTestedAt).toLocaleString()}`
+                  : `Never tested (${env === "SANDBOX" ? "Sandbox" : "Production"})`}
               </p>
               <div className="flex gap-2">
                 <Button
@@ -233,13 +303,12 @@ export function DistributorSettingsPanel() {
             </div>
 
             {result && (
-              <p
-                className={`text-xs ${
-                  result.success ? "text-green-600" : "text-red-600"
-                }`}
-              >
+              <p className={`text-xs ${result.success ? "text-green-600" : "text-red-600"}`}>
                 {result.status}
               </p>
+            )}
+            {!result && lastTestStatus && (
+              <p className="text-xs text-zinc-400">{lastTestStatus}</p>
             )}
           </div>
         )

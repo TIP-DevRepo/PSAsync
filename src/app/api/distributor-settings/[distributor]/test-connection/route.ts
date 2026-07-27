@@ -6,10 +6,6 @@ import { DistributorKey } from "@/lib/distributors/types"
 
 const VALID_DISTRIBUTORS = ["INGRAM_MICRO", "TD_SYNNEX", "DH", "AMAZON_BUSINESS"]
 
-// Which credential fields each distributor needs before a connection is
-// considered "ready". Real distributor API calls come later (Week 3 risk
-// note: build the UI now with mock validation, swap in real APIs once
-// credentials are approved).
 const REQUIRED_FIELDS: Record<string, string[]> = {
   INGRAM_MICRO: ["clientId", "clientSecret", "apiKey"],
   TD_SYNNEX: ["clientId", "clientSecret"],
@@ -31,6 +27,12 @@ export async function POST(
     return NextResponse.json({ error: "Unknown distributor" }, { status: 400 })
   }
 
+  // Which environment to test — defaults to whichever is currently active
+  // if the caller doesn't specify (e.g. testing whichever tab is open)
+  const body = await req.json().catch(() => ({}))
+  const testEnv: "SANDBOX" | "PRODUCTION" = body.environment === "PRODUCTION" ? "PRODUCTION" : "SANDBOX"
+  const isSandbox = testEnv === "SANDBOX"
+
   const companyId = session.user.companyId
 
   const record = await prisma.distributorIntegration.findUnique({
@@ -43,10 +45,18 @@ export async function POST(
     },
   })
 
+  const prefix = isSandbox ? "sandbox" : "production"
+  const getField = (name: string) =>
+    record ? (record as unknown as Record<string, string | null>)[`${prefix}${name}`] : null
+
   const required = REQUIRED_FIELDS[distributor] ?? []
-  const missing = required.filter(
-    (field) => !record || !(record as Record<string, unknown>)[field]
-  )
+  const fieldMap: Record<string, string> = {
+    apiKey: "ApiKey",
+    clientId: "ClientId",
+    clientSecret: "ClientSecret",
+    partnerId: "PartnerId",
+  }
+  const missing = required.filter((field) => !getField(fieldMap[field]))
 
   let success: boolean
   let status: string
@@ -59,29 +69,29 @@ export async function POST(
 
     if (adapter.isLive) {
       const creds = {
-        apiKey: record?.apiKey ?? "",
-        clientId: record?.clientId ?? "",
-        clientSecret: record?.clientSecret ?? "",
-        partnerId: record?.partnerId ?? "",
+        apiKey: getField("ApiKey") ?? "",
+        clientId: getField("ClientId") ?? "",
+        clientSecret: getField("ClientSecret") ?? "",
+        partnerId: getField("PartnerId") ?? "",
       }
-      const result = await adapter.testConnection(
-        creds,
-        record?.sandboxMode ?? true
-      )
+      const result = await adapter.testConnection(creds, isSandbox)
       success = result.success
       status = result.status
     } else {
       success = true
-      status = "Connected (mock — real API pending credential approval)"
+      status = `Connected (mock — real API pending credential approval) [${testEnv}]`
     }
   }
 
   if (record) {
     await prisma.distributorIntegration.update({
       where: { id: record.id },
-      data: { lastTestStatus: status, lastTestedAt: new Date() },
+      data: {
+        [`${prefix}LastTestStatus`]: status,
+        [`${prefix}LastTestedAt`]: new Date(),
+      },
     })
   }
 
-  return NextResponse.json({ success, status })
+  return NextResponse.json({ success, status, environment: testEnv })
 }
