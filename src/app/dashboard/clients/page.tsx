@@ -16,13 +16,12 @@ interface Client {
 }
 
 const STATUS_COLORS: Record<string, string> = {
-  ACTIVE: "bg-green-100 text-green-800",
-  PROSPECT: "bg-blue-100 text-blue-800",
-  INACTIVE: "bg-zinc-100 text-zinc-600",
-  LOST: "bg-red-100 text-red-800",
+  ACTIVE: "bg-success-bg text-success",
+  PROSPECT: "bg-info-bg text-info",
+  INACTIVE: "bg-muted text-muted-foreground",
+  LOST: "bg-danger-bg text-danger",
 }
 
-// ─── Data Table sort/density helpers ──────────────────────────────────────
 type SortColumn = "name" | "industry" | "email" | "phone" | "status"
 type SortDirection = "asc" | "desc" | null
 type Density = "compact" | "default" | "comfortable"
@@ -65,10 +64,10 @@ function SortableHeader({
 }) {
   const active = sortColumn === column
   return (
-    <th className="py-2 px-3 select-none">
+    <th className="py-2 px-3 select-none uppercase tracking-wide">
       <button
         onClick={() => onSort(column)}
-        className="flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100"
+        className="flex items-center gap-1 hover:text-foreground"
       >
         {label}
         {active && sortDirection === "asc" && <ArrowUp size={12} />}
@@ -127,13 +126,13 @@ export default function ClientsListPage() {
   }
 
   if (loading) {
-    return <p className="text-sm text-zinc-500">Loading...</p>
+    return <p className="text-sm text-muted-foreground">Loading...</p>
   }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Clients</h1>
+        <h1 className="text-display font-semibold tracking-tight text-foreground">Clients</h1>
         <Link href="/dashboard/clients/new">
           <Button>Add Client</Button>
         </Link>
@@ -146,12 +145,15 @@ export default function ClientsListPage() {
             placeholder="Search by name..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-64 rounded-md border px-3 py-2 text-sm"
+            className="w-64 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="rounded-md border px-3 py-2 text-sm"
+            onChange={(e) => {
+              setStatusFilter(e.target.value)
+              e.target.blur()
+            }}
+            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="ALL">All Statuses</option>
             <option value="ACTIVE">Active</option>
@@ -162,8 +164,11 @@ export default function ClientsListPage() {
         </div>
         <select
           value={density}
-          onChange={(e) => setDensity(e.target.value as Density)}
-          className="rounded-md border px-3 py-2 text-sm"
+          onChange={(e) => {
+            setDensity(e.target.value as Density)
+            e.target.blur()
+          }}
+          className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         >
           <option value="compact">Compact rows</option>
           <option value="default">Default rows</option>
@@ -171,10 +176,10 @@ export default function ClientsListPage() {
         </select>
       </div>
 
-      <div className="max-h-[70vh] overflow-y-auto overflow-x-auto rounded-md border">
+      <div className="max-h-[70vh] overflow-y-auto overflow-x-auto rounded-lg border border-border bg-card shadow-card">
         <table className="w-full text-sm border-collapse">
-          <thead className="sticky top-0 z-10 bg-white dark:bg-zinc-950">
-            <tr className="border-b text-left text-xs text-zinc-500">
+          <thead className="sticky top-0 z-10 bg-card">
+            <tr className="border-b border-border text-left text-caption text-muted-foreground">
               <SortableHeader label="Name" column="name" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="Industry" column="industry" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="Email" column="email" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
@@ -187,20 +192,20 @@ export default function ClientsListPage() {
               <tr
                 key={client.id}
                 onClick={() => router.push(`/dashboard/clients/${client.id}`)}
-                className="border-b cursor-pointer hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                className="border-b border-border cursor-pointer transition-colors hover:bg-surface-hover"
               >
                 <td className={`${ROW_PADDING[density]} px-3`}>
                   <Link
                     href={`/dashboard/clients/${client.id}`}
                     onClick={(e) => e.stopPropagation()}
-                    className="font-medium hover:underline"
+                    className="font-medium text-foreground hover:underline hover:text-primary"
                   >
                     {client.name}
                   </Link>
                 </td>
-                <td className={`${ROW_PADDING[density]} px-3`}>{client.industry ?? "—"}</td>
-                <td className={`${ROW_PADDING[density]} px-3`}>{client.email ?? "—"}</td>
-                <td className={`${ROW_PADDING[density]} px-3`}>{client.phone ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{client.industry ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{client.email ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{client.phone ?? "—"}</td>
                 <td className={`${ROW_PADDING[density]} px-3`}>
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_COLORS[client.status]}`}>
                     {client.status}
@@ -210,7 +215,7 @@ export default function ClientsListPage() {
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={5} className="py-6 text-center text-zinc-500">
+                <td colSpan={5} className="py-6 text-center text-muted-foreground">
                   No clients found.
                 </td>
               </tr>
