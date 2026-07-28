@@ -59,6 +59,7 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
   --color-surface: var(--surface);
+  --color-surface-hover: var(--surface-hover);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -76,6 +77,9 @@
   --radius-2xl: calc(var(--radius) * 1.8);
   --radius-3xl: calc(var(--radius) * 2.2);
   --radius-4xl: calc(var(--radius) * 2.6);
+  --shadow-card: var(--shadow-card);
+  --shadow-elevated: var(--shadow-elevated);
+  --shadow-popover: var(--shadow-popover);
 }
 
 :root {
@@ -139,13 +143,20 @@
   --info: oklch(0.6 0.15 235);
   --info-bg: oklch(0.96 0.03 235);
 
-  --background: oklch(1 0 0);
+  --background: oklch(0.985 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
   --surface: oklch(1 0 0);
+  /* Third surface tier — for row hover, list-item hover, and any
+     "elevated" state that needs to read as one step up from a plain card
+     without jumping all the way to a popover. Matches --muted in value
+     today (intentionally — this gives the token its own semantic name so
+     component code says "this is a hover surface," not "this is muted
+     text's background," even though the color happens to coincide). */
+  --surface-hover: oklch(0.97 0 0);
   --primary: var(--brand-primary-600);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
@@ -177,6 +188,17 @@
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
   --sidebar-ring: oklch(0.708 0 0);
+
+  /* ─── Layered shadows (light mode only — see Depth Layers pattern) ────
+     Two shadows stacked per token: a tight, slightly-dark contact shadow
+     plus a wide, soft ambient one. This is what makes flat cards read as
+     "lifted" instead of just having a border. Deliberately NOT used as
+     heavily in dark mode — on a near-black surface, shadows barely
+     register, so dark mode leans on the surface-tier + hairline-border
+     system instead (see .dark below). */
+  --shadow-card: 0 1px 2px oklch(0 0 0 / 0.06), 0 4px 12px oklch(0 0 0 / 0.05);
+  --shadow-elevated: 0 2px 4px oklch(0 0 0 / 0.08), 0 12px 24px oklch(0 0 0 / 0.08);
+  --shadow-popover: 0 4px 8px oklch(0 0 0 / 0.10), 0 16px 40px oklch(0 0 0 / 0.12);
 }
 
 .dark {
@@ -187,9 +209,13 @@
   --foreground: oklch(0.96 0 0);
   --card: oklch(0.21 0 0);
   --card-foreground: oklch(0.96 0 0);
-  --popover: oklch(0.21 0 0);
+  --popover: oklch(0.23 0 0);
   --popover-foreground: oklch(0.96 0 0);
   --surface: oklch(0.21 0 0);
+  /* Third tier: background(0.16) → card(0.21) → surface-hover(0.26) —
+     each step a faint climb, matching Halo's "three faint tiers of
+     charcoal" reference. */
+  --surface-hover: oklch(0.26 0 0);
   --primary: var(--brand-primary-400);
   --primary-foreground: oklch(0.16 0 0);
   --secondary: oklch(0.269 0 0);
@@ -216,14 +242,22 @@
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.205 0 0);
+  --sidebar: oklch(0.14 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
+  --sidebar-primary: var(--brand-primary-400);
+  --sidebar-primary-foreground: oklch(0.16 0 0);
+  --sidebar-accent: oklch(0.21 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: var(--brand-primary-400);
+
+  /* Dark mode shadows: much lower opacity, black barely reads on a dark
+     surface — kept mainly for popovers/menus that float above content,
+     where SOME separation cue still helps even if subtle. Cards rely on
+     the border + surface-tier system above instead. */
+  --shadow-card: none;
+  --shadow-elevated: 0 4px 12px oklch(0 0 0 / 0.3);
+  --shadow-popover: 0 8px 24px oklch(0 0 0 / 0.45);
 }
 
 @theme {

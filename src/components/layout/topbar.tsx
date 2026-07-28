@@ -13,6 +13,7 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { signOut } from "next-auth/react"
 import { NotificationBell } from "./notification-bell"
+import { ThemeToggle } from "@/components/theme-toggle"
 
 export function Topbar({ userName, pagePermissions }: { userName: string; pagePermissions: PagePermissions }) {
   const initials = userName
@@ -22,7 +23,7 @@ export function Topbar({ userName, pagePermissions }: { userName: string; pagePe
     .toUpperCase()
 
   return (
-    <header className="flex h-14 items-center justify-between border-b bg-white px-4 dark:bg-black">
+    <header className="flex h-14 items-center justify-between border-b border-border bg-card px-4">
       {/* Mobile menu button — only shows on small screens */}
       <Sheet>
         <SheetTrigger asChild>
@@ -37,7 +38,8 @@ export function Topbar({ userName, pagePermissions }: { userName: string; pagePe
 
       <div className="hidden md:block" />
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-2">
+        <ThemeToggle />
         <NotificationBell />
 
       {/* User menu */}
