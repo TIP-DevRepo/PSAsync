@@ -5,7 +5,7 @@ import { useFixedMenuPosition, useCloseOnOutsideClick, useCloseOnScroll } from "
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy, Workflow, FileText, ExternalLink, Link2, History, Trash2 } from "lucide-react"
+import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy, Workflow, FileText, ExternalLink, Link2, History, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { Modal } from "@/components/Modal"
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -115,6 +115,71 @@ function initials(name: string) {
 
 function fmtDate(d: string | null) {
   return d ? new Date(d).toLocaleDateString() : "—"
+}
+
+// ─── Data Table sort/density helpers ──────────────────────────────────────
+type SortColumn = "number" | "customer" | "name" | "stage" | "total" | "sentAt" | "expiresAt" | "acceptedAt"
+type SortDirection = "asc" | "desc" | null
+type Density = "compact" | "default" | "comfortable"
+
+const ROW_PADDING: Record<Density, string> = {
+  compact: "py-1.5",
+  default: "py-3",
+  comfortable: "py-5",
+}
+
+function compareQuotes(a: Quote, b: Quote, column: SortColumn): number {
+  switch (column) {
+    case "number":
+      return a.quoteNumber.localeCompare(b.quoteNumber)
+    case "customer":
+      return (a.contactName ?? a.clientName).localeCompare(b.contactName ?? b.clientName)
+    case "name":
+      return (a.title ?? "").localeCompare(b.title ?? "")
+    case "stage":
+      return (STAGE_PROGRESS[a.status] ?? 0) - (STAGE_PROGRESS[b.status] ?? 0)
+    case "total":
+      return a.total - b.total
+    case "sentAt":
+      return (a.sentAt ? new Date(a.sentAt).getTime() : 0) - (b.sentAt ? new Date(b.sentAt).getTime() : 0)
+    case "expiresAt":
+      return (a.expiresAt ? new Date(a.expiresAt).getTime() : 0) - (b.expiresAt ? new Date(b.expiresAt).getTime() : 0)
+    case "acceptedAt":
+      return (a.acceptedAt ? new Date(a.acceptedAt).getTime() : 0) - (b.acceptedAt ? new Date(b.acceptedAt).getTime() : 0)
+    default:
+      return 0
+  }
+}
+
+function SortableHeader({
+  label,
+  column,
+  sortColumn,
+  sortDirection,
+  onSort,
+  align,
+}: {
+  label: string
+  column: SortColumn
+  sortColumn: SortColumn | null
+  sortDirection: SortDirection
+  onSort: (column: SortColumn) => void
+  align?: "right"
+}) {
+  const active = sortColumn === column
+  return (
+    <th className={`py-2 pr-3 select-none ${align === "right" ? "text-right" : ""}`}>
+      <button
+        onClick={() => onSort(column)}
+        className={`flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100 ${align === "right" ? "ml-auto" : ""}`}
+      >
+        {label}
+        {active && sortDirection === "asc" && <ArrowUp size={12} />}
+        {active && sortDirection === "desc" && <ArrowDown size={12} />}
+        {!active && <ArrowUpDown size={12} className="opacity-30" />}
+      </button>
+    </th>
+  )
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────
@@ -229,6 +294,10 @@ function QuotesTab() {
   const [bulkAction, setBulkAction] = useState("")
   const [revisionsFor, setRevisionsFor] = useState<Quote | null>(null)
   const [commentsFor, setCommentsFor] = useState<Quote | null>(null)
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
+  const [sortDirection, setSortDirection] = useState<SortDirection>(null)
+  const [density, setDensity] = useState<Density>("default")
+  const selectAllRef = useRef<HTMLInputElement>(null)
 
   function loadQuotes() {
     fetch("/api/quotes")
@@ -252,7 +321,35 @@ function QuotesTab() {
     return matchesSearch && matchesStatus
   })
 
+  const sorted =
+    sortColumn && sortDirection
+      ? [...filtered].sort((a, b) => {
+          const cmp = compareQuotes(a, b, sortColumn)
+          return sortDirection === "asc" ? cmp : -cmp
+        })
+      : filtered
+
+  useEffect(() => {
+    if (selectAllRef.current) {
+      selectAllRef.current.indeterminate = selected.size > 0 && selected.size < filtered.length
+    }
+  }, [selected, filtered.length])
+
   if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
+
+  function handleSort(column: SortColumn) {
+    if (sortColumn !== column) {
+      setSortColumn(column)
+      setSortDirection("asc")
+    } else if (sortDirection === "asc") {
+      setSortDirection("desc")
+    } else if (sortDirection === "desc") {
+      setSortColumn(null)
+      setSortDirection(null)
+    } else {
+      setSortDirection("asc")
+    }
+  }
 
   function handleOpenQuote(quote: Quote) {
     if (quote.draftVersionId) {
@@ -321,7 +418,7 @@ function QuotesTab() {
 
   function handleExportCsv() {
     const headers = ["Number", "Customer", "Name", "Stage", "Total", "Last Sent", "Expiry", "Won Date"]
-    const rows = filtered.map((q) => [
+    const rows = sorted.map((q) => [
       q.version > 1 ? `${q.quoteNumber} v${q.version}` : q.quoteNumber,
       q.contactName ? `${q.contactName} (${q.clientName})` : q.clientName,
       q.title ?? "",
@@ -361,9 +458,20 @@ function QuotesTab() {
             Submit
           </Button>
         </div>
-        <Button variant="outline" size="sm" onClick={handleExportCsv}>
-          Export to CSV
-        </Button>
+        <div className="flex items-center gap-2">
+          <select
+            value={density}
+            onChange={(e) => setDensity(e.target.value as Density)}
+            className="rounded-md border px-3 py-2 text-sm"
+          >
+            <option value="compact">Compact rows</option>
+            <option value="default">Default rows</option>
+            <option value="comfortable">Comfortable rows</option>
+          </select>
+          <Button variant="outline" size="sm" onClick={handleExportCsv}>
+            Export to CSV
+          </Button>
+        </div>
       </div>
 
       <div className="flex gap-3">
@@ -390,40 +498,47 @@ function QuotesTab() {
         </select>
       </div>
 
-      <div className="overflow-x-auto">
+      <div className="max-h-[70vh] overflow-y-auto overflow-x-auto rounded-md border">
         <table className="w-full text-sm border-collapse">
-          <thead>
+          <thead className="sticky top-0 z-10 bg-white dark:bg-zinc-950">
             <tr className="border-b text-left text-xs text-zinc-500">
               <th className="py-2 pr-2 w-8">
                 <input
+                  ref={selectAllRef}
                   type="checkbox"
                   checked={filtered.length > 0 && selected.size === filtered.length}
                   onChange={toggleSelectAll}
                 />
               </th>
               <th className="py-2 pr-3">Owner</th>
-              <th className="py-2 pr-3">Number</th>
-              <th className="py-2 pr-3">Customer</th>
-              <th className="py-2 pr-3">Name</th>
-              <th className="py-2 pr-3 w-40">Stage</th>
-              <th className="py-2 pr-3">Total</th>
-              <th className="py-2 pr-3">Last Sent Date</th>
-              <th className="py-2 pr-3">Expiry Date</th>
-              <th className="py-2 pr-3">Won Date</th>
+              <SortableHeader label="Number" column="number" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="Customer" column="customer" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="Name" column="name" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="Stage" column="stage" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="Total" column="total" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" />
+              <SortableHeader label="Last Sent Date" column="sentAt" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="Expiry Date" column="expiresAt" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="Won Date" column="acceptedAt" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <th className="py-2 pr-3">Actions</th>
             </tr>
           </thead>
           <tbody>
-            {filtered.map((quote) => (
-              <tr key={quote.id} className="border-b hover:bg-zinc-50 dark:hover:bg-zinc-900 align-top">
-                <td className="py-3 pr-2">
+            {sorted.map((quote) => (
+              <tr
+                key={quote.id}
+                onClick={() => toggleSelected(quote.id)}
+                className={`border-b cursor-pointer align-top ${
+                  selected.has(quote.id) ? "bg-zinc-50 dark:bg-zinc-900" : "hover:bg-zinc-50 dark:hover:bg-zinc-900"
+                }`}
+              >
+                <td className={`${ROW_PADDING[density]} pr-2`} onClick={(e) => e.stopPropagation()}>
                   <input
                     type="checkbox"
                     checked={selected.has(quote.id)}
                     onChange={() => toggleSelected(quote.id)}
                   />
                 </td>
-                <td className="py-3 pr-3">
+                <td className={`${ROW_PADDING[density]} pr-3`}>
                   {quote.owner && (
                     <div
                       title={quote.owner.name}
@@ -433,7 +548,7 @@ function QuotesTab() {
                     </div>
                   )}
                 </td>
-                <td className="py-3 pr-3">
+                <td className={`${ROW_PADDING[density]} pr-3`} onClick={(e) => e.stopPropagation()}>
                   <button
                     onClick={() => handleOpenQuote(quote)}
                     className="font-medium hover:underline text-left"
@@ -449,12 +564,12 @@ function QuotesTab() {
                     </div>
                   )}
                 </td>
-                <td className="py-3 pr-3">
+                <td className={`${ROW_PADDING[density]} pr-3`}>
                   <p className="font-medium">{quote.contactName ?? quote.clientName}</p>
                   {quote.contactName && <p className="text-xs text-zinc-500">{quote.clientName}</p>}
                 </td>
-                <td className="py-3 pr-3">{quote.title ?? "—"}</td>
-                <td className="py-3 pr-3">
+                <td className={`${ROW_PADDING[density]} pr-3`}>{quote.title ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} pr-3 w-40`}>
                   <p className="text-xs font-medium mb-1">{statusLabel(quote.status)}</p>
                   <div className="h-1.5 w-full rounded-full bg-zinc-100 dark:bg-zinc-800">
                     <div
@@ -463,11 +578,11 @@ function QuotesTab() {
                     />
                   </div>
                 </td>
-                <td className="py-3 pr-3">${quote.total.toFixed(2)}</td>
-                <td className="py-3 pr-3">{fmtDate(quote.sentAt)}</td>
-                <td className="py-3 pr-3">{fmtDate(quote.expiresAt)}</td>
-                <td className="py-3 pr-3">{fmtDate(quote.acceptedAt)}</td>
-                <td className="py-3 pr-3">
+                <td className={`${ROW_PADDING[density]} pr-3 text-right tabular-nums`}>${quote.total.toFixed(2)}</td>
+                <td className={`${ROW_PADDING[density]} pr-3`}>{fmtDate(quote.sentAt)}</td>
+                <td className={`${ROW_PADDING[density]} pr-3`}>{fmtDate(quote.expiresAt)}</td>
+                <td className={`${ROW_PADDING[density]} pr-3`}>{fmtDate(quote.acceptedAt)}</td>
+                <td className={`${ROW_PADDING[density]} pr-3`} onClick={(e) => e.stopPropagation()}>
                   <div className="flex items-center gap-2 relative">
                     <button
                       title="Edit"
@@ -517,7 +632,7 @@ function QuotesTab() {
                 </td>
               </tr>
             ))}
-            {filtered.length === 0 && (
+            {sorted.length === 0 && (
               <tr>
                 <td colSpan={11} className="py-6 text-center text-zinc-500">
                   No quotes found.
