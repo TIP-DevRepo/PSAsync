@@ -85,6 +85,19 @@ interface ContactOption {
   lastName: string
 }
 
+// Same semantic status scale used on the Quotes list, reused here so a
+// quote's status reads identically whether you're on the list or the
+// detail page.
+const STATUS_COLORS: Record<string, string> = {
+  DRAFT: "bg-muted text-muted-foreground",
+  PENDING_APPROVAL: "bg-warning-bg text-warning",
+  SENT: "bg-info-bg text-info",
+  VIEWED: "bg-primary/10 text-primary",
+  ACCEPTED: "bg-success-bg text-success",
+  DECLINED: "bg-danger-bg text-danger",
+  EXPIRED: "bg-warning-bg text-warning",
+}
+
 function lineTotal(li: LineItemBuilderItem) {
   return li.unitPrice * li.quantity * (1 - li.discount / 100)
 }
@@ -181,8 +194,6 @@ export default function QuoteDetailPage({
     }
   }, [loadQuote, loadVersions, loadApprovals, loadComments])
 
-  // Refresh the contacts list whenever the quote's client changes, so the
-  // Contact dropdown always reflects contacts belonging to the current client
   useEffect(() => {
     if (!quote?.client?.id) return
     fetch(`/api/clients/${quote.client.id}`)
@@ -190,8 +201,8 @@ export default function QuoteDetailPage({
       .then((data) => setContacts(data.contacts ?? []))
   }, [quote?.client?.id])
 
-  if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
-  if (notFound) return <p className="text-sm text-red-600">Quote not found.</p>
+  if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
+  if (notFound) return <p className="text-sm text-danger">Quote not found.</p>
   if (!quote) return null
 
   // ─── Send / portal link actions ────────────────────────────────────────
@@ -309,8 +320,6 @@ export default function QuoteDetailPage({
   }
 
   async function handleClientChange(newClientId: string) {
-    // Changing the client invalidates the previously selected contact,
-    // since contacts belong to a specific client
     await updateQuoteField({ clientId: newClientId, contactId: null })
   }
 
@@ -325,7 +334,6 @@ export default function QuoteDetailPage({
   }
 
   async function updateLineItem(lineItemId: string, patch: Partial<LineItemBuilderItem>) {
-    // Optimistic local update so typing feels instant
     setQuote((prev) =>
       prev
         ? {
@@ -344,7 +352,6 @@ export default function QuoteDetailPage({
   }
 
   async function deleteLineItem(lineItemId: string) {
-    // Confirmation happens inside LineItemBuilder before this is called
     await fetch(`/api/quotes/${id}/line-items/${lineItemId}`, { method: "DELETE" })
     loadQuote()
   }
@@ -389,7 +396,6 @@ export default function QuoteDetailPage({
     const a = group[idx]
     const b = group[swapIdx]
 
-    // Swap sortOrder values between the two items
     setQuote((prev) =>
       prev
         ? {
@@ -418,7 +424,6 @@ export default function QuoteDetailPage({
   }
 
   // ─── Totals ──────────────────────────────────────────────────────────────
-  // Text blocks are pure content — never counted toward pricing
   const pricedItems = quote.lineItems.filter((li) => !li.isTextBlock)
   const oneTime = pricedItems.filter((li) => !li.isRecurring)
   const oneTimeSubtotal = oneTime.reduce((sum, li) => sum + lineTotal(li), 0)
@@ -451,18 +456,18 @@ export default function QuoteDetailPage({
   return (
     <div className="w-full space-y-6">
       <div>
-        <Link href="/dashboard/quotes" className="text-sm text-zinc-500 hover:underline inline-block mb-2">
+        <Link href="/dashboard/quotes" className="text-sm text-muted-foreground hover:text-foreground hover:underline inline-block mb-2">
           ← Back to Quotes
         </Link>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">
+            <h1 className="text-display font-semibold tracking-tight text-foreground">
               {quote.quoteNumber}
               {quote.version > 1 && (
-                <span className="text-base font-normal text-zinc-400"> v{quote.version}</span>
+                <span className="text-base font-normal text-muted-foreground"> v{quote.version}</span>
               )}
             </h1>
-            {quote.title && <p className="text-zinc-500">{quote.title}</p>}
+            {quote.title && <p className="text-muted-foreground">{quote.title}</p>}
           </div>
           <div className="flex items-center gap-3">
             {quote.status === "DRAFT" && (
@@ -491,9 +496,12 @@ export default function QuoteDetailPage({
             {canChangeStatus ? (
               <select
                 value={quote.status}
-                onChange={(e) => handleChangeStatus(e.target.value)}
+                onChange={(e) => {
+                  handleChangeStatus(e.target.value)
+                  e.target.blur()
+                }}
                 disabled={changingStatus}
-                className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800 border-0"
+                className={`rounded-full px-2 py-1 text-xs font-medium border-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${STATUS_COLORS[quote.status]}`}
               >
                 <option value="DRAFT">Draft</option>
                 <option value="PENDING_APPROVAL">Pending Approval</option>
@@ -504,7 +512,7 @@ export default function QuoteDetailPage({
                 <option value="EXPIRED">Expired</option>
               </select>
             ) : (
-              <span className="rounded-full bg-zinc-100 px-2 py-1 text-xs font-medium text-zinc-600 dark:bg-zinc-800">
+              <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_COLORS[quote.status]}`}>
                 {statusLabel(quote.status)}
               </span>
             )}
@@ -513,8 +521,8 @@ export default function QuoteDetailPage({
       </div>
 
       {isLocked && quote.status !== "PENDING_APPROVAL" && (
-        <div className="rounded-md border border-amber-300 bg-amber-50 dark:bg-amber-950 p-4 flex items-center justify-between">
-          <p className="text-sm text-amber-800 dark:text-amber-200">
+        <div className="rounded-lg border border-warning/30 bg-warning-bg p-4 flex items-center justify-between">
+          <p className="text-sm text-warning">
             This quote has been sent and is locked. Create a new version to make changes.
           </p>
           <Button size="sm" onClick={handleCreateVersion} disabled={creatingVersion}>
@@ -524,8 +532,8 @@ export default function QuoteDetailPage({
       )}
 
       {quote.status === "PENDING_APPROVAL" && (
-        <div className="rounded-md border border-blue-300 bg-blue-50 dark:bg-blue-950 p-4 space-y-3">
-          <p className="text-sm text-blue-800 dark:text-blue-200 font-medium">
+        <div className="rounded-lg border border-info/30 bg-info-bg p-4 space-y-3">
+          <p className="text-sm text-info font-medium">
             This quote needs approval before it can be sent.
           </p>
           <div className="space-y-2">
@@ -540,11 +548,11 @@ export default function QuoteDetailPage({
                 return (
                   <div
                     key={a.id}
-                    className="flex items-center justify-between rounded-md bg-white dark:bg-zinc-900 p-3 text-sm"
+                    className="flex items-center justify-between rounded-lg bg-card border border-border p-3 text-sm"
                   >
                     <div>
-                      <p className="font-medium">{a.workflow.name}</p>
-                      <p className="text-xs text-zinc-500">
+                      <p className="font-medium text-foreground">{a.workflow.name}</p>
+                      <p className="text-xs text-muted-foreground">
                         Requires {requiredRoleName} or higher
                       </p>
                     </div>
@@ -563,7 +571,7 @@ export default function QuoteDetailPage({
                         </Button>
                       </div>
                     ) : (
-                      <span className="text-xs text-zinc-400">
+                      <span className="text-xs text-muted-foreground">
                         Waiting on {requiredRoleName}
                       </span>
                     )}
@@ -575,8 +583,8 @@ export default function QuoteDetailPage({
       )}
 
       {!quote.isActive && quote.sentAt && (
-        <div className="rounded-md border border-zinc-300 bg-zinc-100 dark:bg-zinc-800 p-4 flex items-center justify-between">
-          <p className="text-sm text-zinc-600 dark:text-zinc-300">
+        <div className="rounded-lg border border-border bg-muted p-4 flex items-center justify-between">
+          <p className="text-sm text-muted-foreground">
             This is an archived version. Another version is currently the active one shown to the client.
           </p>
           <Button size="sm" variant="outline" onClick={() => handleReactivate(id)} disabled={reactivatingId === id}>
@@ -588,28 +596,28 @@ export default function QuoteDetailPage({
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
         {/* Left: main content */}
         <div className="lg:col-span-3 space-y-6">
-          <div className="rounded-md border p-4 space-y-3 text-sm">
+          <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 text-sm">
             {!showEditableHeader ? (
               <>
-                <p><span className="text-zinc-500">Client:</span> {quote.client.name}</p>
+                <p><span className="text-muted-foreground">Client:</span> <span className="text-foreground">{quote.client.name}</span></p>
                 <p>
-                  <span className="text-zinc-500">Contact:</span>{" "}
-                  {quote.contact ? `${quote.contact.firstName} ${quote.contact.lastName}` : "—"}
+                  <span className="text-muted-foreground">Contact:</span>{" "}
+                  <span className="text-foreground">{quote.contact ? `${quote.contact.firstName} ${quote.contact.lastName}` : "—"}</span>
                 </p>
-                <p><span className="text-zinc-500">Rep:</span> {quote.user.name}</p>
+                <p><span className="text-muted-foreground">Rep:</span> <span className="text-foreground">{quote.user.name}</span></p>
                 <p>
-                  <span className="text-zinc-500">Expires:</span>{" "}
-                  {quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "—"}
+                  <span className="text-muted-foreground">Expires:</span>{" "}
+                  <span className="text-foreground">{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "—"}</span>
                 </p>
               </>
             ) : (
               <>
                 <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Client</label>
+                  <label className="block text-xs text-muted-foreground mb-1">Client</label>
                   <select
                     value={quote.client.id}
                     onChange={(e) => handleClientChange(e.target.value)}
-                    className="w-full rounded-md border px-2 py-1.5 text-sm"
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     {clients.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
@@ -617,11 +625,11 @@ export default function QuoteDetailPage({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Contact</label>
+                  <label className="block text-xs text-muted-foreground mb-1">Contact</label>
                   <select
                     value={quote.contact?.id ?? ""}
                     onChange={(e) => updateQuoteField({ contactId: e.target.value || null })}
-                    className="w-full rounded-md border px-2 py-1.5 text-sm"
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="">No contact selected</option>
                     {contacts.map((c) => (
@@ -629,35 +637,35 @@ export default function QuoteDetailPage({
                     ))}
                   </select>
                 </div>
-                <p><span className="text-zinc-500">Rep:</span> {quote.user.name}</p>
+                <p><span className="text-muted-foreground">Rep:</span> <span className="text-foreground">{quote.user.name}</span></p>
                 <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Expiry Date</label>
+                  <label className="block text-xs text-muted-foreground mb-1">Expiry Date</label>
                   <input
                     key={`expiry-${quote.expiresAt}`}
                     type="date"
                     defaultValue={quote.expiresAt ? quote.expiresAt.slice(0, 10) : ""}
                     onBlur={(e) => updateQuoteField({ expiresAt: e.target.value || null })}
-                    className="w-full rounded-md border px-2 py-1.5 text-sm"
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Title / Subject</label>
+                  <label className="block text-xs text-muted-foreground mb-1">Title / Subject</label>
                   <input
                     key={`title-${quote.title}`}
                     type="text"
                     defaultValue={quote.title ?? ""}
                     onBlur={(e) => updateQuoteField({ title: e.target.value })}
-                    className="w-full rounded-md border px-2 py-1.5 text-sm"
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs text-zinc-500 mb-1">Client-Facing Intro Message</label>
+                  <label className="block text-xs text-muted-foreground mb-1">Client-Facing Intro Message</label>
                   <textarea
                     key={`intro-${quote.introText}`}
                     defaultValue={quote.introText ?? ""}
                     onBlur={(e) => updateQuoteField({ introText: e.target.value })}
                     rows={3}
-                    className="w-full rounded-md border px-2 py-1.5 text-sm"
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 </div>
               </>
@@ -665,7 +673,7 @@ export default function QuoteDetailPage({
           </div>
 
           <div className="space-y-4">
-            <h2 className="font-semibold text-lg">Line Items</h2>
+            <h2 className="font-semibold text-heading text-foreground">Line Items</h2>
 
             <LineItemBuilder
               items={quote.lineItems}
@@ -679,49 +687,49 @@ export default function QuoteDetailPage({
             />
           </div>
 
-          <div className="rounded-md border p-4 space-y-1 text-sm max-w-md ml-auto">
+          <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1 text-sm max-w-md ml-auto">
             <div className="flex justify-between">
-              <span className="text-zinc-500">One-Time Subtotal</span>
-              <span>{money(oneTimeSubtotal)}</span>
+              <span className="text-muted-foreground">One-Time Subtotal</span>
+              <span className="text-foreground tabular-nums">{money(oneTimeSubtotal)}</span>
             </div>
             <div className="flex justify-between">
-              <span className="text-zinc-500">Tax ({quote.taxRate}%)</span>
-              <span>{money(tax)}</span>
+              <span className="text-muted-foreground">Tax ({quote.taxRate}%)</span>
+              <span className="text-foreground tabular-nums">{money(tax)}</span>
             </div>
-            <div className="flex justify-between font-semibold border-t pt-1">
-              <span>Grand Total (One-Time)</span>
-              <span>{money(grandTotalOneTime)}</span>
+            <div className="flex justify-between font-semibold border-t border-border pt-1">
+              <span className="text-foreground">Grand Total (One-Time)</span>
+              <span className="text-foreground tabular-nums">{money(grandTotalOneTime)}</span>
             </div>
             {recurringByInterval.MONTHLY > 0 && (
               <div className="flex justify-between pt-2">
-                <span className="text-zinc-500">Monthly Recurring</span>
-                <span>{money(recurringByInterval.MONTHLY)}</span>
+                <span className="text-muted-foreground">Monthly Recurring</span>
+                <span className="text-foreground tabular-nums">{money(recurringByInterval.MONTHLY)}</span>
               </div>
             )}
             {recurringByInterval.QUARTERLY > 0 && (
               <div className="flex justify-between">
-                <span className="text-zinc-500">Quarterly Recurring</span>
-                <span>{money(recurringByInterval.QUARTERLY)}</span>
+                <span className="text-muted-foreground">Quarterly Recurring</span>
+                <span className="text-foreground tabular-nums">{money(recurringByInterval.QUARTERLY)}</span>
               </div>
             )}
             {recurringByInterval.ANNUALLY > 0 && (
               <div className="flex justify-between">
-                <span className="text-zinc-500">Annual Recurring</span>
-                <span>{money(recurringByInterval.ANNUALLY)}</span>
+                <span className="text-muted-foreground">Annual Recurring</span>
+                <span className="text-foreground tabular-nums">{money(recurringByInterval.ANNUALLY)}</span>
               </div>
             )}
-            <div className="border-t mt-2 pt-2 space-y-1 text-zinc-500">
+            <div className="border-t border-border mt-2 pt-2 space-y-1 text-muted-foreground">
               <div className="flex justify-between">
                 <span>Internal: Total Cost</span>
-                <span>{money(totalCost)}</span>
+                <span className="tabular-nums">{money(totalCost)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Internal: Total Margin $</span>
-                <span>{money(totalMargin)}</span>
+                <span className="tabular-nums">{money(totalMargin)}</span>
               </div>
               <div className="flex justify-between">
                 <span>Internal: Margin %</span>
-                <span>{marginPct.toFixed(1)}%</span>
+                <span className="tabular-nums">{marginPct.toFixed(1)}%</span>
               </div>
             </div>
           </div>
@@ -729,26 +737,26 @@ export default function QuoteDetailPage({
 
         {/* Right: Version History + Comments */}
         <div className="lg:col-span-2 space-y-6">
-          <div className="rounded-md border p-4 text-sm">
-              <h2 className="font-semibold text-sm mb-2">Version History</h2>
+          <div className="rounded-lg border border-border bg-card shadow-card p-4 text-sm">
+              <h2 className="font-semibold text-sm mb-2 text-foreground">Version History</h2>
               <div className="space-y-1">
                 {versions.map((v) => (
                   <div
                     key={v.id}
-                    className={`flex items-center justify-between rounded px-2 py-1 ${
-                      v.id === quote.id ? "bg-zinc-100 dark:bg-zinc-800" : ""
+                    className={`flex items-center justify-between rounded-md px-2 py-1.5 transition-colors ${
+                      v.id === quote.id ? "bg-muted" : "hover:bg-surface-hover"
                     }`}
                   >
                     <a href={`/dashboard/quotes/${v.id}`} className="hover:underline">
-                      <span className={v.id === quote.id ? "font-medium" : ""}>
+                      <span className={v.id === quote.id ? "font-medium text-foreground" : "text-foreground"}>
                         v{v.version} {v.id === quote.id && "(viewing)"}
                       </span>
-                      <span className="ml-2 text-xs text-zinc-500">
+                      <span className="ml-2 text-xs text-muted-foreground">
                         {statusLabel(v.status)} · {new Date(v.createdAt).toLocaleDateString()}
                       </span>
                     </a>
                     {v.isActive ? (
-                      <span className="text-xs font-medium text-green-600">Active</span>
+                      <span className="text-xs font-medium text-success">Active</span>
                     ) : v.sentAt ? (
                       <Button
                         size="sm"
@@ -759,29 +767,29 @@ export default function QuoteDetailPage({
                         {reactivatingId === v.id ? "..." : "Reactivate"}
                       </Button>
                     ) : (
-                      <span className="text-xs text-zinc-400">Draft in progress</span>
+                      <span className="text-xs text-muted-foreground">Draft in progress</span>
                     )}
                       </div>
                     ))}
               </div>
           </div>
 
-          <div className="rounded-md border p-4 space-y-3">
-            <h2 className="font-semibold text-sm">Comments</h2>
+          <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
+            <h2 className="font-semibold text-sm text-foreground">Comments</h2>
             <div className="space-y-2 max-h-80 overflow-y-auto">
               {comments.length === 0 && (
-                <p className="text-sm text-zinc-500">No messages yet.</p>
+                <p className="text-sm text-muted-foreground">No messages yet.</p>
               )}
               {comments.map((c) => (
                 <div
                   key={c.id}
                   className={`rounded-md p-3 text-sm max-w-[85%] ${
                     c.authorType === "INTERNAL"
-                      ? "bg-zinc-100 dark:bg-zinc-800 ml-auto"
-                      : "bg-blue-50 dark:bg-blue-950"
+                      ? "bg-muted ml-auto text-foreground"
+                      : "bg-info-bg text-foreground"
                   }`}
                 >
-                  <p className="text-xs font-medium text-zinc-500 mb-1">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">
                     {c.authorName} · {new Date(c.createdAt).toLocaleString()}
                   </p>
                   <p className="whitespace-pre-wrap">{c.message}</p>
@@ -794,7 +802,7 @@ export default function QuoteDetailPage({
                 onChange={(e) => setNewComment(e.target.value)}
                 placeholder="Reply to the client..."
                 rows={2}
-                className="flex-1 rounded-md border px-3 py-2 text-sm"
+                className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
               <HeroButton
                 variant="primary"
@@ -813,7 +821,7 @@ export default function QuoteDetailPage({
           <button
             onClick={handleDelete}
             disabled={deleting}
-            className="text-sm text-red-500 hover:underline disabled:opacity-50"
+            className="text-sm text-danger hover:underline disabled:opacity-50"
           >
             {deleting ? "Deleting..." : "Delete Quote"}
           </button>
@@ -920,66 +928,67 @@ function SendQuoteModal({
 
   return (
     <Modal maxWidth="lg" scrollable>
-      <h2 className="text-lg font-bold">Send Quote</h2>
+      <h2 className="text-lg font-bold text-foreground">Send Quote</h2>
 
       {pendingApprovalMessage ? (
-        <div className="rounded-md border border-blue-300 bg-blue-50 dark:bg-blue-950 p-3 text-sm text-blue-800 dark:text-blue-200">
+        <div className="rounded-lg border border-info/30 bg-info-bg p-3 text-sm text-info">
           {pendingApprovalMessage}
         </div>
       ) : (
         <>
           {error && (
-            <div className="rounded-md border border-red-300 bg-red-50 dark:bg-red-950 p-3 text-sm text-red-700 dark:text-red-300">
+            <div className="rounded-lg border border-danger/30 bg-danger-bg p-3 text-sm text-danger">
               {error}
             </div>
           )}
 
           <div>
-            <label className="block text-sm font-medium mb-1">To</label>
+            <label className="block text-sm font-medium mb-1 text-foreground">To</label>
             <input
               type="text"
               value={to}
               onChange={(e) => setTo(e.target.value)}
               placeholder="client@example.com"
-              className="w-full rounded-md border px-3 py-2 text-sm"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">CC (optional)</label>
+            <label className="block text-sm font-medium mb-1 text-foreground">CC (optional)</label>
             <input
               type="text"
               value={cc}
               onChange={(e) => setCc(e.target.value)}
-              className="w-full rounded-md border px-3 py-2 text-sm"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Subject</label>
+            <label className="block text-sm font-medium mb-1 text-foreground">Subject</label>
             <input
               type="text"
               value={subject}
               onChange={(e) => setSubject(e.target.value)}
-              className="w-full rounded-md border px-3 py-2 text-sm"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 
           <div>
-            <label className="block text-sm font-medium mb-1">Message</label>
+            <label className="block text-sm font-medium mb-1 text-foreground">Message</label>
             <textarea
               value={message}
               onChange={(e) => setMessage(e.target.value)}
               rows={8}
-              className="w-full rounded-md border px-3 py-2 text-sm"
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
 
-          <label className="flex items-center gap-2 text-sm">
+          <label className="flex items-center gap-2 text-sm text-foreground">
             <input
               type="checkbox"
               checked={includePdf}
               onChange={(e) => setIncludePdf(e.target.checked)}
+              className="accent-primary"
             />
             Attach PDF
           </label>
