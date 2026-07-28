@@ -16,16 +16,16 @@
   --color-brand-primary-700: var(--brand-primary-700);
   --color-brand-primary-800: var(--brand-primary-800);
   --color-brand-primary-900: var(--brand-primary-900);
-  --color-brand-accent-50: var(--brand-accent-50);
-  --color-brand-accent-100: var(--brand-accent-100);
-  --color-brand-accent-200: var(--brand-accent-200);
-  --color-brand-accent-300: var(--brand-accent-300);
-  --color-brand-accent-400: var(--brand-accent-400);
-  --color-brand-accent-500: var(--brand-accent-500);
-  --color-brand-accent-600: var(--brand-accent-600);
-  --color-brand-accent-700: var(--brand-accent-700);
-  --color-brand-accent-800: var(--brand-accent-800);
-  --color-brand-accent-900: var(--brand-accent-900);
+  --color-brand-secondary-50: var(--brand-secondary-50);
+  --color-brand-secondary-100: var(--brand-secondary-100);
+  --color-brand-secondary-200: var(--brand-secondary-200);
+  --color-brand-secondary-300: var(--brand-secondary-300);
+  --color-brand-secondary-400: var(--brand-secondary-400);
+  --color-brand-secondary-500: var(--brand-secondary-500);
+  --color-brand-secondary-600: var(--brand-secondary-600);
+  --color-brand-secondary-700: var(--brand-secondary-700);
+  --color-brand-secondary-800: var(--brand-secondary-800);
+  --color-brand-secondary-900: var(--brand-secondary-900);
   --color-success: var(--success);
   --color-success-bg: var(--success-bg);
   --color-warning: var(--warning);
@@ -58,6 +58,7 @@
   --color-destructive: var(--destructive);
   --color-accent-foreground: var(--accent-foreground);
   --color-accent: var(--accent);
+  --color-surface: var(--surface);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
   --color-secondary-foreground: var(--secondary-foreground);
@@ -82,14 +83,25 @@
      Overridden per-company at runtime by CompanyThemeProvider, which
      injects each company's actual primaryColor/accentColor from Settings.
      These are just fallback values used before that loads (or if a page
-     renders with no company context, e.g. the login screen). */
+     renders with no company context, e.g. the login screen).
+
+     NAMING NOTE: "brand-primary" always means the company's MAIN brand
+     color (Settings → primaryColor), and "brand-secondary" always means
+     their second color (Settings → accentColor). This is deliberately
+     NOT called "brand-accent" — HeroUI v3 renamed its own "primary"
+     concept to a variable literally named --accent, so using "accent" for
+     our secondary brand hue would collide with an unrelated meaning in
+     every HeroUI component. --accent below is wired to brand-primary,
+     matching both shadcn's --primary and HeroUI's --accent to the SAME
+     real color, which is what actually makes the two libraries look
+     unified. */
   --brand-primary-base: oklch(0.55 0.18 255);
-  --brand-accent-base: oklch(0.6 0.15 300);
+  --brand-secondary-base: oklch(0.6 0.15 300);
 
   /* Full 50-900 scale generated from the one base color above, using
      OKLCH color-mix so every step stays perceptually even. Lighter tints
      mix toward white, darker shades mix toward black. This regenerates
-     automatically the instant --brand-primary-base/--brand-accent-base
+     automatically the instant --brand-primary-base/--brand-secondary-base
      change — no JS color math needed anywhere. */
   --brand-primary-50: color-mix(in oklch, var(--brand-primary-base) 8%, white);
   --brand-primary-100: color-mix(in oklch, var(--brand-primary-base) 16%, white);
@@ -102,16 +114,16 @@
   --brand-primary-800: color-mix(in oklch, var(--brand-primary-base) 55%, black);
   --brand-primary-900: color-mix(in oklch, var(--brand-primary-base) 40%, black);
 
-  --brand-accent-50: color-mix(in oklch, var(--brand-accent-base) 8%, white);
-  --brand-accent-100: color-mix(in oklch, var(--brand-accent-base) 16%, white);
-  --brand-accent-200: color-mix(in oklch, var(--brand-accent-base) 30%, white);
-  --brand-accent-300: color-mix(in oklch, var(--brand-accent-base) 45%, white);
-  --brand-accent-400: color-mix(in oklch, var(--brand-accent-base) 70%, white);
-  --brand-accent-500: var(--brand-accent-base);
-  --brand-accent-600: color-mix(in oklch, var(--brand-accent-base) 85%, black);
-  --brand-accent-700: color-mix(in oklch, var(--brand-accent-base) 70%, black);
-  --brand-accent-800: color-mix(in oklch, var(--brand-accent-base) 55%, black);
-  --brand-accent-900: color-mix(in oklch, var(--brand-accent-base) 40%, black);
+  --brand-secondary-50: color-mix(in oklch, var(--brand-secondary-base) 8%, white);
+  --brand-secondary-100: color-mix(in oklch, var(--brand-secondary-base) 16%, white);
+  --brand-secondary-200: color-mix(in oklch, var(--brand-secondary-base) 30%, white);
+  --brand-secondary-300: color-mix(in oklch, var(--brand-secondary-base) 45%, white);
+  --brand-secondary-400: color-mix(in oklch, var(--brand-secondary-base) 70%, white);
+  --brand-secondary-500: var(--brand-secondary-base);
+  --brand-secondary-600: color-mix(in oklch, var(--brand-secondary-base) 85%, black);
+  --brand-secondary-700: color-mix(in oklch, var(--brand-secondary-base) 70%, black);
+  --brand-secondary-800: color-mix(in oklch, var(--brand-secondary-base) 55%, black);
+  --brand-secondary-900: color-mix(in oklch, var(--brand-secondary-base) 40%, black);
 
   /* ─── Semantic status colors ──────────────────────────────────────────
      Fixed regardless of company branding — a success/error/warning
@@ -133,14 +145,20 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
+  --surface: oklch(1 0 0);
   --primary: var(--brand-primary-600);
   --primary-foreground: oklch(0.985 0 0);
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
   --muted-foreground: oklch(0.556 0 0);
-  --accent: var(--brand-accent-100);
-  --accent-foreground: var(--brand-accent-700);
+  /* --accent is the ONE variable HeroUI's own components read directly
+     for their primary/main-action color — set to the real brand color,
+     not a pale tint, so HeroUI components visually match our Button's
+     "default" variant instead of rendering washed-out */
+  --accent: var(--brand-primary-600);
+  --accent-foreground: oklch(0.985 0 0);
+  --accent-hover: color-mix(in oklch, var(--brand-primary-600) 85%, black);
   --destructive: var(--danger);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
@@ -171,14 +189,16 @@
   --card-foreground: oklch(0.96 0 0);
   --popover: oklch(0.21 0 0);
   --popover-foreground: oklch(0.96 0 0);
+  --surface: oklch(0.21 0 0);
   --primary: var(--brand-primary-400);
   --primary-foreground: oklch(0.16 0 0);
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.96 0 0);
   --muted: oklch(0.269 0 0);
   --muted-foreground: oklch(0.708 0 0);
-  --accent: color-mix(in oklch, var(--brand-accent-base) 20%, oklch(0.269 0 0));
-  --accent-foreground: var(--brand-accent-300);
+  --accent: var(--brand-primary-400);
+  --accent-foreground: oklch(0.16 0 0);
+  --accent-hover: color-mix(in oklch, var(--brand-primary-400) 85%, white);
   --destructive: var(--danger);
   --success: oklch(0.65 0.13 145);
   --success-bg: oklch(0.25 0.04 145);

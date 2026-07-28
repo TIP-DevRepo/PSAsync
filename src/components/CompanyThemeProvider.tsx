@@ -31,7 +31,7 @@ export async function CompanyThemeProvider() {
     overrides.push(`--brand-primary-base: ${settings.primaryColor};`)
   }
   if (settings.accentColor && isValidHexColor(settings.accentColor)) {
-    overrides.push(`--brand-accent-base: ${settings.accentColor};`)
+    overrides.push(`--brand-secondary-base: ${settings.accentColor};`)
   }
 
   if (overrides.length === 0) return null
