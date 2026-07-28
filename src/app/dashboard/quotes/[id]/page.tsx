@@ -501,7 +501,7 @@ export default function QuoteDetailPage({
                   e.target.blur()
                 }}
                 disabled={changingStatus}
-                className={`rounded-full px-2 py-1 text-xs font-medium border-0 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${STATUS_COLORS[quote.status]}`}
+                className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <option value="DRAFT">Draft</option>
                 <option value="PENDING_APPROVAL">Pending Approval</option>
