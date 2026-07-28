@@ -120,6 +120,18 @@ export interface CatalogOption {
 
 const NO_SECTION = "__no_section__"
 
+// ─── Data Table density control ────────────────────────────────────────
+// Sort and whole-row-select don't apply to this table (order is
+// drag-controlled data, and every cell is an editable input) — density
+// is the one Data Table rule that maps cleanly here.
+type Density = "compact" | "default" | "comfortable"
+
+const ROW_PADDING: Record<Density, string> = {
+  compact: "py-1",
+  default: "py-2",
+  comfortable: "py-3",
+}
+
 function lineTotal(li: LineItemBuilderItem) {
   return li.unitPrice * li.quantity * (1 - li.discount / 100)
 }
@@ -431,6 +443,8 @@ export function LineItemBuilder({
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null)
   const [menuAnchor, setMenuAnchor] = useState<{ top: number; bottom: number; right: number } | null>(null)
   const { menuRef: rowMenuRef, style: menuStyle } = useFixedMenuPosition(!!openRowMenu, menuAnchor)
+  const [density, setDensity] = useState<Density>("default")
+  const pad = ROW_PADDING[density]
   // Which item is currently being dragged (drives the floating DragOverlay
   // preview), and where it would land if dropped right now (drives the
   // InsertionLine / bundle-join ring). Rows themselves never move.
@@ -706,25 +720,36 @@ export function LineItemBuilder({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-4 text-xs text-zinc-500">
-        <span className="flex items-center gap-1">
-          <Repeat size={13} className="text-teal-500" /> recurring
-        </span>
-        <span className="flex items-center gap-1">
-          <GitBranch size={13} className="text-amber-500" /> choice group
-        </span>
-        <span className="flex items-center gap-1">
-          <Package size={13} className="text-purple-500" /> bundle
-        </span>
-        <span className="flex items-center gap-1">
-          <ToggleRight size={13} className="text-blue-500" /> optional
-        </span>
-        <span className="flex items-center gap-1">
-          <SlidersHorizontal size={13} className="text-rose-500" /> qty adjustable
-        </span>
-        <span className="flex items-center gap-1">
-          <AlignLeft size={13} className="text-zinc-400" /> text block
-        </span>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-4 text-xs text-zinc-500">
+          <span className="flex items-center gap-1">
+            <Repeat size={13} className="text-teal-500" /> recurring
+          </span>
+          <span className="flex items-center gap-1">
+            <GitBranch size={13} className="text-amber-500" /> choice group
+          </span>
+          <span className="flex items-center gap-1">
+            <Package size={13} className="text-purple-500" /> bundle
+          </span>
+          <span className="flex items-center gap-1">
+            <ToggleRight size={13} className="text-blue-500" /> optional
+          </span>
+          <span className="flex items-center gap-1">
+            <SlidersHorizontal size={13} className="text-rose-500" /> qty adjustable
+          </span>
+          <span className="flex items-center gap-1">
+            <AlignLeft size={13} className="text-zinc-400" /> text block
+          </span>
+        </div>
+        <select
+          value={density}
+          onChange={(e) => setDensity(e.target.value as Density)}
+          className="rounded-md border px-2 py-1 text-xs"
+        >
+          <option value="compact">Compact rows</option>
+          <option value="default">Default rows</option>
+          <option value="comfortable">Comfortable rows</option>
+        </select>
       </div>
 
       <fieldset disabled={locked} className="space-y-4 border-0 p-0 m-0">
@@ -800,11 +825,11 @@ export function LineItemBuilder({
                       >
                         {(drag) => (
                           <>
-                            <Cell ref={drag.rowRef} className={`py-2 pl-4 ${getRowAccent(li)}`}>
+                            <Cell ref={drag.rowRef} className={`${pad} pl-4 ${getRowAccent(li)}`}>
                               <DragHandle attributes={drag.attributes} listeners={drag.listeners} disabled={locked} />
                             </Cell>
                             <Cell />
-                            <Cell span={9} className="py-2 pr-4">
+                            <Cell span={9} className={`${pad} pr-4`}>
                               <div className="flex items-center gap-2 flex-wrap">
                                 <span className="text-xs font-semibold text-purple-600 dark:text-purple-300">
                                   📦 BUNDLE
@@ -831,7 +856,7 @@ export function LineItemBuilder({
                                 </button>
                               </div>
                             </Cell>
-                            <Cell className="py-2 pr-4">
+                            <Cell className={`${pad} pr-4`}>
                               <button
                                 onClick={() => handleDelete(li.id)}
                                 title="Delete bundle (items inside stay)"
@@ -851,11 +876,11 @@ export function LineItemBuilder({
                       <SortableRow id={li.id} disabled={locked} className="border-b">
                         {(drag) => (
                           <>
-                            <Cell ref={drag.rowRef} className={`py-2 pl-4 align-top ${getRowAccent(li)}`}>
+                            <Cell ref={drag.rowRef} className={`${pad} pl-4 align-top ${getRowAccent(li)}`}>
                               <DragHandle attributes={drag.attributes} listeners={drag.listeners} disabled={locked} />
                             </Cell>
                             <Cell className="align-top" />
-                            <Cell span={9} className="py-2 pr-4 align-top">
+                            <Cell span={9} className={`${pad} pr-4 align-top`}>
                               <input
                                 type="text"
                                 defaultValue={li.name}
@@ -870,7 +895,7 @@ export function LineItemBuilder({
                                 className="mt-1 w-full rounded border px-2 py-1 text-xs text-zinc-500"
                               />
                             </Cell>
-                            <Cell className="py-2 pr-4 align-top">
+                            <Cell className={`${pad} pr-4 align-top`}>
                               <button
                                 onClick={() => handleDelete(li.id)}
                                 title="Delete"
@@ -893,15 +918,15 @@ export function LineItemBuilder({
                     >
                       {(drag) => (
                         <>
-                          <Cell ref={drag.rowRef} className={`py-2 pl-4 align-top ${getRowAccent(li)}`}>
+                          <Cell ref={drag.rowRef} className={`${pad} pl-4 align-top ${getRowAccent(li)}`}>
                             <span style={{ marginLeft: indent ? "1.25rem" : 0, display: "inline-block" }}>
                               <DragHandle attributes={drag.attributes} listeners={drag.listeners} disabled={locked} />
                             </span>
                           </Cell>
-                          <Cell className="py-2 pr-2 align-top">
+                          <Cell className={`${pad} pr-2 align-top`}>
                             <LineItemConfigIcons li={li} />
                           </Cell>
-                          <Cell className="py-2 pr-2 align-top">
+                          <Cell className={`${pad} pr-2 align-top`}>
                             <input
                               type="text"
                               defaultValue={li.sku ?? ""}
@@ -909,7 +934,7 @@ export function LineItemBuilder({
                               className="w-24 rounded border px-2 py-1 text-xs"
                             />
                           </Cell>
-                          <Cell className="py-2 pr-2 align-top">
+                          <Cell className={`${pad} pr-2 align-top`}>
                             {li.bundleName && (
                               <p className="text-xs text-purple-500 mb-1">
                                 📦 in {li.bundleName}
@@ -929,25 +954,25 @@ export function LineItemBuilder({
                               className="mt-1 w-full min-w-[10rem] rounded border px-2 py-1 text-xs text-zinc-500"
                             />
                           </Cell>
-                          <Cell className="py-2 pr-2 align-top">
+                          <Cell className={`${pad} pr-2 align-top text-right`}>
                             <input
                               type="number"
                               defaultValue={li.quantity}
                               onBlur={(e) => onUpdate(li.id, { quantity: Number(e.target.value) })}
-                              className="w-16 rounded border px-2 py-1 text-xs"
+                              className="w-16 rounded border px-2 py-1 text-xs text-right tabular-nums"
                             />
                           </Cell>
-                          <Cell className="py-2 pr-2 align-top">
+                          <Cell className={`${pad} pr-2 align-top text-right`}>
                             <input
                               key={`cost-${li.id}-${li.cost}`}
                               type="number"
                               step="0.01"
                               defaultValue={li.cost}
                               onBlur={(e) => onUpdate(li.id, { cost: Number(e.target.value) })}
-                              className="w-20 rounded border px-2 py-1 text-xs"
+                              className="w-20 rounded border px-2 py-1 text-xs text-right tabular-nums"
                             />
                           </Cell>
-                          <Cell className="py-2 pr-2 align-top">
+                          <Cell className={`${pad} pr-2 align-top text-right`}>
                             <input
                               key={`mod-${li.id}-${li.cost}-${li.unitPrice}`}
                               type="number"
@@ -959,11 +984,11 @@ export function LineItemBuilder({
                                 const newPrice = Math.round((li.cost / (1 - mod / 100)) * 100) / 100
                                 onUpdate(li.id, { unitPrice: newPrice })
                               }}
-                              className="w-16 rounded border px-2 py-1 text-xs"
+                              className="w-16 rounded border px-2 py-1 text-xs text-right tabular-nums"
                             />
                             <span className="text-zinc-400"> %</span>
                           </Cell>
-                          <Cell className="py-2 pr-2 align-top">
+                          <Cell className={`${pad} pr-2 align-top text-right`}>
                             <input
                               key={`price-${li.id}-${li.unitPrice}`}
                               type="number"
@@ -976,27 +1001,27 @@ export function LineItemBuilder({
                                 onUpdate(li.id, { unitPrice: clamped })
                                 if (clamped !== value) e.target.value = String(clamped)
                               }}
-                              className="w-20 rounded border px-2 py-1 text-xs"
+                              className="w-20 rounded border px-2 py-1 text-xs text-right tabular-nums"
                             />
                           </Cell>
-                          <Cell className="py-2 pr-2 align-top">
+                          <Cell className={`${pad} pr-2 align-top text-right`}>
                             <input
                               type="number"
                               step="1"
                               defaultValue={li.discount}
                               onBlur={(e) => onUpdate(li.id, { discount: Number(e.target.value) })}
-                              className="w-16 rounded border px-2 py-1 text-xs"
+                              className="w-16 rounded border px-2 py-1 text-xs text-right tabular-nums"
                             />
                           </Cell>
-                          <Cell className="py-2 pr-2 align-top font-medium">{money(total)}</Cell>
-                          <Cell className="py-2 pr-2 align-top text-xs">
+                          <Cell className={`${pad} pr-2 align-top font-medium text-right tabular-nums`}>{money(total)}</Cell>
+                          <Cell className={`${pad} pr-2 align-top text-xs text-right tabular-nums`}>
                             {money(margin)}
                             <br />
                             <span className={marginColor(marginPct)}>
                               {total > 0 ? `${marginPct.toFixed(0)}%` : "—"}
                             </span>
                           </Cell>
-                          <Cell className="py-2 pr-4 align-top">
+                          <Cell className={`${pad} pr-4 align-top`}>
                             <div className="flex items-center gap-2 relative">
                               <button
                                 onClick={() => onDuplicate(li)}
@@ -1141,18 +1166,18 @@ export function LineItemBuilder({
                   >
                     <SortableContext items={topLevelItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
                       <div className="w-full text-sm grid" style={{ gridTemplateColumns: GRID_COLS }}>
-                        <Cell className="py-2 pl-4 text-left text-xs text-zinc-500 border-b" />
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Config</Cell>
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Part #</Cell>
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Description</Cell>
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Qty</Cell>
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Unit Cost</Cell>
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Modifier</Cell>
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Unit Price</Cell>
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Disc %</Cell>
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Total</Cell>
-                        <Cell className="py-2 text-left text-xs text-zinc-500 border-b">Margin</Cell>
-                        <Cell className="py-2 pr-4 text-left text-xs text-zinc-500 border-b" />
+                        <Cell className={`${pad} pl-4 text-left text-xs text-zinc-500 border-b`} />
+                        <Cell className={`${pad} text-left text-xs text-zinc-500 border-b`}>Config</Cell>
+                        <Cell className={`${pad} text-left text-xs text-zinc-500 border-b`}>Part #</Cell>
+                        <Cell className={`${pad} text-left text-xs text-zinc-500 border-b`}>Description</Cell>
+                        <Cell className={`${pad} text-right text-xs text-zinc-500 border-b`}>Qty</Cell>
+                        <Cell className={`${pad} text-right text-xs text-zinc-500 border-b`}>Unit Cost</Cell>
+                        <Cell className={`${pad} text-right text-xs text-zinc-500 border-b`}>Modifier</Cell>
+                        <Cell className={`${pad} text-right text-xs text-zinc-500 border-b`}>Unit Price</Cell>
+                        <Cell className={`${pad} text-right text-xs text-zinc-500 border-b`}>Disc %</Cell>
+                        <Cell className={`${pad} text-right text-xs text-zinc-500 border-b`}>Total</Cell>
+                        <Cell className={`${pad} text-right text-xs text-zinc-500 border-b`}>Margin</Cell>
+                        <Cell className={`${pad} pr-4 text-left text-xs text-zinc-500 border-b`} />
 
                         <SectionEdgeCap id={topCapId} />
 
