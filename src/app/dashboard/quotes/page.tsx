@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useLayoutEffect } from "react"
 import { useFixedMenuPosition, useCloseOnOutsideClick, useCloseOnScroll } from "@/lib/useFixedMenu"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -182,10 +182,94 @@ function SortableHeader({
   )
 }
 
+// ─── Tabs System ────────────────────────────────────────────────────────
+// Sliding indicator, full keyboard nav, ARIA roles, and a short crossfade
+// on content switch, per the Tabs System pattern in the design rules doc.
+// Mobile segmented-control treatment (under 5 tabs) is a separate visual
+// decision, deliberately deferred — documented, not guessed at here.
+type TabKey = "scorecard" | "quotes" | "templates"
+
+const TOP_TABS: { key: TabKey; label: string }[] = [
+  { key: "scorecard", label: "Scorecard" },
+  { key: "quotes", label: "Quotes" },
+  { key: "templates", label: "Templates" },
+]
+
+function TabsBar({ activeTab, onChange }: { activeTab: TabKey; onChange: (key: TabKey) => void }) {
+  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const [indicator, setIndicator] = useState({ left: 0, width: 0 })
+
+  useLayoutEffect(() => {
+    const btn = tabRefs.current[activeTab]
+    if (btn) setIndicator({ left: btn.offsetLeft, width: btn.offsetWidth })
+  }, [activeTab])
+
+  function handleKeyDown(e: React.KeyboardEvent, idx: number) {
+    let nextIdx = idx
+    if (e.key === "ArrowRight") nextIdx = (idx + 1) % TOP_TABS.length
+    else if (e.key === "ArrowLeft") nextIdx = (idx - 1 + TOP_TABS.length) % TOP_TABS.length
+    else if (e.key === "Home") nextIdx = 0
+    else if (e.key === "End") nextIdx = TOP_TABS.length - 1
+    else return
+    e.preventDefault()
+    const nextKey = TOP_TABS[nextIdx].key
+    onChange(nextKey)
+    tabRefs.current[nextKey]?.focus()
+  }
+
+  return (
+    <div role="tablist" aria-label="Quotes sections" className="relative flex gap-4 border-b text-sm">
+      {TOP_TABS.map((tab, idx) => {
+        const isActive = activeTab === tab.key
+        return (
+          <button
+            key={tab.key}
+            ref={(el) => {
+              tabRefs.current[tab.key] = el
+            }}
+            role="tab"
+            id={`quotes-tab-${tab.key}`}
+            aria-selected={isActive}
+            aria-controls={`quotes-tabpanel-${tab.key}`}
+            tabIndex={isActive ? 0 : -1}
+            onClick={() => onChange(tab.key)}
+            onKeyDown={(e) => handleKeyDown(e, idx)}
+            className={`pb-2 rounded-t-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2 ${
+              isActive ? "font-semibold text-zinc-900 dark:text-zinc-100" : "text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+            }`}
+          >
+            {tab.label}
+          </button>
+        )
+      })}
+      <div
+        className="absolute bottom-0 h-0.5 bg-zinc-900 dark:bg-zinc-100 transition-[left,width] duration-300"
+        style={{ left: indicator.left, width: indicator.width, transitionTimingFunction: "cubic-bezier(0.34, 1.56, 0.64, 1)" }}
+      />
+    </div>
+  )
+}
+
 // ─── Main Page ────────────────────────────────────────────────────────────
 export default function QuotesPage() {
-  const [activeTab, setActiveTab] = useState<"scorecard" | "quotes" | "templates">("quotes")
+  const [activeTab, setActiveTab] = useState<TabKey>("quotes")
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
+
+  // Crossfade: fade out the old tab's content, pause briefly, then swap
+  // content and fade in — never a hard instant cut.
+  const [displayedTab, setDisplayedTab] = useState<TabKey>(activeTab)
+  const [contentVisible, setContentVisible] = useState(true)
+
+  useEffect(() => {
+    if (activeTab === displayedTab) return
+    setContentVisible(false)
+    const timer = setTimeout(() => {
+      setDisplayedTab(activeTab)
+      setContentVisible(true)
+    }, 80)
+    return () => clearTimeout(timer)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab])
 
   return (
     <div className="space-y-6">
@@ -194,31 +278,18 @@ export default function QuotesPage() {
         <Button onClick={() => setShowTemplatePicker(true)}>New Quote</Button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-4 border-b text-sm">
-        <button
-          onClick={() => setActiveTab("scorecard")}
-          className={`pb-2 ${activeTab === "scorecard" ? "border-b-2 border-zinc-900 font-semibold dark:border-zinc-100" : "text-zinc-500"}`}
-        >
-          Scorecard
-        </button>
-        <button
-          onClick={() => setActiveTab("quotes")}
-          className={`pb-2 ${activeTab === "quotes" ? "border-b-2 border-zinc-900 font-semibold dark:border-zinc-100" : "text-zinc-500"}`}
-        >
-          Quotes
-        </button>
-        <button
-          onClick={() => setActiveTab("templates")}
-          className={`pb-2 ${activeTab === "templates" ? "border-b-2 border-zinc-900 font-semibold dark:border-zinc-100" : "text-zinc-500"}`}
-        >
-          Templates
-        </button>
-      </div>
+      <TabsBar activeTab={activeTab} onChange={setActiveTab} />
 
-      {activeTab === "scorecard" && <ScorecardTab />}
-      {activeTab === "quotes" && <QuotesTab />}
-      {activeTab === "templates" && <TemplatesTab />}
+      <div
+        role="tabpanel"
+        id={`quotes-tabpanel-${displayedTab}`}
+        aria-labelledby={`quotes-tab-${displayedTab}`}
+        className={`transition-opacity duration-150 ${contentVisible ? "opacity-100" : "opacity-0"}`}
+      >
+        {displayedTab === "scorecard" && <ScorecardTab />}
+        {displayedTab === "quotes" && <QuotesTab />}
+        {displayedTab === "templates" && <TemplatesTab />}
+      </div>
 
       {showTemplatePicker && (
         <TemplatePickerModal onClose={() => setShowTemplatePicker(false)} />
