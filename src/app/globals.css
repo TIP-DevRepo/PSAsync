@@ -143,25 +143,19 @@
   --info: oklch(0.6 0.15 235);
   --info-bg: oklch(0.96 0.03 235);
 
-  --background: oklch(0.985 0 0);
+  --background: oklch(0.95 0 0);
   --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
+  --card: oklch(0.985 0 0);
   --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
+  --popover: oklch(0.985 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --surface: oklch(1 0 0);
-  /* Third surface tier — for row hover, list-item hover, and any
-     "elevated" state that needs to read as one step up from a plain card
-     without jumping all the way to a popover. Matches --muted in value
-     today (intentionally — this gives the token its own semantic name so
-     component code says "this is a hover surface," not "this is muted
-     text's background," even though the color happens to coincide). */
-  --surface-hover: oklch(0.97 0 0);
+  --surface: oklch(0.985 0 0);
+  --surface-hover: oklch(0.93 0 0);
   --primary: var(--brand-primary-600);
   --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
+  --secondary: oklch(0.93 0 0);
   --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
+  --muted: oklch(0.93 0 0);
   --muted-foreground: oklch(0.556 0 0);
   /* --accent is the ONE variable HeroUI's own components read directly
      for their primary/main-action color — set to the real brand color,
@@ -171,8 +165,8 @@
   --accent-foreground: oklch(0.985 0 0);
   --accent-hover: color-mix(in oklch, var(--brand-primary-600) 85%, black);
   --destructive: var(--danger);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
+  --border: oklch(0.85 0 0);
+  --input: oklch(0.85 0 0);
   --ring: var(--brand-primary-500);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
@@ -180,13 +174,13 @@
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.985 0 0);
+  --sidebar: oklch(0.93 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
   --sidebar-primary: var(--brand-primary-600);
   --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent: oklch(0.90 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-border: oklch(0.85 0 0);
   --sidebar-ring: oklch(0.708 0 0);
 
   /* ─── Layered shadows (light mode only — see Depth Layers pattern) ────
@@ -205,22 +199,19 @@
   /* Per our Dark Mode pattern reference: base on near-black, never pure
      black, and desaturate accent colors ~20% so they don't vibrate
      against the dark surface */
-  --background: oklch(0.16 0 0);
+  --background: oklch(0.22 0 0);
   --foreground: oklch(0.96 0 0);
-  --card: oklch(0.21 0 0);
+  --card: oklch(0.27 0 0);
   --card-foreground: oklch(0.96 0 0);
-  --popover: oklch(0.23 0 0);
+  --popover: oklch(0.29 0 0);
   --popover-foreground: oklch(0.96 0 0);
-  --surface: oklch(0.21 0 0);
-  /* Third tier: background(0.16) → card(0.21) → surface-hover(0.26) —
-     each step a faint climb, matching Halo's "three faint tiers of
-     charcoal" reference. */
-  --surface-hover: oklch(0.26 0 0);
+  --surface: oklch(0.27 0 0);
+  --surface-hover: oklch(0.32 0 0);
   --primary: var(--brand-primary-400);
   --primary-foreground: oklch(0.16 0 0);
-  --secondary: oklch(0.269 0 0);
+  --secondary: oklch(0.30 0 0);
   --secondary-foreground: oklch(0.96 0 0);
-  --muted: oklch(0.269 0 0);
+  --muted: oklch(0.30 0 0);
   --muted-foreground: oklch(0.708 0 0);
   --accent: var(--brand-primary-400);
   --accent-foreground: oklch(0.16 0 0);
@@ -234,21 +225,21 @@
   --danger-bg: oklch(0.25 0.04 25);
   --info: oklch(0.68 0.13 235);
   --info-bg: oklch(0.25 0.04 235);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 18%);
   --ring: var(--brand-primary-400);
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.14 0 0);
+  --sidebar: oklch(0.18 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
   --sidebar-primary: var(--brand-primary-400);
   --sidebar-primary-foreground: oklch(0.16 0 0);
-  --sidebar-accent: oklch(0.21 0 0);
+  --sidebar-accent: oklch(0.27 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
+  --sidebar-border: oklch(1 0 0 / 12%);
   --sidebar-ring: var(--brand-primary-400);
 
   /* Dark mode shadows: much lower opacity, black barely reads on a dark
