@@ -20,7 +20,7 @@ export default async function DashboardLayout({
   return (
     <div className="flex h-screen">
       {/* Sidebar — permanent on desktop, hidden on mobile */}
-      <aside className="hidden w-64 border-r md:block">
+      <aside className="hidden w-64 border-r border-sidebar-border md:block">
         <Sidebar pagePermissions={pagePermissions} />
       </aside>
 

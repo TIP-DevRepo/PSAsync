@@ -24,8 +24,6 @@ export interface PagePermissions {
   purchaseOrders?: boolean
 }
 
-// permissionKey: null means always visible (no gate). Otherwise must match
-// a boolean field on the role's permissions.pages object.
 const navItems: { label: string; href: string; icon: typeof LayoutDashboard; permissionKey: keyof PagePermissions | null }[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, permissionKey: null },
   { label: "Clients", href: "/dashboard/clients", icon: Users, permissionKey: "clients" },
@@ -45,8 +43,9 @@ export function Sidebar({ pagePermissions = {} }: { pagePermissions?: PagePermis
   )
 
   return (
-    <nav className="flex flex-col gap-1 p-4">
-      <div className="mb-6 px-2">
+    <nav className="flex h-full flex-col gap-1 bg-sidebar p-4 text-sidebar-foreground">
+      <div className="mb-6 flex items-center gap-2 px-2">
+        <span className="h-2.5 w-2.5 rounded-sm bg-primary" />
         <span className="text-lg font-bold tracking-tight">PetaCore</span>
       </div>
       {visibleItems.map((item) => {
@@ -59,10 +58,10 @@ export function Sidebar({ pagePermissions = {} }: { pagePermissions?: PagePermis
             key={item.href}
             href={item.href}
             className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               isActive
-                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                ? "bg-sidebar-primary text-sidebar-primary-foreground"
+                : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
             )}
           >
             <Icon className="h-4 w-4" />
