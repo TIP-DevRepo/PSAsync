@@ -72,8 +72,6 @@ const settingsCategories: SettingsCategory[] = [
   },
 ]
 
-// Flat lookup so the right-hand panel and its title are easy to resolve
-// from whichever item key is currently selected
 const ITEM_LOOKUP = {} as Record<PanelKey, { label: string; category: string }>
 settingsCategories.forEach((cat) => {
   cat.items.forEach((item) => {
@@ -81,7 +79,6 @@ settingsCategories.forEach((cat) => {
   })
 })
 
-// Turns a category label into a safe id fragment for aria-controls/id pairing
 function categoryPanelId(label: string) {
   return `settings-accordion-panel-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
 }
@@ -108,7 +105,7 @@ function renderPanel(key: PanelKey | null) {
       return <MicrosoftSettingsPanel />
     default:
       return (
-        <p className="text-sm text-zinc-500">
+        <p className="text-sm text-muted-foreground">
           Select a setting from the left to get started.
         </p>
       )
@@ -117,7 +114,7 @@ function renderPanel(key: PanelKey | null) {
 
 export default function SettingsIndexPage() {
   return (
-    <Suspense fallback={<p className="text-sm text-zinc-500">Loading...</p>}>
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
       <SettingsPageContent />
     </Suspense>
   )
@@ -126,14 +123,9 @@ export default function SettingsIndexPage() {
 function SettingsPageContent() {
   const searchParams = useSearchParams()
 
-  // Start with the first category open and its first item selected, so the
-  // page never opens to a totally empty right-hand panel
   const [openCategory, setOpenCategory] = useState<string | null>(settingsCategories[0].label)
   const [selectedKey, setSelectedKey] = useState<PanelKey | null>(settingsCategories[0].items[0].key)
 
-  // Deliberately single-open: these are unrelated settings categories (not
-  // sequential steps or an FAQ), so only one is expanded at a time to keep
-  // the left panel scannable.
   function toggleCategory(label: string) {
     const btn = headerRefs.current[label]
     if (btn) {
@@ -142,8 +134,6 @@ function SettingsPageContent() {
     setOpenCategory((prev) => (prev === label ? null : label))
   }
 
-  // If a ?panel= param is present (e.g. redirected here from the Microsoft
-  // OAuth flow), open that panel's category and select it directly
   useEffect(() => {
     const panel = searchParams.get("panel") as PanelKey | null
     if (panel && ITEM_LOOKUP[panel]) {
@@ -153,9 +143,6 @@ function SettingsPageContent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  // Anchor the tapped header: when a category expands/collapses and shifts
-  // content below it, keep the header the user actually clicked pinned at
-  // the same viewport position instead of letting the page jump.
   const headerRefs = useRef<Record<string, HTMLButtonElement | null>>({})
   const scrollAnchor = useRef<{ label: string; top: number } | null>(null)
 
@@ -174,7 +161,7 @@ function SettingsPageContent() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Settings</h1>
+      <h1 className="text-display font-semibold tracking-tight text-foreground">Settings</h1>
 
       <div className="flex gap-6 items-start">
         {/* Left panel — accordion */}
@@ -183,7 +170,7 @@ function SettingsPageContent() {
             const isOpen = openCategory === category.label
             const panelId = categoryPanelId(category.label)
             return (
-              <div key={category.label} className="rounded-md border">
+              <div key={category.label} className="rounded-lg border border-border bg-card shadow-card overflow-hidden">
                 <button
                   ref={(el) => {
                     headerRefs.current[category.label] = el
@@ -191,11 +178,11 @@ function SettingsPageContent() {
                   onClick={() => toggleCategory(category.label)}
                   aria-expanded={isOpen}
                   aria-controls={panelId}
-                  className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium"
+                  className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-foreground hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset"
                 >
                   {category.label}
                   <ChevronDown
-                    className={cn("h-4 w-4 transition-transform duration-300 ease-out", isOpen && "rotate-180")}
+                    className={cn("h-4 w-4 text-muted-foreground transition-transform duration-300 ease-out", isOpen && "rotate-180 text-primary")}
                   />
                 </button>
 
@@ -207,7 +194,7 @@ function SettingsPageContent() {
                   style={{ gridTemplateRows: isOpen ? "1fr" : "0fr" }}
                 >
                   <div className="overflow-hidden">
-                    <div className="border-t px-4 py-2 flex flex-col gap-1">
+                    <div className="border-t border-border px-4 py-2 flex flex-col gap-1">
                       {category.items.map((item) => {
                         const ItemIcon = item.icon
                         const isSelected = selectedKey === item.key
@@ -216,10 +203,10 @@ function SettingsPageContent() {
                             key={item.key}
                             onClick={() => setSelectedKey(item.key)}
                             className={cn(
-                              "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-left",
+                              "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-left transition-colors",
                               isSelected
-                                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                                : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                                ? "bg-primary text-primary-foreground"
+                                : "text-muted-foreground hover:bg-surface-hover hover:text-foreground"
                             )}
                           >
                             <ItemIcon className="h-4 w-4" />
@@ -236,11 +223,11 @@ function SettingsPageContent() {
         </div>
 
         {/* Right panel — selected setting's content */}
-        <div className="flex-1 min-w-0 rounded-md border p-6">
+        <div className="flex-1 min-w-0 rounded-lg border border-border bg-card shadow-card p-6">
           {selected && (
             <div className="mb-4">
-              <p className="text-xs text-zinc-400">{selected.category}</p>
-              <h2 className="text-lg font-semibold">{selected.label}</h2>
+              <p className="text-caption text-muted-foreground uppercase tracking-wide">{selected.category}</p>
+              <h2 className="text-heading font-semibold text-foreground">{selected.label}</h2>
             </div>
           )}
           {renderPanel(selectedKey)}
