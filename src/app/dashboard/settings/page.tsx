@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, Suspense } from "react"
+import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -24,7 +24,7 @@ type PanelKey =
   | "notifications"
   | "distributors"
   | "microsoft"
-  
+
 interface SettingsItem {
   key: PanelKey
   label: string
@@ -81,6 +81,11 @@ settingsCategories.forEach((cat) => {
   })
 })
 
+// Turns a category label into a safe id fragment for aria-controls/id pairing
+function categoryPanelId(label: string) {
+  return `settings-accordion-panel-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`
+}
+
 function renderPanel(key: PanelKey | null) {
   switch (key) {
     case "company":
@@ -126,6 +131,17 @@ function SettingsPageContent() {
   const [openCategory, setOpenCategory] = useState<string | null>(settingsCategories[0].label)
   const [selectedKey, setSelectedKey] = useState<PanelKey | null>(settingsCategories[0].items[0].key)
 
+  // Deliberately single-open: these are unrelated settings categories (not
+  // sequential steps or an FAQ), so only one is expanded at a time to keep
+  // the left panel scannable.
+  function toggleCategory(label: string) {
+    const btn = headerRefs.current[label]
+    if (btn) {
+      scrollAnchor.current = { label, top: btn.getBoundingClientRect().top }
+    }
+    setOpenCategory((prev) => (prev === label ? null : label))
+  }
+
   // If a ?panel= param is present (e.g. redirected here from the Microsoft
   // OAuth flow), open that panel's category and select it directly
   useEffect(() => {
@@ -136,6 +152,23 @@ function SettingsPageContent() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  // Anchor the tapped header: when a category expands/collapses and shifts
+  // content below it, keep the header the user actually clicked pinned at
+  // the same viewport position instead of letting the page jump.
+  const headerRefs = useRef<Record<string, HTMLButtonElement | null>>({})
+  const scrollAnchor = useRef<{ label: string; top: number } | null>(null)
+
+  useLayoutEffect(() => {
+    if (!scrollAnchor.current) return
+    const { label, top } = scrollAnchor.current
+    const btn = headerRefs.current[label]
+    scrollAnchor.current = null
+    if (!btn) return
+    const newTop = btn.getBoundingClientRect().top
+    const delta = newTop - top
+    if (delta !== 0) window.scrollBy(0, delta)
+  }, [openCategory])
 
   const selected = selectedKey ? ITEM_LOOKUP[selectedKey] : null
 
@@ -148,41 +181,55 @@ function SettingsPageContent() {
         <div className="w-72 flex-shrink-0 space-y-2">
           {settingsCategories.map((category) => {
             const isOpen = openCategory === category.label
+            const panelId = categoryPanelId(category.label)
             return (
               <div key={category.label} className="rounded-md border">
                 <button
-                  onClick={() => setOpenCategory(isOpen ? null : category.label)}
+                  ref={(el) => {
+                    headerRefs.current[category.label] = el
+                  }}
+                  onClick={() => toggleCategory(category.label)}
+                  aria-expanded={isOpen}
+                  aria-controls={panelId}
                   className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium"
                 >
                   {category.label}
                   <ChevronDown
-                    className={cn("h-4 w-4 transition-transform", isOpen && "rotate-180")}
+                    className={cn("h-4 w-4 transition-transform duration-300 ease-out", isOpen && "rotate-180")}
                   />
                 </button>
 
-                {isOpen && (
-                  <div className="border-t px-4 py-2 flex flex-col gap-1">
-                    {category.items.map((item) => {
-                      const ItemIcon = item.icon
-                      const isSelected = selectedKey === item.key
-                      return (
-                        <button
-                          key={item.key}
-                          onClick={() => setSelectedKey(item.key)}
-                          className={cn(
-                            "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-left",
-                            isSelected
-                              ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
-                              : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
-                          )}
-                        >
-                          <ItemIcon className="h-4 w-4" />
-                          {item.label}
-                        </button>
-                      )
-                    })}
+                <div
+                  id={panelId}
+                  role="region"
+                  aria-hidden={!isOpen}
+                  className="grid transition-[grid-template-rows] duration-300 ease-out"
+                  style={{ gridTemplateRows: isOpen ? "1fr" : "0fr" }}
+                >
+                  <div className="overflow-hidden">
+                    <div className="border-t px-4 py-2 flex flex-col gap-1">
+                      {category.items.map((item) => {
+                        const ItemIcon = item.icon
+                        const isSelected = selectedKey === item.key
+                        return (
+                          <button
+                            key={item.key}
+                            onClick={() => setSelectedKey(item.key)}
+                            className={cn(
+                              "flex items-center gap-2 rounded-md px-2 py-2 text-sm text-left",
+                              isSelected
+                                ? "bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900"
+                                : "text-zinc-600 hover:bg-zinc-100 dark:text-zinc-400 dark:hover:bg-zinc-800"
+                            )}
+                          >
+                            <ItemIcon className="h-4 w-4" />
+                            {item.label}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
-                )}
+                </div>
               </div>
             )
           })}
