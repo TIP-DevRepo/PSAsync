@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
-import { toast } from "@heroui/react"
+import { toast } from "@/lib/toast"
 
 interface QuoteSettings {
   quotePrefix: string
@@ -53,14 +53,18 @@ export function QuoteSettingsPanel() {
   async function handleSave() {
     setSaving(true)
 
-    await fetch("/api/quote-settings", {
+    const res = await fetch("/api/quote-settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     })
 
     setSaving(false)
-    toast.success("Saved successfully.")
+    if (res.ok) {
+      toast.success("Quote settings saved")
+    } else {
+      toast.error("Couldn't save quote settings")
+    }
   }
 
   if (loading) {

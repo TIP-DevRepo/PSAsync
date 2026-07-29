@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 interface RolePermissions {
   pages: { clients: boolean; catalog: boolean; vendors: boolean; quotes: boolean; settings: boolean }
@@ -113,6 +114,7 @@ export function RolesPermissionsPanel() {
       setError(data.error || "Something went wrong.")
       return
     }
+    toast.success(`Role "${newRoleName.trim()}" created`)
     setNewRoleName("")
     setNewRoleRank("50")
     setShowNew(false)
@@ -134,6 +136,7 @@ export function RolesPermissionsPanel() {
       setError(data.error || "Something went wrong.")
       return
     }
+    toast.success("Role updated")
     loadRoles(draft.id)
   }
 
@@ -146,6 +149,7 @@ export function RolesPermissionsPanel() {
       setError(data.error || "Something went wrong.")
       return
     }
+    toast.success(`Role "${role.name}" deleted`)
     setSelectedId(null)
     loadRoles()
   }

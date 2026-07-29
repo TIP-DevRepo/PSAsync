@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 type TriggerType = "TOTAL_THRESHOLD" | "DISCOUNT_THRESHOLD" | "SPECIFIC_USER"
 
@@ -77,7 +78,7 @@ export function ApprovalWorkflowsPanel() {
   async function handleCreate() {
     if (!form.name.trim() || !form.requiredRoleId) return
     setSaving(true)
-    await fetch("/api/approval-workflows", {
+    const res = await fetch("/api/approval-workflows", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -89,6 +90,11 @@ export function ApprovalWorkflowsPanel() {
       }),
     })
     setSaving(false)
+    if (res.ok) {
+      toast.success(`Workflow "${form.name}" created`)
+    } else {
+      toast.error("Couldn't create workflow")
+    }
     setShowForm(false)
     setForm({
       name: "",
@@ -106,12 +112,14 @@ export function ApprovalWorkflowsPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ active: !w.active }),
     })
+    toast.success(w.active ? `"${w.name}" deactivated` : `"${w.name}" activated`)
     loadWorkflows()
   }
 
   async function handleDelete(id: string) {
     if (!confirm("Delete this approval workflow?")) return
     await fetch(`/api/approval-workflows/${id}`, { method: "DELETE" })
+    toast.success("Workflow deleted")
     loadWorkflows()
   }
 
