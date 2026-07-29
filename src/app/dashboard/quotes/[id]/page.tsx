@@ -12,6 +12,7 @@ import {
 } from "@/components/quotes/LineItemBuilder"
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface QuoteDetail {
@@ -277,7 +278,13 @@ export default function QuoteDetailPage({
   }
 
   async function handleDelete() {
-    if (!confirm("Delete this quote permanently? This can't be undone.")) return
+    const confirmed = await confirmDialog({
+      title: "Delete this quote permanently?",
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
     setDeleting(true)
     const res = await fetch(`/api/quotes/${id}`, { method: "DELETE" })
     if (res.ok) {

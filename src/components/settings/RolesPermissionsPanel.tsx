@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 
 interface RolePermissions {
   pages: { clients: boolean; catalog: boolean; vendors: boolean; quotes: boolean; settings: boolean }
@@ -141,7 +142,13 @@ export function RolesPermissionsPanel() {
   }
 
   async function handleDelete(role: Role) {
-    if (!confirm(`Delete the "${role.name}" role? This can't be undone.`)) return
+    const confirmed = await confirmDialog({
+      title: `Delete the "${role.name}" role?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
     setError("")
     const res = await fetch(`/api/roles/${role.id}`, { method: "DELETE" })
     const data = await res.json().catch(() => ({}))

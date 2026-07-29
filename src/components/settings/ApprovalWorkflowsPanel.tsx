@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 
 type TriggerType = "TOTAL_THRESHOLD" | "DISCOUNT_THRESHOLD" | "SPECIFIC_USER"
 
@@ -117,7 +118,12 @@ export function ApprovalWorkflowsPanel() {
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Delete this approval workflow?")) return
+    const confirmed = await confirmDialog({
+      title: "Delete this approval workflow?",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
     await fetch(`/api/approval-workflows/${id}`, { method: "DELETE" })
     toast.success("Workflow deleted")
     loadWorkflows()

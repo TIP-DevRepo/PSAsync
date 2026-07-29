@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy, Workflow, FileText, ExternalLink, Link2, History, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Quote {
@@ -462,7 +463,13 @@ function QuotesTab() {
     const count = selected.size
 
     if (bulkAction === "delete") {
-      if (!confirm(`Delete ${count} quote(s) permanently?`)) return
+      const confirmed = await confirmDialog({
+        title: `Delete ${count} quote${count === 1 ? "" : "s"}?`,
+        description: "This can't be undone.",
+        confirmLabel: "Delete",
+        variant: "danger",
+      })
+      if (!confirmed) return
       await Promise.all(
         Array.from(selected).map((id) => fetch(`/api/quotes/${id}`, { method: "DELETE" }))
       )
@@ -989,7 +996,13 @@ function QuoteActionsMenu({
   }
 
   async function handleDelete() {
-    if (!confirm("Delete this quote permanently?")) return
+    const confirmed = await confirmDialog({
+      title: "Delete this quote permanently?",
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
     const res = await fetch(`/api/quotes/${quote.id}`, { method: "DELETE" })
     if (res.ok) {
       toast.success("Quote deleted")

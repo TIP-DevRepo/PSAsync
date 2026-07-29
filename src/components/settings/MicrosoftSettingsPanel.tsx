@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 
 interface CredSettings {
   microsoftClientId: string
@@ -90,12 +91,17 @@ export function MicrosoftSettingsPanel() {
   async function handleToggleSso() {
     if (!settings) return
     const next = !settings.ssoEnabled
-    if (next && !confirm(
-      "Turning on SSO disables password login for EVERY user in your company immediately — " +
-      "they'll all sign in with Microsoft from now on. Anyone without a matching Microsoft " +
-      "account of the same email won't be able to log in. Continue?"
-    )) {
-      return
+    if (next) {
+      const confirmed = await confirmDialog({
+        title: "Turn on Single Sign-On?",
+        description:
+          "This disables password login for EVERY user in your company immediately — " +
+          "they'll all sign in with Microsoft from now on. Anyone without a matching Microsoft " +
+          "account of the same email won't be able to log in.",
+        confirmLabel: "Turn On SSO",
+        variant: "danger",
+      })
+      if (!confirmed) return
     }
     setTogglingSso(true)
     await fetch("/api/microsoft-settings", {
@@ -109,7 +115,13 @@ export function MicrosoftSettingsPanel() {
   }
 
   async function handleRemove(id: string) {
-    if (!confirm("Disconnect this mailbox? Anywhere it's currently selected (like Quote Settings) will need a new mailbox chosen.")) return
+    const confirmed = await confirmDialog({
+      title: "Disconnect this mailbox?",
+      description: "Anywhere it's currently selected (like Quote Settings) will need a new mailbox chosen.",
+      confirmLabel: "Disconnect",
+      variant: "danger",
+    })
+    if (!confirmed) return
     setRemovingId(id)
     await fetch(`/api/microsoft-connections/${id}`, { method: "DELETE" })
     setRemovingId(null)

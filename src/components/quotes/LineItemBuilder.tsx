@@ -6,6 +6,7 @@ import { Tooltip } from "@heroui/react"
 import { Repeat, ToggleRight, SlidersHorizontal, GitBranch, Package, AlignLeft, GripVertical, ImageOff, Check, AlertTriangle } from "lucide-react"
 import { useFixedMenuPosition, useCloseOnOutsideClick, useCloseOnScroll } from "@/lib/useFixedMenu"
 import { Modal } from "@/components/Modal"
+import { confirmDialog } from "@/lib/confirm-dialog"
 import {
   DndContext,
   DragOverlay,
@@ -505,7 +506,12 @@ export function LineItemBuilder({
   }
 
   async function handleDelete(id: string) {
-    if (!confirm("Remove this line item?")) return
+    const confirmed = await confirmDialog({
+      title: "Remove this line item?",
+      confirmLabel: "Remove",
+      variant: "danger",
+    })
+    if (!confirmed) return
     await onDelete(id)
   }
 

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 
 type DistributorKey = "INGRAM_MICRO" | "TD_SYNNEX" | "DH" | "AMAZON_BUSINESS"
 type Environment = "SANDBOX" | "PRODUCTION"
@@ -165,11 +166,14 @@ export function DistributorSettingsPanel() {
     const current = settings[key].activeEnvironment
 
     if (current === "PRODUCTION" && targetEnv === "SANDBOX") {
-      const confirmed = window.confirm(
-        `Switch ${DISTRIBUTOR_META[key].label} from Production to Sandbox?\n\n` +
-          `This distributor will stop returning real pricing/availability and start using sandbox (test) data everywhere it's used — quote builder searches, price lookups, everything.\n\n` +
-          `Continue?`
-      )
+      const confirmed = await confirmDialog({
+        title: `Switch ${DISTRIBUTOR_META[key].label} from Production to Sandbox?`,
+        description:
+          "This distributor will stop returning real pricing/availability and start using " +
+          "sandbox (test) data everywhere it's used — quote builder searches, price lookups, everything.",
+        confirmLabel: "Switch to Sandbox",
+        variant: "danger",
+      })
       if (!confirmed) return
     }
 
