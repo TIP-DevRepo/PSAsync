@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 interface POLineItem {
   id: string
@@ -93,6 +94,7 @@ export default function PurchaseOrderDetailPage({
       body: JSON.stringify({ status: newStatus }),
     })
     setChangingStatus(false)
+    toast.success(`Status updated to ${statusLabel(newStatus)}`)
     loadPO()
   }
 

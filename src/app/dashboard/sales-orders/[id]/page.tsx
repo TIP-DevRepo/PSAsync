@@ -5,6 +5,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/Modal"
+import { toast } from "@/lib/toast"
 
 interface SOLineItem {
   id: string
@@ -139,6 +140,7 @@ export default function SalesOrderDetailPage({
       body: JSON.stringify({ status: newStatus }),
     })
     setChangingStatus(false)
+    toast.success(`Status updated to ${statusLabel(newStatus)}`)
     loadSO()
   }
 
@@ -418,6 +420,7 @@ function GeneratePOModal({
       return
     }
 
+    toast.success(`Purchase Order ${data.poNumber ?? ""} created`.trim())
     onCreated(data.id)
   }
 
