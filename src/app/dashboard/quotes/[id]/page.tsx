@@ -11,6 +11,7 @@ import {
   type RecurringInterval,
 } from "@/components/quotes/LineItemBuilder"
 import { Modal } from "@/components/Modal"
+import { toast } from "@/lib/toast"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface QuoteDetail {
@@ -210,6 +211,7 @@ export default function QuoteDetailPage({
     setSending(true)
     await fetch(`/api/quotes/${id}/send`, { method: "POST" })
     setSending(false)
+    toast.success("Quote marked as sent")
     loadQuote()
     loadVersions()
     loadApprovals()
@@ -219,6 +221,7 @@ export default function QuoteDetailPage({
     setDecidingId(approvalId)
     await fetch(`/api/quotes/${id}/approvals/${approvalId}/approve`, { method: "POST" })
     setDecidingId(null)
+    toast.success("Approval granted")
     loadQuote()
     loadVersions()
     loadApprovals()
@@ -233,6 +236,7 @@ export default function QuoteDetailPage({
       body: JSON.stringify({ reason }),
     })
     setDecidingId(null)
+    toast.info("Approval rejected")
     loadQuote()
     loadApprovals()
   }
@@ -241,6 +245,7 @@ export default function QuoteDetailPage({
     setReactivatingId(versionId)
     await fetch(`/api/quotes/${versionId}/reactivate`, { method: "POST" })
     setReactivatingId(null)
+    toast.success("Version reactivated")
     loadVersions()
     if (versionId === id) loadQuote()
   }
@@ -280,7 +285,7 @@ export default function QuoteDetailPage({
       return
     }
     const data = await res.json().catch(() => ({}))
-    alert(data.error || "Couldn't delete this quote.")
+    toast.error("Couldn't delete this quote", data.error)
     setDeleting(false)
   }
 
@@ -292,6 +297,7 @@ export default function QuoteDetailPage({
       body: JSON.stringify({ status: newStatus }),
     })
     setChangingStatus(false)
+    toast.success(`Status updated to ${statusLabel(newStatus)}`)
     loadQuote()
     loadVersions()
   }
@@ -923,6 +929,7 @@ function SendQuoteModal({
       return
     }
 
+    toast.success("Quote sent")
     onSent()
   }
 
