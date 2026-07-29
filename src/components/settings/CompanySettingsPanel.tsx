@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 interface CompanyData {
   name: string
@@ -20,7 +21,6 @@ export function CompanySettingsPanel() {
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
-  const [message, setMessage] = useState("")
 
   useEffect(() => {
     fetch("/api/company-settings")
@@ -33,7 +33,6 @@ export function CompanySettingsPanel() {
 
   async function handleSave() {
     setSaving(true)
-    setMessage("")
 
     if (logoFile) {
       const formData = new FormData()
@@ -42,11 +41,16 @@ export function CompanySettingsPanel() {
         method: "POST",
         body: formData,
       })
+      if (!res.ok) {
+        setSaving(false)
+        toast.error("Couldn't upload logo")
+        return
+      }
       const json = await res.json()
       data.logoUrl = json.logoUrl
     }
 
-    await fetch("/api/company-settings", {
+    const res = await fetch("/api/company-settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -57,7 +61,11 @@ export function CompanySettingsPanel() {
     })
 
     setSaving(false)
-    setMessage("Saved successfully.")
+    if (res.ok) {
+      toast.success("Company settings saved")
+    } else {
+      toast.error("Couldn't save company settings")
+    }
   }
 
   if (loading) {
@@ -116,8 +124,6 @@ export function CompanySettingsPanel() {
       <Button onClick={handleSave} disabled={saving}>
         {saving ? "Saving..." : "Save Changes"}
       </Button>
-
-      {message && <p className="text-sm text-green-600">{message}</p>}
     </div>
   )
 }

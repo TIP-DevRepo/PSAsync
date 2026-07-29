@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 interface NotificationSettings {
   emailDefaultCc: string
@@ -15,7 +16,6 @@ export function NotificationSettingsPanel() {
   })
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState("")
 
   useEffect(() => {
     fetch("/api/notification-settings")
@@ -32,16 +32,19 @@ export function NotificationSettingsPanel() {
 
   async function handleSave() {
     setSaving(true)
-    setMessage("")
 
-    await fetch("/api/notification-settings", {
+    const res = await fetch("/api/notification-settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     })
 
     setSaving(false)
-    setMessage("Saved successfully.")
+    if (res.ok) {
+      toast.success("Notification settings saved")
+    } else {
+      toast.error("Couldn't save notification settings")
+    }
   }
 
   if (loading) {
@@ -85,8 +88,6 @@ export function NotificationSettingsPanel() {
       <Button onClick={handleSave} disabled={saving}>
         {saving ? "Saving..." : "Save Changes"}
       </Button>
-
-      {message && <p className="text-sm text-green-600">{message}</p>}
     </div>
   )
 }

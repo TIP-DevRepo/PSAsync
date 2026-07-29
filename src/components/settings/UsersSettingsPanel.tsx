@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 interface RoleOption {
   id: string
@@ -23,7 +24,6 @@ export function UsersSettingsPanel() {
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
   const [newUser, setNewUser] = useState({ name: "", email: "", roleId: "", tempPassword: "" })
-  const [message, setMessage] = useState("")
 
   function loadUsers() {
     fetch("/api/users")
@@ -47,7 +47,6 @@ export function UsersSettingsPanel() {
   }, [])
 
   async function handleInvite() {
-    setMessage("")
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -56,21 +55,31 @@ export function UsersSettingsPanel() {
 
     if (!res.ok) {
       const err = await res.json()
-      setMessage(err.error ?? "Something went wrong")
+      toast.error("Couldn't invite user", err.error)
       return
     }
 
+    toast.success(`Invited ${newUser.name || newUser.email}`)
     setNewUser({ name: "", email: "", roleId: roles[0]?.id ?? "", tempPassword: "" })
     setShowInvite(false)
     loadUsers()
   }
 
   async function updateUser(id: string, changes: { roleId?: string; active?: boolean }) {
-    await fetch(`/api/users/${id}`, {
+    const res = await fetch(`/api/users/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(changes),
     })
+    if (res.ok) {
+      if (changes.active !== undefined) {
+        toast.success(changes.active ? "User activated" : "User deactivated")
+      } else if (changes.roleId !== undefined) {
+        toast.success("Role updated")
+      }
+    } else {
+      toast.error("Couldn't update user")
+    }
     loadUsers()
   }
 
@@ -136,7 +145,6 @@ export function UsersSettingsPanel() {
             />
           </div>
           <Button onClick={handleInvite}>Create User</Button>
-          {message && <p className="text-sm text-red-600">{message}</p>}
         </div>
       )}
 
