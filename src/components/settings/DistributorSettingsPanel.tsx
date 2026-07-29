@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 type DistributorKey = "INGRAM_MICRO" | "TD_SYNNEX" | "DH" | "AMAZON_BUSINESS"
 type Environment = "SANDBOX" | "PRODUCTION"
@@ -113,14 +114,14 @@ export function DistributorSettingsPanel() {
     })
   }
 
-  async function handleSave(key: DistributorKey) {
+  async function handleSave(key: DistributorKey, silent = false) {
     if (!settings) return
     setSavingKey(key)
 
     const s = settings[key]
     const env = viewingEnv[key]
 
-    await fetch(`/api/distributor-settings/${key}`, {
+    const res = await fetch(`/api/distributor-settings/${key}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -135,10 +136,17 @@ export function DistributorSettingsPanel() {
     })
 
     setSavingKey(null)
+    if (!silent) {
+      if (res.ok) {
+        toast.success(`${DISTRIBUTOR_META[key].label} settings saved`)
+      } else {
+        toast.error(`Couldn't save ${DISTRIBUTOR_META[key].label} settings`)
+      }
+    }
   }
 
   async function handleTest(key: DistributorKey) {
-    await handleSave(key)
+    await handleSave(key, true)
 
     setTestingKey(key)
     const env = viewingEnv[key]
@@ -175,6 +183,7 @@ export function DistributorSettingsPanel() {
       }),
     })
 
+    toast.success(`${DISTRIBUTOR_META[key].label} is now active on ${targetEnv === "PRODUCTION" ? "Production" : "Sandbox"}`)
     update(key, "activeEnvironment", targetEnv)
   }
 

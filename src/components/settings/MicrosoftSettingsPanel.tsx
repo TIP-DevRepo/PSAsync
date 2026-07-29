@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 interface CredSettings {
   microsoftClientId: string
@@ -71,12 +72,17 @@ export function MicrosoftSettingsPanel() {
 
   async function handleSaveCredentials() {
     setSaving(true)
-    await fetch("/api/microsoft-settings", {
+    const res = await fetch("/api/microsoft-settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(form),
     })
     setSaving(false)
+    if (res.ok) {
+      toast.success("Azure credentials saved")
+    } else {
+      toast.error("Couldn't save credentials")
+    }
     setForm((prev) => ({ ...prev, microsoftClientSecret: "" }))
     loadCredentials()
   }
@@ -98,6 +104,7 @@ export function MicrosoftSettingsPanel() {
       body: JSON.stringify({ ssoEnabled: next }),
     })
     setTogglingSso(false)
+    toast.success(next ? "SSO turned on" : "SSO turned off")
     loadCredentials()
   }
 
@@ -106,11 +113,13 @@ export function MicrosoftSettingsPanel() {
     setRemovingId(id)
     await fetch(`/api/microsoft-connections/${id}`, { method: "DELETE" })
     setRemovingId(null)
+    toast.success("Mailbox disconnected")
     loadConnections()
   }
 
   function copyRedirectUri() {
     navigator.clipboard.writeText(redirectUri)
+    toast.success("Copied to clipboard")
   }
 
   function startConnect() {
