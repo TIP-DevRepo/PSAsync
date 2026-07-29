@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 interface CatalogItemDetail {
   id: string
@@ -27,7 +28,6 @@ export default function CatalogItemDetailPage() {
   const [item, setItem] = useState<CatalogItemDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState("")
 
   useEffect(() => {
     fetch(`/api/catalog/${id}`)
@@ -45,16 +45,19 @@ export default function CatalogItemDetailPage() {
   async function handleSave() {
     if (!item) return
     setSaving(true)
-    setMessage("")
 
-    await fetch(`/api/catalog/${id}`, {
+    const res = await fetch(`/api/catalog/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(item),
     })
 
     setSaving(false)
-    setMessage("Saved successfully.")
+    if (res.ok) {
+      toast.success("Item saved")
+    } else {
+      toast.error("Couldn't save item")
+    }
   }
 
   if (loading) {
@@ -196,8 +199,6 @@ export default function CatalogItemDetailPage() {
       <Button onClick={handleSave} disabled={saving}>
         {saving ? "Saving..." : "Save Changes"}
       </Button>
-
-      {message && <p className="text-sm text-green-600">{message}</p>}
     </div>
   )
 }

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 interface Contact {
   id: string
@@ -68,11 +69,16 @@ export default function ClientDetailPage() {
   }, [id])
 
   async function handleAddContact() {
-    await fetch(`/api/clients/${id}/contacts`, {
+    const res = await fetch(`/api/clients/${id}/contacts`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(newContact),
     })
+    if (res.ok) {
+      toast.success("Contact added")
+    } else {
+      toast.error("Couldn't add contact")
+    }
     setNewContact({ firstName: "", lastName: "", title: "", email: "", phone: "", isPrimary: false })
     setShowAddContact(false)
     loadClient()
