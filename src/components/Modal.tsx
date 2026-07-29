@@ -42,7 +42,7 @@ export function Modal({ children, maxWidth = "md", scrollable = false, onClose }
       <HeroModal.Backdrop isDismissable={!!onClose} isKeyboardDismissDisabled={!onClose}>
         <HeroModal.Container placement="center">
           <HeroModal.Dialog
-            className={`bg-white dark:bg-zinc-900 rounded-md p-6 w-full ${MAX_WIDTH_CLASSES[maxWidth]} space-y-4 ${
+            className={`bg-popover text-popover-foreground border border-border rounded-lg shadow-popover p-6 w-full ${MAX_WIDTH_CLASSES[maxWidth]} space-y-4 ${
               scrollable ? "max-h-[90vh] overflow-y-auto" : ""
             }`}
           >
