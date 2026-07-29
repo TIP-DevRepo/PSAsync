@@ -4,6 +4,7 @@ import "./globals.css";
 import { CompanyThemeProvider } from "@/components/CompanyThemeProvider"
 import { AppToastProvider } from "@/components/ToastProvider"
 import { ConfirmDialogProvider } from "@/components/ConfirmDialogProvider"
+import { PromptDialogProvider } from "@/components/PromptDialogProvider"
 import { ThemeProvider } from "next-themes"
 
 const geistSans = Geist({
@@ -37,6 +38,7 @@ export default function RootLayout({
           <CompanyThemeProvider />
           <AppToastProvider />
           <ConfirmDialogProvider />
+          <PromptDialogProvider />
           {children}
         </ThemeProvider>
       </body>

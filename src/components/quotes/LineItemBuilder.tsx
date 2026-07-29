@@ -7,6 +7,7 @@ import { Repeat, ToggleRight, SlidersHorizontal, GitBranch, Package, AlignLeft, 
 import { useFixedMenuPosition, useCloseOnOutsideClick, useCloseOnScroll } from "@/lib/useFixedMenu"
 import { Modal } from "@/components/Modal"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { promptDialog } from "@/lib/prompt-dialog"
 import {
   DndContext,
   DragOverlay,
@@ -476,16 +477,22 @@ export function LineItemBuilder({
   }
 
   async function handleAddChoiceGroup(section: string | null) {
-    const groupName = window.prompt('Name this choice group (e.g. "Support Tier"):')
-    if (!groupName || !groupName.trim()) return
+    const groupName = await promptDialog({
+      title: "Name this choice group",
+      placeholder: 'e.g. "Support Tier"',
+    })
+    if (!groupName) return
     const name = groupName.trim()
     await onCreate(section, { name: "Option 1", isOptional: true, choiceGroup: name })
     await onCreate(section, { name: "Option 2", isOptional: true, choiceGroup: name })
   }
 
   async function handleAddBundle(section: string | null) {
-    const bundleName = window.prompt('Name this bundle (e.g. "Starter Kit"):')
-    if (!bundleName || !bundleName.trim()) return
+    const bundleName = await promptDialog({
+      title: "Name this bundle",
+      placeholder: 'e.g. "Starter Kit"',
+    })
+    if (!bundleName) return
     const name = bundleName.trim()
     await onCreate(section, { name, bundleName: name, isBundleHeader: true })
   }
@@ -1102,10 +1109,10 @@ export function LineItemBuilder({
                                     <label className="block text-zinc-500 mb-1">Choice group</label>
                                     <select
                                       value={li.choiceGroup ?? ""}
-                                      onChange={(e) => {
+                                      onChange={async (e) => {
                                         if (e.target.value === "__new__") {
-                                          const name = window.prompt("New choice group name:")
-                                          if (name && name.trim()) {
+                                          const name = await promptDialog({ title: "New choice group name" })
+                                          if (name) {
                                             onUpdate(li.id, { choiceGroup: name.trim() })
                                           }
                                         } else {
