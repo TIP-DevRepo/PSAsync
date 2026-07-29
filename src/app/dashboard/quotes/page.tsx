@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy, Workflow, FileText, ExternalLink, Link2, History, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { Modal } from "@/components/Modal"
+import { toast } from "@/lib/toast"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Quote {
@@ -458,12 +459,14 @@ function QuotesTab() {
 
   async function handleBulkSubmit() {
     if (!bulkAction || selected.size === 0) return
+    const count = selected.size
 
     if (bulkAction === "delete") {
-      if (!confirm(`Delete ${selected.size} quote(s) permanently?`)) return
+      if (!confirm(`Delete ${count} quote(s) permanently?`)) return
       await Promise.all(
         Array.from(selected).map((id) => fetch(`/api/quotes/${id}`, { method: "DELETE" }))
       )
+      toast.success(`Deleted ${count} quote${count === 1 ? "" : "s"}`)
     } else if (bulkAction === "mark_lost") {
       await Promise.all(
         Array.from(selected).map((id) =>
@@ -474,6 +477,7 @@ function QuotesTab() {
           })
         )
       )
+      toast.success(`Marked ${count} quote${count === 1 ? "" : "s"} as Lost`)
     } else if (bulkAction === "mark_expired") {
       await Promise.all(
         Array.from(selected).map((id) =>
@@ -484,6 +488,7 @@ function QuotesTab() {
           })
         )
       )
+      toast.success(`Marked ${count} quote${count === 1 ? "" : "s"} as Expired`)
     }
 
     setSelected(new Set())
@@ -987,10 +992,11 @@ function QuoteActionsMenu({
     if (!confirm("Delete this quote permanently?")) return
     const res = await fetch(`/api/quotes/${quote.id}`, { method: "DELETE" })
     if (res.ok) {
+      toast.success("Quote deleted")
       onDeleted()
     } else {
       const data = await res.json().catch(() => ({}))
-      alert(data.error || "Couldn't delete this quote.")
+      toast.error("Couldn't delete this quote", data.error)
     }
     setOpen(false)
   }
