@@ -1,6 +1,7 @@
 "use client"
 
 import Link from "next/link"
+import Image from "next/image"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
 import {
@@ -44,10 +45,14 @@ export function Sidebar({ pagePermissions = {} }: { pagePermissions?: PagePermis
 
   return (
     <nav className="flex h-full flex-col gap-1 bg-sidebar p-4 text-sidebar-foreground">
-      <div className="mb-6 flex items-center gap-2 px-2">
-        <span className="h-2.5 w-2.5 rounded-sm bg-primary" />
+      <Link
+        href="/dashboard/updates"
+        className="mb-6 flex items-center gap-2 px-2 rounded-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        title="Features & Updates"
+      >
+        <Image src="/icon.png" alt="" width={20} height={20} className="rounded-sm" />
         <span className="text-lg font-bold tracking-tight">PetaCore</span>
-      </div>
+      </Link>
       {visibleItems.map((item) => {
         const isActive = item.href === "/dashboard/settings"
           ? pathname.startsWith("/dashboard/settings")
