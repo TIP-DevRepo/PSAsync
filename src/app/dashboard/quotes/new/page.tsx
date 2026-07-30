@@ -54,6 +54,7 @@ function NewQuoteForm() {
     internalNotes: "",
     expiresAt: addDaysIso(30),
     shipAddress: "",
+    shipAddress2: "",
     shipCity: "",
     shipState: "",
     shipZip: "",
@@ -90,17 +91,19 @@ function NewQuoteForm() {
 
   function handleContactSelect(contact: ContactSearchResult) {
     setSelectedContact(contact)
-    // Autofill shipping address from the client's saved default — stays
-    // independently editable from this point on, doesn't write back to
-    // the client's record
-    const c = contact.client
+    // Autofill shipping address from the client's main shipping location,
+    // falling back to their main billing location if no shipping location
+    // is set. Stays independently editable from this point on — doesn't
+    // write back to the client's record.
+    const loc = contact.client.mainShippingLocation ?? contact.client.mainBillingLocation
     setForm((prev) => ({
       ...prev,
-      shipAddress: c.shipAddress ?? c.billAddress ?? "",
-      shipCity: c.shipCity ?? c.billCity ?? "",
-      shipState: c.shipState ?? c.billState ?? "",
-      shipZip: c.shipZip ?? c.billZip ?? "",
-      shipCountry: c.shipCountry ?? c.billCountry ?? "",
+      shipAddress: loc?.address ?? "",
+      shipAddress2: loc?.address2 ?? "",
+      shipCity: loc?.city ?? "",
+      shipState: loc?.state ?? "",
+      shipZip: loc?.zip ?? "",
+      shipCountry: loc?.country ?? "",
     }))
   }
 
@@ -252,6 +255,15 @@ function NewQuoteForm() {
                 className="w-full rounded-md border px-3 py-2 text-sm"
               />
             </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Suite, Apt, Unit (optional)</label>
+              <input
+                type="text"
+                value={form.shipAddress2}
+                onChange={(e) => update("shipAddress2", e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm"
+              />
+            </div>
             <div className="grid grid-cols-3 gap-3">
               <div>
                 <label className="block text-sm font-medium mb-1">City</label>
@@ -280,6 +292,15 @@ function NewQuoteForm() {
                   className="w-full rounded-md border px-3 py-2 text-sm"
                 />
               </div>
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Country</label>
+              <input
+                type="text"
+                value={form.shipCountry}
+                onChange={(e) => update("shipCountry", e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm"
+              />
             </div>
           </div>
         </div>

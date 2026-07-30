@@ -193,6 +193,7 @@ export async function POST(req: NextRequest) {
       terms: body.terms || templateTerms || settings?.quoteTerms || null,
       internalNotes: body.internalNotes || null,
       shipAddress: body.shipAddress || null,
+      shipAddress2: body.shipAddress2 || null,
       shipCity: body.shipCity || null,
       shipState: body.shipState || null,
       shipZip: body.shipZip || null,

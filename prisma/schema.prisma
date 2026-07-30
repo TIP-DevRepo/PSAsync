@@ -340,6 +340,7 @@ model Quote {
   internalNotes       String?        @db.Text
   clientPoNumber      String?
   shipAddress         String?
+  shipAddress2        String?
   shipCity            String?
   shipState           String?
   shipZip             String?

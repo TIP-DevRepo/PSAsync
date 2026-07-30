@@ -33,10 +33,10 @@ export async function GET(req: NextRequest) {
           email: true,
           phone: true,
           mainBillingLocation: {
-            select: { name: true, address: true, city: true, state: true, zip: true },
+            select: { name: true, address: true, address2: true, city: true, state: true, zip: true, country: true },
           },
           mainShippingLocation: {
-            select: { name: true, address: true, city: true, state: true, zip: true },
+            select: { name: true, address: true, address2: true, city: true, state: true, zip: true, country: true },
           },
         },
       },

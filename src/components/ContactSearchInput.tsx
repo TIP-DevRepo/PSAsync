@@ -14,16 +14,24 @@ export interface ContactSearchResult {
     name: string
     email: string | null
     phone: string | null
-    billAddress: string | null
-    billCity: string | null
-    billState: string | null
-    billZip: string | null
-    billCountry: string | null
-    shipAddress: string | null
-    shipCity: string | null
-    shipState: string | null
-    shipZip: string | null
-    shipCountry: string | null
+    mainBillingLocation: {
+      name: string
+      address: string | null
+      address2: string | null
+      city: string | null
+      state: string | null
+      zip: string | null
+      country: string | null
+    } | null
+    mainShippingLocation: {
+      name: string
+      address: string | null
+      address2: string | null
+      city: string | null
+      state: string | null
+      zip: string | null
+      country: string | null
+    } | null
   }
 }
 
