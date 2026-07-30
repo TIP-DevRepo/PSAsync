@@ -128,6 +128,7 @@ export async function POST(req: NextRequest) {
     isBundleHeader: boolean
   }[] = []
   let templateTerms: string | null = null
+  let templateSections: string[] = []
 
   if (body.templateId) {
     const template = await prisma.quoteTemplate.findUnique({
@@ -137,6 +138,7 @@ export async function POST(req: NextRequest) {
 
     if (template) {
       templateTerms = template.terms
+      templateSections = template.sections
       templateLineItems = template.lineItems.map((tli) => ({
         catalogItemId: tli.catalogItemId,
         section: tli.section,
@@ -196,6 +198,7 @@ export async function POST(req: NextRequest) {
       shipZip: body.shipZip || null,
       shipCountry: body.shipCountry || null,
       expiresAt,
+      sections: templateSections,
       lineItems: {
         create: templateLineItems,
       },

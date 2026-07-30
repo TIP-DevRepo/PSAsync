@@ -31,6 +31,7 @@ interface QuoteDetail {
   internalAccessToken: string
   version: number
   isActive: boolean
+  sections: string[]
   client: { id: string; name: string; email: string | null }
   contact: { id: string; firstName: string; lastName: string; email: string | null } | null
   user: { id: string; name: string }
@@ -397,6 +398,24 @@ export default function QuoteDetailPage({
     loadQuote()
   }
 
+  async function handleAddSection(name: string) {
+    await fetch(`/api/quotes/${id}/sections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+    loadQuote()
+  }
+
+  async function handleRemoveSection(name: string) {
+    await fetch(`/api/quotes/${id}/sections`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+    loadQuote()
+  }
+
   async function moveItem(section: string | null, itemId: string, direction: "up" | "down") {
     if (!quote) return
     const group = quote.lineItems
@@ -692,6 +711,9 @@ export default function QuoteDetailPage({
               items={quote.lineItems}
               catalog={catalog}
               locked={isLocked}
+              persistedSections={quote.sections}
+              onAddSection={handleAddSection}
+              onRemoveSection={handleRemoveSection}
               onCreate={createLineItem}
               onUpdate={updateLineItem}
               onDelete={deleteLineItem}

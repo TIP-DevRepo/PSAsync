@@ -421,6 +421,9 @@ interface LineItemBuilderProps {
   items: LineItemBuilderItem[]
   catalog: CatalogOption[]
   locked?: boolean
+  persistedSections: string[]
+  onAddSection: (name: string) => void | Promise<void>
+  onRemoveSection?: (name: string) => void | Promise<void>
   onCreate: (section: string | null, payload: Partial<LineItemBuilderItem>) => void | Promise<void>
   onUpdate: (id: string, patch: Partial<LineItemBuilderItem>) => void | Promise<void>
   onDelete: (id: string) => void | Promise<void>
@@ -432,13 +435,15 @@ export function LineItemBuilder({
   items,
   catalog,
   locked = false,
+  persistedSections,
+  onAddSection,
+  onRemoveSection,
   onCreate,
   onUpdate,
   onDelete,
   onMove,
   onDuplicate,
 }: LineItemBuilderProps) {
-  const [pendingSections, setPendingSections] = useState<string[]>([])
   const [addModalSection, setAddModalSection] = useState<string | null>(null)
   const [addToBundleName, setAddToBundleName] = useState<string | null>(null)
   const [newSectionName, setNewSectionName] = useState("")
@@ -714,7 +719,13 @@ export function LineItemBuilder({
       const key = li.section ?? NO_SECTION
       if (!realSections.includes(key)) realSections.push(key)
     })
-  const sectionKeys = [...realSections, ...pendingSections].filter(
+  // persistedSections is the explicit, stable order — it only changes
+  // when a section is actually added/removed, never as a side effect of
+  // adding a line item. realSections (derived from item positions) is
+  // appended after purely as a fallback for older sections that exist
+  // only because a line item references them, not because they were ever
+  // added through "+ Add Section."
+  const sectionKeys = [...persistedSections, ...realSections].filter(
     (v, i, arr) => arr.indexOf(v) === i
   )
   if (sectionKeys.length === 0) sectionKeys.push(NO_SECTION)
@@ -791,6 +802,16 @@ export function LineItemBuilder({
                   <Button size="sm" variant="outline" onClick={() => handleAddTextBlock(sectionValue)}>
                     + Text Block
                   </Button>
+                  {sectionKey !== NO_SECTION && sectionItems.length === 0 && onRemoveSection && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => onRemoveSection(sectionKey)}
+                      className="text-red-500 hover:text-red-700"
+                    >
+                      Remove Section
+                    </Button>
+                  )}
                 </div>
               </div>
 
@@ -1269,10 +1290,10 @@ export function LineItemBuilder({
           />
           <Button
             variant="outline"
-            onClick={() => {
+            onClick={async () => {
               const name = newSectionName.trim()
               if (!name) return
-              setPendingSections((prev) => (prev.includes(name) ? prev : [...prev, name]))
+              await onAddSection(name)
               setNewSectionName("")
             }}
           >

@@ -17,6 +17,7 @@ interface TemplateDetail {
   terms: string | null
   expiryDays: number
   active: boolean
+  sections: string[]
   lineItems: LineItemBuilderItem[]
 }
 
@@ -155,6 +156,26 @@ export default function TemplateDetailPage({
     loadTemplate(id)
   }
 
+  async function handleAddSection(name: string) {
+    if (!id) return
+    await fetch(`/api/quote-templates/${id}/sections`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+    loadTemplate(id)
+  }
+
+  async function handleRemoveSection(name: string) {
+    if (!id) return
+    await fetch(`/api/quote-templates/${id}/sections`, {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+    loadTemplate(id)
+  }
+
   async function moveItem(section: string | null, itemId: string, direction: "up" | "down") {
     if (!id || !template) return
     const group = template.lineItems
@@ -280,6 +301,9 @@ export default function TemplateDetailPage({
           items={template.lineItems}
           catalog={catalog}
           locked={false}
+          persistedSections={template.sections}
+          onAddSection={handleAddSection}
+          onRemoveSection={handleRemoveSection}
           onCreate={createLineItem}
           onUpdate={updateLineItem}
           onDelete={deleteLineItem}

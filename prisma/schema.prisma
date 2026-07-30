@@ -363,6 +363,7 @@ model Quote {
   taxRate             Float          @default(0)
   pendingEmailPayload Json?
   flagged             Boolean        @default(false)
+  sections            String[]       @default([])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -565,6 +566,7 @@ model QuoteTemplate {
   terms       String?  @db.Text
   expiryDays  Int      @default(30)
   active      Boolean  @default(true)
+  sections    String[] @default([])
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
