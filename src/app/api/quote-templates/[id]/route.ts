@@ -49,6 +49,7 @@ export async function PATCH(
   if (body.description !== undefined) data.description = body.description || null
   if (body.introText !== undefined) data.introText = body.introText || null
   if (body.terms !== undefined) data.terms = body.terms || null
+  if (body.useDefaultTerms !== undefined) data.useDefaultTerms = Boolean(body.useDefaultTerms)
   if (body.expiryDays !== undefined) data.expiryDays = Number(body.expiryDays) || 30
   if (body.active !== undefined) data.active = Boolean(body.active)
 

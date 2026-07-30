@@ -80,6 +80,8 @@ export async function PATCH(
 
   if (body.title !== undefined) data.title = body.title || null
   if (body.introText !== undefined) data.introText = body.introText || null
+  if (body.terms !== undefined) data.terms = body.terms || null
+  if (body.useDefaultTerms !== undefined) data.useDefaultTerms = !!body.useDefaultTerms
   if (body.expiresAt !== undefined) data.expiresAt = body.expiresAt ? new Date(body.expiresAt) : null
 
   const updated = await prisma.quote.update({ where: { id }, data })

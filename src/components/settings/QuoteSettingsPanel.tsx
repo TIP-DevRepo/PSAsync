@@ -3,6 +3,8 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { RichTextEditor } from "@/components/ui/rich-text-editor"
+import { CollapsibleField } from "@/components/ui/collapsible-field"
 
 interface QuoteSettings {
   quotePrefix: string
@@ -100,16 +102,12 @@ export function QuoteSettingsPanel() {
           </p>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Default Terms & Conditions</label>
-          <textarea
-            value={settings.quoteTerms}
-            onChange={(e) => update("quoteTerms", e.target.value)}
-            rows={5}
-            className="w-full rounded-md border px-3 py-2 text-sm"
-            placeholder="This text will appear at the bottom of every quote by default."
-          />
-        </div>
+        <CollapsibleField label="Default Terms & Conditions">
+          <p className="text-xs text-muted-foreground mb-2">
+            This text will appear at the bottom of every quote by default.
+          </p>
+          <RichTextEditor value={settings.quoteTerms} onChange={(html) => update("quoteTerms", html)} />
+        </CollapsibleField>
 
         <div>
           <label className="block text-sm font-medium mb-1">Default CC Email</label>

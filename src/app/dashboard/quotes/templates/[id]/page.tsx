@@ -8,6 +8,9 @@ import {
   type LineItemBuilderItem,
   type CatalogOption,
 } from "@/components/quotes/LineItemBuilder"
+import { toast } from "@/lib/toast"
+import { RichTextEditor } from "@/components/ui/rich-text-editor"
+import { CollapsibleField } from "@/components/ui/collapsible-field"
 
 interface TemplateDetail {
   id: string
@@ -18,6 +21,7 @@ interface TemplateDetail {
   expiryDays: number
   active: boolean
   sections: string[]
+  useDefaultTerms: boolean
   lineItems: LineItemBuilderItem[]
 }
 
@@ -40,6 +44,7 @@ export default function TemplateDetailPage({
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [notFound, setNotFound] = useState(false)
+  const [companyDefaultTerms, setCompanyDefaultTerms] = useState("")
 
   useEffect(() => {
     params.then((p) => setId(p.id))
@@ -66,6 +71,9 @@ export default function TemplateDetailPage({
     fetch("/api/catalog")
       .then((res) => res.json())
       .then((items: CatalogOption[]) => setCatalog(items.filter((i) => i.active)))
+    fetch("/api/quote-settings")
+      .then((res) => res.json())
+      .then((json) => setCompanyDefaultTerms(json.quoteTerms ?? ""))
   }, [id])
 
   function update(field: string, value: string | number | boolean) {
@@ -75,7 +83,7 @@ export default function TemplateDetailPage({
   async function handleSave() {
     if (!id || !template) return
     setSaving(true)
-    await fetch(`/api/quote-templates/${id}`, {
+    const res = await fetch(`/api/quote-templates/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -83,11 +91,17 @@ export default function TemplateDetailPage({
         description: template.description,
         introText: template.introText,
         terms: template.terms,
+        useDefaultTerms: template.useDefaultTerms,
         expiryDays: template.expiryDays,
         active: template.active,
       }),
     })
     setSaving(false)
+    if (res.ok) {
+      toast.success("Template saved")
+    } else {
+      toast.error("Couldn't save template")
+    }
   }
 
   // ─── Line item mutations (passed into the shared LineItemBuilder) ──────
@@ -262,15 +276,25 @@ export default function TemplateDetailPage({
             className="w-full rounded-md border px-3 py-2 text-sm"
           />
         </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Terms & Conditions</label>
-          <textarea
-            value={template.terms ?? ""}
-            onChange={(e) => update("terms", e.target.value)}
-            rows={3}
-            className="w-full rounded-md border px-3 py-2 text-sm"
-          />
-        </div>
+        <CollapsibleField label="Terms & Conditions">
+          <label className="flex items-center gap-2 text-sm text-foreground mb-2">
+            <input
+              type="checkbox"
+              checked={template.useDefaultTerms}
+              onChange={(e) => update("useDefaultTerms", e.target.checked)}
+              className="accent-primary"
+            />
+            Use company default Terms &amp; Conditions
+          </label>
+          {template.useDefaultTerms ? (
+            <div
+              className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
+              dangerouslySetInnerHTML={{ __html: companyDefaultTerms || "No company default set." }}
+            />
+          ) : (
+            <RichTextEditor value={template.terms ?? ""} onChange={(html) => update("terms", html)} />
+          )}
+        </CollapsibleField>
         <div>
           <label className="block text-sm font-medium mb-1">Default Expiry (days)</label>
           <input

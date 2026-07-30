@@ -13,6 +13,8 @@ import {
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { RichTextEditor } from "@/components/ui/rich-text-editor"
+import { CollapsibleField } from "@/components/ui/collapsible-field"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface QuoteDetail {
@@ -32,6 +34,8 @@ interface QuoteDetail {
   version: number
   isActive: boolean
   sections: string[]
+  terms: string | null
+  useDefaultTerms: boolean
   client: { id: string; name: string; email: string | null }
   contact: { id: string; firstName: string; lastName: string; email: string | null } | null
   user: { id: string; name: string }
@@ -144,6 +148,8 @@ export default function QuoteDetailPage({
   const [postingComment, setPostingComment] = useState(false)
   const [clients, setClients] = useState<ClientOption[]>([])
   const [contacts, setContacts] = useState<ContactOption[]>([])
+  const [termsDraft, setTermsDraft] = useState("")
+  const [companyDefaultTerms, setCompanyDefaultTerms] = useState("")
 
   const loadQuote = useCallback(() => {
     fetch(`/api/quotes/${id}`)
@@ -189,6 +195,9 @@ export default function QuoteDetailPage({
     fetch("/api/clients")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setClients(data))
+    fetch("/api/quote-settings")
+      .then((res) => res.json())
+      .then((json) => setCompanyDefaultTerms(json.quoteTerms ?? ""))
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((session) => setMyRole(session?.user?.role ?? null))
@@ -203,6 +212,14 @@ export default function QuoteDetailPage({
       .then((res) => res.json())
       .then((data) => setContacts(data.contacts ?? []))
   }, [quote?.client?.id])
+
+  // Only re-sync the terms draft when a different quote loads — not on
+  // every reload — so saving some other field (which also refetches the
+  // quote) doesn't stomp on terms text the user is mid-edit on.
+  useEffect(() => {
+    if (quote) setTermsDraft(quote.terms ?? "")
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quote?.id])
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
   if (notFound) return <p className="text-sm text-danger">Quote not found.</p>
@@ -641,6 +658,14 @@ export default function QuoteDetailPage({
                   <span className="text-muted-foreground">Expires:</span>{" "}
                   <span className="text-foreground">{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "—"}</span>
                 </p>
+                {(quote.useDefaultTerms ? companyDefaultTerms : quote.terms) && (
+                  <CollapsibleField label="Terms & Conditions">
+                    <div
+                      className="text-sm text-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
+                      dangerouslySetInnerHTML={{ __html: quote.useDefaultTerms ? companyDefaultTerms : (quote.terms ?? "") }}
+                    />
+                  </CollapsibleField>
+                )}
               </>
             ) : (
               <>
@@ -700,6 +725,29 @@ export default function QuoteDetailPage({
                     className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 </div>
+                <CollapsibleField label="Terms & Conditions">
+                  <label className="flex items-center gap-2 text-sm text-foreground mb-2">
+                    <input
+                      type="checkbox"
+                      checked={quote.useDefaultTerms}
+                      onChange={(e) => updateQuoteField({ useDefaultTerms: e.target.checked })}
+                      className="accent-primary"
+                    />
+                    Use company default Terms &amp; Conditions
+                  </label>
+                  {quote.useDefaultTerms ? (
+                    <div
+                      className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
+                      dangerouslySetInnerHTML={{ __html: companyDefaultTerms || "No company default set." }}
+                    />
+                  ) : (
+                    <RichTextEditor
+                      value={termsDraft}
+                      onChange={setTermsDraft}
+                      onBlur={() => updateQuoteField({ terms: termsDraft })}
+                    />
+                  )}
+                </CollapsibleField>
               </>
             )}
           </div>

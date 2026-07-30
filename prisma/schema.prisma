@@ -337,6 +337,7 @@ model Quote {
   title               String?
   introText           String?        @db.Text
   terms               String?        @db.Text
+  useDefaultTerms      Boolean        @default(true)
   internalNotes       String?        @db.Text
   clientPoNumber      String?
   shipAddress         String?
@@ -564,7 +565,8 @@ model QuoteTemplate {
   name        String
   description String?  @db.Text
   introText   String?  @db.Text
-  terms       String?  @db.Text
+  terms          String?  @db.Text
+  useDefaultTerms Boolean @default(true)
   expiryDays  Int      @default(30)
   active      Boolean  @default(true)
   sections    String[] @default([])
