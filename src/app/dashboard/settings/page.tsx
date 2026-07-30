@@ -2,9 +2,10 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
-import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList } from "lucide-react"
+import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
+import { IndustriesSettingsPanel } from "@/components/settings/IndustriesSettingsPanel"
 import { UsersSettingsPanel } from "@/components/settings/UsersSettingsPanel"
 import { RolesPermissionsPanel } from "@/components/settings/RolesPermissionsPanel"
 import { QuoteSettingsPanel } from "@/components/settings/QuoteSettingsPanel"
@@ -18,6 +19,7 @@ type PanelKey =
   | "company"
   | "users"
   | "roles"
+  | "industries"
   | "salesOrders"
   | "quotes"
   | "approval-workflows"
@@ -47,6 +49,10 @@ const settingsCategories: SettingsCategory[] = [
       { key: "users", label: "Manage Users", icon: UserCog },
       { key: "roles", label: "Roles & Permissions", icon: ShieldCheck },
     ],
+  },
+  {
+    label: "Clients",
+    items: [{ key: "industries", label: "Industries", icon: Briefcase }],
   },
   {
     label: "Quotes",
@@ -91,6 +97,8 @@ function renderPanel(key: PanelKey | null) {
       return <UsersSettingsPanel />
       case "roles":
       return <RolesPermissionsPanel />
+    case "industries":
+      return <IndustriesSettingsPanel />
     case "salesOrders":
       return <SalesOrderSettingsPanel />
     case "quotes":

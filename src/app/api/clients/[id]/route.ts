@@ -15,12 +15,78 @@ export async function GET(
 
   const client = await prisma.client.findUnique({
     where: { id, companyId: session.user.companyId },
-    include: { contacts: true },
+    include: {
+      contacts: true,
+      locations: {
+        include: { billingContact: true, shippingContact: true },
+      },
+      mainBillingLocation: { include: { billingContact: true } },
+      mainShippingLocation: { include: { shippingContact: true } },
+      industryRef: true,
+    },
   })
 
   if (!client) {
     return NextResponse.json({ error: "Client not found" }, { status: 404 })
   }
+
+  return NextResponse.json(client)
+}
+
+export async function PATCH(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+
+  const { id } = await params
+
+  // Verify this client actually belongs to the caller's company before
+  // updating anything — id alone isn't enough to scope a Prisma update,
+  // so this doubles as the ownership check the GET route already does.
+  const existing = await prisma.client.findUnique({
+    where: { id, companyId: session.user.companyId },
+    select: { id: true },
+  })
+  if (!existing) {
+    return NextResponse.json({ error: "Client not found" }, { status: 404 })
+  }
+
+  const body = await req.json()
+
+  const {
+    name,
+    industryId,
+    email,
+    phone,
+    website,
+    status,
+    notes,
+    mainBillingLocationId,
+    mainShippingLocationId,
+  } = body
+
+  if (name !== undefined && !name.trim()) {
+    return NextResponse.json({ error: "Client name can't be blank" }, { status: 400 })
+  }
+
+  const client = await prisma.client.update({
+    where: { id },
+    data: {
+      name,
+      industryId: industryId || null,
+      email,
+      phone,
+      website,
+      status,
+      notes,
+      mainBillingLocationId: mainBillingLocationId || null,
+      mainShippingLocationId: mainShippingLocationId || null,
+    },
+  })
 
   return NextResponse.json(client)
 }

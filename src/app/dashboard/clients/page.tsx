@@ -12,7 +12,7 @@ interface Client {
   email: string | null
   phone: string | null
   status: string
-  industry: string | null
+  industryRef: { name: string } | null
 }
 
 const STATUS_COLORS: Record<string, string> = {
@@ -37,7 +37,7 @@ function compareClients(a: Client, b: Client, column: SortColumn): number {
     case "name":
       return a.name.localeCompare(b.name)
     case "industry":
-      return (a.industry ?? "").localeCompare(b.industry ?? "")
+      return (a.industryRef?.name ?? "").localeCompare(b.industryRef?.name ?? "")
     case "email":
       return (a.email ?? "").localeCompare(b.email ?? "")
     case "phone":
@@ -203,7 +203,7 @@ export default function ClientsListPage() {
                     {client.name}
                   </Link>
                 </td>
-                <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{client.industry ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{client.industryRef?.name ?? "—"}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{client.email ?? "—"}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{client.phone ?? "—"}</td>
                 <td className={`${ROW_PADDING[density]} px-3`}>

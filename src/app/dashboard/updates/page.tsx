@@ -1,4 +1,5 @@
-import { PRODUCT_UPDATES, type UpdateCategory } from "@/lib/product-updates"
+import Image from "next/image"
+import { PRODUCT_UPDATES, PETACORE_OVERVIEW, type UpdateCategory } from "@/lib/product-updates"
 
 const CATEGORY_COLORS: Record<UpdateCategory, string> = {
   "New Feature": "bg-success-bg text-success",
@@ -19,8 +20,18 @@ export default function UpdatesPage() {
 
   return (
     <div className="w-full max-w-3xl space-y-8">
+      <div className="flex items-center gap-4">
+        <Image src="/icon.png" alt="PetaCore" width={64} height={64} className="rounded-lg shadow-elevated" />
+        <div>
+          <h1 className="text-display font-semibold tracking-tight text-foreground">PetaCore</h1>
+          <p className="text-sm font-medium text-muted-foreground">Unified MSP Solution</p>
+        </div>
+      </div>
+
+      <p className="text-sm text-muted-foreground max-w-2xl">{PETACORE_OVERVIEW}</p>
+
       <div>
-        <h1 className="text-display font-semibold tracking-tight text-foreground">Features &amp; Updates</h1>
+        <h2 className="text-heading font-semibold tracking-tight text-foreground">Features &amp; Updates</h2>
         <p className="text-muted-foreground mt-1">See what&apos;s new in PetaCore.</p>
       </div>
 

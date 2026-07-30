@@ -26,6 +26,7 @@ model Company {
 
   users                   User[]
   clients                 Client[]
+  industries              Industry[]
   vendors                 Vendor[]
   quotes                  Quote[]
   salesOrders             SalesOrder[]
@@ -122,7 +123,8 @@ model Client {
   email        String?
   phone        String?
   website      String?
-  industry     String?
+  industryId   String?
+  industryRef  Industry? @relation(fields: [industryId], references: [id])
   status       ClientStatus @default(PROSPECT)
   source       String?
   tags         String[]
@@ -130,27 +132,68 @@ model Client {
   paymentTerms String?
   notes        String?      @db.Text
 
-  // Billing address
-  billAddress String?
-  billCity    String?
-  billState   String?
-  billZip     String?
-  billCountry String?
-
-  // Shipping address
-  shipAddress String?
-  shipCity    String?
-  shipState   String?
-  shipZip     String?
-  shipCountry String?
+  // Main billing/shipping now point at one of this client's Locations
+  // rather than storing free-text address fields directly — the actual
+  // address/contact shown is derived from whichever Location is picked.
+  mainBillingLocationId  String?
+  mainBillingLocation    ClientLocation? @relation("ClientMainBilling", fields: [mainBillingLocationId], references: [id])
+  mainShippingLocationId String?
+  mainShippingLocation   ClientLocation? @relation("ClientMainShipping", fields: [mainShippingLocationId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   contacts      Contact[]
+  locations     ClientLocation[]        @relation("ClientLocations")
   quotes        Quote[]
   salesOrders   SalesOrder[]
   customPricing ClientCustomPrice[]
+}
+
+model Industry {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  createdAt DateTime @default(now())
+
+  clients Client[]
+
+  @@unique([companyId, name])
+}
+
+model ClientLocation {
+  id        String   @id @default(cuid())
+  clientId  String
+  client    Client   @relation("ClientLocations", fields: [clientId], references: [id], onDelete: Cascade)
+  name      String
+  address   String?
+  address2  String?
+  city      String?
+  state     String?
+  zip       String?
+  country   String?
+  phone     String?
+  notes     String?
+  isPrimary Boolean  @default(false)
+
+  billingContactId  String?
+  billingContact    Contact? @relation("LocationBillingContact", fields: [billingContactId], references: [id])
+  shippingContactId String?
+  shippingContact   Contact? @relation("LocationShippingContact", fields: [shippingContactId], references: [id])
+
+  // Back-relation for Contact.location — contacts who work at this site
+  contactsBasedHere Contact[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Back-relations required by Prisma since Client links to ClientLocation
+  // through two additional named relations beyond the primary "locations" one
+  mainBillingForClients  Client[] @relation("ClientMainBilling")
+  mainShippingForClients Client[] @relation("ClientMainShipping")
+
+  @@index([clientId])
 }
 
 enum ClientStatus {
@@ -162,22 +205,32 @@ enum ClientStatus {
 
 // ─── CONTACT ─────────────────────────────────────────────────────────────────
 model Contact {
-  id        String   @id @default(cuid())
-  clientId  String
-  client    Client   @relation(fields: [clientId], references: [id])
-  firstName String
-  lastName  String
-  title     String?
-  email     String?
-  phone     String?
-  mobile    String?
-  isPrimary Boolean  @default(false)
-  role      String?
-  notes     String?  @db.Text
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id           String              @id @default(cuid())
+  clientId     String
+  client       Client              @relation(fields: [clientId], references: [id])
+  firstName    String
+  lastName     String
+  title        String?
+  email        String?
+  phone        String? // Work phone
+  mobile       String? // Cell phone
+  locationType ContactLocationType @default(IN_OFFICE)
+  locationId   String?
+  location     ClientLocation?     @relation(fields: [locationId], references: [id])
+  isPrimary    Boolean             @default(false)
+  role         String?
+  notes        String?             @db.Text
+  createdAt    DateTime            @default(now())
+  updatedAt    DateTime            @updatedAt
 
-  quotes Quote[]
+  quotes                  Quote[]
+  billingForLocations     ClientLocation[] @relation("LocationBillingContact")
+  shippingForLocations    ClientLocation[] @relation("LocationShippingContact")
+}
+
+enum ContactLocationType {
+  REMOTE
+  IN_OFFICE
 }
 
 // ─── VENDOR ──────────────────────────────────────────────────────────────────

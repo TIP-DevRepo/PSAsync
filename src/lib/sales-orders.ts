@@ -23,7 +23,7 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
     where: { id: quoteId },
     include: {
       lineItems: { orderBy: { sortOrder: "asc" } },
-      client: true,
+      client: { include: { mainShippingLocation: true } },
       company: { include: { settings: true } },
     },
   })
@@ -45,11 +45,11 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
       soNumber,
       clientPoNumber: quote.clientPoNumber,
       status: "DRAFT",
-      shipAddress: quote.client.shipAddress,
-      shipCity: quote.client.shipCity,
-      shipState: quote.client.shipState,
-      shipZip: quote.client.shipZip,
-      shipCountry: quote.client.shipCountry,
+      shipAddress: quote.client.mainShippingLocation?.address ?? null,
+      shipCity: quote.client.mainShippingLocation?.city ?? null,
+      shipState: quote.client.mainShippingLocation?.state ?? null,
+      shipZip: quote.client.mainShippingLocation?.zip ?? null,
+      shipCountry: null,
       lineItems: {
         create: orderedItems.map((li) => ({
           name: li.name,

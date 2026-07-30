@@ -14,6 +14,14 @@ export async function POST(
   const { id } = await params
   const body = await req.json()
 
+  // Only one contact can be primary at a time
+  if (body.isPrimary) {
+    await prisma.contact.updateMany({
+      where: { clientId: id, isPrimary: true },
+      data: { isPrimary: false },
+    })
+  }
+
   const contact = await prisma.contact.create({
     data: {
       clientId: id,
@@ -22,6 +30,10 @@ export async function POST(
       title: body.title || null,
       email: body.email || null,
       phone: body.phone || null,
+      mobile: body.mobile || null,
+      locationType: body.locationType || "IN_OFFICE",
+      locationId: body.locationId || null,
+      notes: body.notes || null,
       isPrimary: body.isPrimary || false,
     },
   })

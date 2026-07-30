@@ -9,6 +9,7 @@ import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { TabsBar } from "@/components/ui/tabs-bar"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Quote {
@@ -191,61 +192,6 @@ const TOP_TABS: { key: TabKey; label: string }[] = [
   { key: "templates", label: "Templates" },
 ]
 
-function TabsBar({ activeTab, onChange }: { activeTab: TabKey; onChange: (key: TabKey) => void }) {
-  const tabRefs = useRef<Record<string, HTMLButtonElement | null>>({})
-  const [indicator, setIndicator] = useState({ left: 0, width: 0 })
-
-  useLayoutEffect(() => {
-    const btn = tabRefs.current[activeTab]
-    if (btn) setIndicator({ left: btn.offsetLeft, width: btn.offsetWidth })
-  }, [activeTab])
-
-  function handleKeyDown(e: React.KeyboardEvent, idx: number) {
-    let nextIdx = idx
-    if (e.key === "ArrowRight") nextIdx = (idx + 1) % TOP_TABS.length
-    else if (e.key === "ArrowLeft") nextIdx = (idx - 1 + TOP_TABS.length) % TOP_TABS.length
-    else if (e.key === "Home") nextIdx = 0
-    else if (e.key === "End") nextIdx = TOP_TABS.length - 1
-    else return
-    e.preventDefault()
-    const nextKey = TOP_TABS[nextIdx].key
-    onChange(nextKey)
-    tabRefs.current[nextKey]?.focus()
-  }
-
-  return (
-    <div role="tablist" aria-label="Quotes sections" className="relative flex gap-4 border-b border-border text-sm">
-      {TOP_TABS.map((tab, idx) => {
-        const isActive = activeTab === tab.key
-        return (
-          <button
-            key={tab.key}
-            ref={(el) => {
-              tabRefs.current[tab.key] = el
-            }}
-            role="tab"
-            id={`quotes-tab-${tab.key}`}
-            aria-selected={isActive}
-            aria-controls={`quotes-tabpanel-${tab.key}`}
-            tabIndex={isActive ? 0 : -1}
-            onClick={() => onChange(tab.key)}
-            onKeyDown={(e) => handleKeyDown(e, idx)}
-            className={`pb-2 rounded-t-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
-              isActive ? "font-semibold text-foreground" : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {tab.label}
-          </button>
-        )
-      })}
-      <div
-        className="absolute bottom-0 h-0.5 bg-primary transition-[left,width] duration-300"
-        style={{ left: indicator.left, width: indicator.width, transitionTimingFunction: "cubic-bezier(0.34, 1.56, 0.64, 1)" }}
-      />
-    </div>
-  )
-}
-
 // ─── Main Page ────────────────────────────────────────────────────────────
 export default function QuotesPage() {
   const [activeTab, setActiveTab] = useState<TabKey>("quotes")
@@ -272,12 +218,12 @@ export default function QuotesPage() {
         <Button onClick={() => setShowTemplatePicker(true)}>New Quote</Button>
       </div>
 
-      <TabsBar activeTab={activeTab} onChange={setActiveTab} />
+      <TabsBar tabs={TOP_TABS} activeTab={activeTab} onChange={setActiveTab} ariaLabel="Quotes sections" />
 
       <div
         role="tabpanel"
-        id={`quotes-tabpanel-${displayedTab}`}
-        aria-labelledby={`quotes-tab-${displayedTab}`}
+        id={`tabpanel-${displayedTab}`}
+        aria-labelledby={`tab-${displayedTab}`}
         className={`transition-opacity duration-150 ${contentVisible ? "opacity-100" : "opacity-0"}`}
       >
         {displayedTab === "scorecard" && <ScorecardTab />}
