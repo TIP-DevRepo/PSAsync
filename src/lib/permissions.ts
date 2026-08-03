@@ -11,7 +11,7 @@ export interface RolePermissions {
   >>
   clients?: Partial<Record<"create" | "edit" | "delete" | "viewAllClients", boolean>>
   salesOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "generatePO" | "viewAll", boolean>>
-  purchaseOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "send", boolean>>
+  purchaseOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "send" | "viewAll", boolean>>
   settingsSections?: Partial<Record<
     "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders",
     boolean

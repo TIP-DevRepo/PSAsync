@@ -17,6 +17,8 @@ interface RolePermissions {
     viewAllUsersQuotes: boolean
   }
   clients: { create: boolean; edit: boolean; delete: boolean; viewAllClients: boolean }
+  salesOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; generatePO: boolean; viewAll: boolean }
+  purchaseOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; send: boolean; viewAll: boolean }
   settingsSections: {
     company: boolean
     users: boolean
@@ -58,6 +60,24 @@ const CLIENT_LABELS: [keyof RolePermissions["clients"], string][] = [
   ["edit", "Edit clients"],
   ["delete", "Delete clients"],
   ["viewAllClients", "View all clients (not just ones tied to their own quotes)"],
+]
+
+const SALES_ORDER_LABELS: [keyof RolePermissions["salesOrders"], string][] = [
+  ["create", "Create sales orders"],
+  ["edit", "Edit sales orders"],
+  ["delete", "Delete sales orders"],
+  ["changeStatus", "Change sales order status manually"],
+  ["generatePO", "Generate purchase orders from a sales order"],
+  ["viewAll", "See all users' sales orders (not just their own)"],
+]
+
+const PURCHASE_ORDER_LABELS: [keyof RolePermissions["purchaseOrders"], string][] = [
+  ["create", "Create purchase orders"],
+  ["edit", "Edit purchase orders"],
+  ["delete", "Delete purchase orders"],
+  ["changeStatus", "Change purchase order status manually"],
+  ["send", "Send purchase orders to vendors"],
+  ["viewAll", "See all users' purchase orders (not just their own)"],
 ]
 
 const SETTINGS_LABELS: [keyof RolePermissions["settingsSections"], string][] = [
@@ -172,6 +192,14 @@ export function RolesPermissionsPanel() {
   function updateClientPerm(key: keyof RolePermissions["clients"], value: boolean) {
     if (!draft) return
     setDraft({ ...draft, permissions: { ...draft.permissions, clients: { ...draft.permissions.clients, [key]: value } } })
+  }
+  function updateSalesOrderPerm(key: keyof RolePermissions["salesOrders"], value: boolean) {
+    if (!draft) return
+    setDraft({ ...draft, permissions: { ...draft.permissions, salesOrders: { ...draft.permissions.salesOrders, [key]: value } } })
+  }
+  function updatePurchaseOrderPerm(key: keyof RolePermissions["purchaseOrders"], value: boolean) {
+    if (!draft) return
+    setDraft({ ...draft, permissions: { ...draft.permissions, purchaseOrders: { ...draft.permissions.purchaseOrders, [key]: value } } })
   }
   function updateSettingsPerm(key: keyof RolePermissions["settingsSections"], value: boolean) {
     if (!draft) return
@@ -320,6 +348,38 @@ export function RolesPermissionsPanel() {
                       type="checkbox"
                       checked={draft.permissions.clients[key]}
                       onChange={(e) => updateClientPerm(key, e.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold text-sm mb-2">Sales Order Actions</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {SALES_ORDER_LABELS.map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.permissions.salesOrders?.[key] ?? false}
+                      onChange={(e) => updateSalesOrderPerm(key, e.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold text-sm mb-2">Purchase Order Actions</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {PURCHASE_ORDER_LABELS.map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.permissions.purchaseOrders?.[key] ?? false}
+                      onChange={(e) => updatePurchaseOrderPerm(key, e.target.checked)}
                     />
                     {label}
                   </label>

@@ -9,8 +9,13 @@ export async function GET() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
   }
 
+  const canViewAll = await hasPermission(session.user.id, "purchaseOrders.viewAll")
+
   const purchaseOrders = await prisma.purchaseOrder.findMany({
-    where: { companyId: session.user.companyId },
+    where: {
+      companyId: session.user.companyId,
+      ...(canViewAll ? {} : { userId: session.user.id }),
+    },
     include: {
       vendor: { select: { name: true } },
       user: { select: { name: true } },
