@@ -61,9 +61,11 @@ export async function POST(
   const updated = await prisma.quote.update({ where: { id }, data })
 
   if (body.status === "ACCEPTED") {
-    createSalesOrderFromAcceptedQuote(id).catch((err) =>
+    try {
+      await createSalesOrderFromAcceptedQuote(id)
+    } catch (err) {
       console.error("createSalesOrderFromAcceptedQuote failed:", err)
-    )
+    }
   }
 
   return NextResponse.json(updated)

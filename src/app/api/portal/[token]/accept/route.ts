@@ -64,9 +64,11 @@ export async function POST(
     console.error("notifyQuoteEvent failed:", err)
   )
 
-  createSalesOrderFromAcceptedQuote(quote.id).catch((err) =>
+  try {
+    await createSalesOrderFromAcceptedQuote(quote.id)
+  } catch (err) {
     console.error("createSalesOrderFromAcceptedQuote failed:", err)
-  )
+  }
 
   return NextResponse.json(updated)
 }
