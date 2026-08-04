@@ -68,10 +68,22 @@ export async function PATCH(
     paymentTerms,
     mainBillingLocationId,
     mainShippingLocationId,
+    isInternal,
   } = body
 
   if (name !== undefined && !name.trim()) {
     return NextResponse.json({ error: "Client name can't be blank" }, { status: 400 })
+  }
+
+  // Only one client per company can be marked as "your own company" at a
+  // time. If this update is turning isInternal on, clear it from whichever
+  // other client currently has it first, so the flag never lands on two
+  // records at once.
+  if (isInternal === true) {
+    await prisma.client.updateMany({
+      where: { companyId: session.user.companyId, isInternal: true, id: { not: id } },
+      data: { isInternal: false },
+    })
   }
 
   const client = await prisma.client.update({
@@ -87,6 +99,7 @@ export async function PATCH(
       paymentTerms: paymentTerms || null,
       mainBillingLocationId: mainBillingLocationId || null,
       mainShippingLocationId: mainShippingLocationId || null,
+      ...(isInternal !== undefined ? { isInternal } : {}),
     },
   })
 

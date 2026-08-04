@@ -102,6 +102,10 @@ model User {
   notifications               Notification[]
   connectedMicrosoftMailboxes MicrosoftConnection[]
   quoteComments               QuoteComment[]
+  soComments                   SOComment[]
+  poComments                   POComment[]
+  soAttachments                SOAttachment[]
+  poAttachments                POAttachment[]
   triggeredWorkflows          ApprovalWorkflow[]    @relation("WorkflowTriggerUser")
   approvalDecisions           QuoteApproval[]       @relation("ApprovalDecidedBy")
 }
@@ -132,6 +136,7 @@ model Client {
   creditLimit  Float?
   paymentTerms String?
   notes        String?      @db.Text
+  isInternal   Boolean      @default(false)
 
   // Main billing/shipping now point at one of this client's Locations
   // rather than storing free-text address fields directly — the actual
@@ -257,6 +262,7 @@ model Vendor {
 
   catalogItems   CatalogItem[]
   purchaseOrders PurchaseOrder[]
+  soLineItems    SOLineItem[]
 }
 
 enum VendorType {
@@ -296,6 +302,8 @@ model CatalogItem {
   quoteLineItems    QuoteLineItem[]
   customPricing     ClientCustomPrice[]
   templateLineItems QuoteTemplateLineItem[]
+  soLineItems       SOLineItem[]
+  poLineItems       POLineItem[]
 }
 
 enum ItemType {
@@ -456,6 +464,8 @@ model SalesOrder {
 
   purchaseOrders PurchaseOrder[]
   lineItems      SOLineItem[]
+  comments       SOComment[]
+  attachments    SOAttachment[]
 }
 
 enum SalesOrderStatus {
@@ -473,9 +483,15 @@ model SOLineItem {
   id                String             @id @default(cuid())
   salesOrderId      String
   salesOrder        SalesOrder         @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  catalogItemId     String?
+  catalogItem       CatalogItem?       @relation(fields: [catalogItemId], references: [id])
+  vendorId          String?
+  vendor            Vendor?            @relation(fields: [vendorId], references: [id])
   name              String
   description       String?            @db.Text
+  partNumber        String?
   sku               String?
+  vendorSku         String?
   section           String?
   quantity          Float              @default(1)
   unitPrice         Float              @default(0)
@@ -518,8 +534,10 @@ model PurchaseOrder {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  lineItems POLineItem[]
-  shipments POShipment[]
+  lineItems   POLineItem[]
+  shipments   POShipment[]
+  comments    POComment[]
+  attachments POAttachment[]
 }
 
 enum POStatus {
@@ -538,9 +556,13 @@ model POLineItem {
   purchaseOrder      PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   sourceSOLineItemId String?
   sourceSOLineItem   SOLineItem?   @relation(fields: [sourceSOLineItemId], references: [id])
+  catalogItemId      String?
+  catalogItem        CatalogItem?  @relation(fields: [catalogItemId], references: [id])
   name               String
   description        String?       @db.Text
+  partNumber         String?
   sku                String?
+  vendorSku          String?
   quantity           Float         @default(1)
   unitCost           Float         @default(0)
   serialNumber       String?
@@ -736,6 +758,56 @@ model QuoteComment {
   authorName   String
   message      String   @db.Text
   createdAt    DateTime @default(now())
+}
+
+// ─── SALES ORDER COMMENTS ────────────────────────────────────────────────
+model SOComment {
+  id           String     @id @default(cuid())
+  salesOrderId String
+  salesOrder   SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  authorUserId String
+  authorUser   User       @relation(fields: [authorUserId], references: [id])
+  authorName   String
+  message      String     @db.Text
+  createdAt    DateTime   @default(now())
+}
+
+// ─── PURCHASE ORDER COMMENTS ──────────────────────────────────────────────
+model POComment {
+  id              String        @id @default(cuid())
+  purchaseOrderId String
+  purchaseOrder   PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  authorUserId    String
+  authorUser      User          @relation(fields: [authorUserId], references: [id])
+  authorName      String
+  message         String        @db.Text
+  createdAt       DateTime      @default(now())
+}
+
+// ─── SALES ORDER ATTACHMENTS ──────────────────────────────────────────────
+model SOAttachment {
+  id               String     @id @default(cuid())
+  salesOrderId     String
+  salesOrder       SalesOrder @relation(fields: [salesOrderId], references: [id], onDelete: Cascade)
+  fileName         String
+  fileUrl          String
+  fileSize         Int?
+  uploadedByUserId String
+  uploadedByUser   User       @relation(fields: [uploadedByUserId], references: [id])
+  createdAt        DateTime   @default(now())
+}
+
+// ─── PURCHASE ORDER ATTACHMENTS ───────────────────────────────────────────
+model POAttachment {
+  id               String        @id @default(cuid())
+  purchaseOrderId  String
+  purchaseOrder    PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  fileName         String
+  fileUrl          String
+  fileSize         Int?
+  uploadedByUserId String
+  uploadedByUser   User          @relation(fields: [uploadedByUserId], references: [id])
+  createdAt        DateTime      @default(now())
 }
 
 // ─── NOTIFICATION ─────────────────────────────────────────────────────────

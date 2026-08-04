@@ -53,6 +53,7 @@ interface ClientDetail {
   status: string
   paymentTerms: string | null
   notes: string | null
+  isInternal: boolean
   contacts: Contact[]
   locations: ClientLocation[]
   mainBillingLocationId: string | null
@@ -161,6 +162,7 @@ export default function ClientDetailPage() {
     notes: "",
     mainBillingLocationId: "",
     mainShippingLocationId: "",
+    isInternal: false,
   })
 
   const [showAddLocation, setShowAddLocation] = useState(false)
@@ -230,6 +232,7 @@ export default function ClientDetailPage() {
       notes: client.notes ?? "",
       mainBillingLocationId: client.mainBillingLocationId ?? "",
       mainShippingLocationId: client.mainShippingLocationId ?? "",
+      isInternal: client.isInternal,
     })
     setEditingDetails(true)
   }
@@ -383,6 +386,13 @@ export default function ClientDetailPage() {
                     <span className="font-medium text-foreground">Payment Terms:</span>{" "}
                     <span className="text-muted-foreground">{client.paymentTerms || "—"}</span>
                   </p>
+                  {client.isInternal && (
+                    <p>
+                      <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">
+                        This is your own company
+                      </span>
+                    </p>
+                  )}
                 </>
               ) : (
                 <>
@@ -471,6 +481,18 @@ export default function ClientDetailPage() {
                       <option value="Prepaid">Prepaid</option>
                     </select>
                   </div>
+                  <label className="flex items-center gap-2 text-sm text-foreground pt-2">
+                    <input
+                      type="checkbox"
+                      checked={detailsDraft.isInternal}
+                      onChange={(e) => setDetailsDraft({ ...detailsDraft, isInternal: e.target.checked })}
+                      className="accent-primary"
+                    />
+                    This is your own company
+                  </label>
+                  <p className="text-xs text-muted-foreground">
+                    Marking this client as your own company makes its locations available as ship-to options on Purchase Orders. Only one client can be marked this way — checking this box will unmark any other client currently set.
+                  </p>
                 </>
               )}
             </div>
