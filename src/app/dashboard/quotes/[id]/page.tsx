@@ -35,6 +35,7 @@ interface QuoteDetail {
   isActive: boolean
   sections: string[]
   terms: string | null
+  paymentTerms: string | null
   useDefaultTerms: boolean
   client: { id: string; name: string; email: string | null }
   contact: { id: string; firstName: string; lastName: string; email: string | null } | null
@@ -659,6 +660,10 @@ export default function QuoteDetailPage({
                   <span className="text-muted-foreground">Expires:</span>{" "}
                   <span className="text-foreground">{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "—"}</span>
                 </p>
+                <p>
+                  <span className="text-muted-foreground">Payment Terms:</span>{" "}
+                  <span className="text-foreground">{quote.paymentTerms || "—"}</span>
+                </p>
                 {(quote.useDefaultTerms ? companyDefaultTerms : quote.terms) && (
                   <CollapsibleField label="Terms & Conditions">
                     <div
@@ -706,6 +711,23 @@ export default function QuoteDetailPage({
                     className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 </div>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Payment Terms</label>
+                  <select
+                    value={quote.paymentTerms ?? ""}
+                    onChange={(e) => updateQuoteField({ paymentTerms: e.target.value || null })}
+                    className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <option value="">Not set</option>
+                    <option value="Due on Receipt">Due on Receipt</option>
+                    <option value="Net15">Net 15</option>
+                    <option value="Net30">Net 30</option>
+                    <option value="Net45">Net 45</option>
+                    <option value="Net60">Net 60</option>
+                    <option value="Prepaid">Prepaid</option>
+                  </select>
+                </div>
+
                 <div>
                   <label className="block text-xs text-muted-foreground mb-1">Title / Subject</label>
                   <input

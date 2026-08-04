@@ -28,11 +28,12 @@ export async function GET(req: NextRequest) {
     include: {
       client: {
         select: {
-          id: true,
-          name: true,
-          email: true,
-          phone: true,
-          mainBillingLocation: {
+            id: true,
+            name: true,
+            email: true,
+            phone: true,
+            paymentTerms: true,
+            mainBillingLocation: {
             select: { name: true, address: true, address2: true, city: true, state: true, zip: true, country: true },
           },
           mainShippingLocation: {

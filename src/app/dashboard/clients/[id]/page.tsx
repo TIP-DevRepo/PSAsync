@@ -51,6 +51,7 @@ interface ClientDetail {
   industryId: string | null
   industryRef: { id: string; name: string } | null
   status: string
+  paymentTerms: string | null
   notes: string | null
   contacts: Contact[]
   locations: ClientLocation[]
@@ -156,6 +157,7 @@ export default function ClientDetailPage() {
     phone: "",
     website: "",
     status: "",
+    paymentTerms: "",
     notes: "",
     mainBillingLocationId: "",
     mainShippingLocationId: "",
@@ -224,6 +226,7 @@ export default function ClientDetailPage() {
       phone: client.phone ?? "",
       website: client.website ?? "",
       status: client.status,
+      paymentTerms: client.paymentTerms ?? "",
       notes: client.notes ?? "",
       mainBillingLocationId: client.mainBillingLocationId ?? "",
       mainShippingLocationId: client.mainShippingLocationId ?? "",
@@ -376,6 +379,10 @@ export default function ClientDetailPage() {
                       <span className="text-muted-foreground">—</span>
                     )}
                   </p>
+                  <p>
+                    <span className="font-medium text-foreground">Payment Terms:</span>{" "}
+                    <span className="text-muted-foreground">{client.paymentTerms || "—"}</span>
+                  </p>
                 </>
               ) : (
                 <>
@@ -447,6 +454,22 @@ export default function ClientDetailPage() {
                       onChange={(e) => setDetailsDraft({ ...detailsDraft, website: e.target.value })}
                       className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Payment Terms</label>
+                    <select
+                      value={detailsDraft.paymentTerms}
+                      onChange={(e) => setDetailsDraft({ ...detailsDraft, paymentTerms: e.target.value })}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      <option value="">Not set</option>
+                      <option value="Due on Receipt">Due on Receipt</option>
+                      <option value="Net15">Net 15</option>
+                      <option value="Net30">Net 30</option>
+                      <option value="Net45">Net 45</option>
+                      <option value="Net60">Net 60</option>
+                      <option value="Prepaid">Prepaid</option>
+                    </select>
                   </div>
                 </>
               )}

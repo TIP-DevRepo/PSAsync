@@ -45,6 +45,7 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
       soNumber,
       clientPoNumber: quote.clientPoNumber,
       status: "DRAFT",
+      paymentTerms: quote.paymentTerms,
       shipAddress: quote.client.mainShippingLocation?.address ?? null,
       shipCity: quote.client.mainShippingLocation?.city ?? null,
       shipState: quote.client.mainShippingLocation?.state ?? null,

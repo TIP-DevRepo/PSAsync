@@ -65,6 +65,7 @@ export async function PATCH(
     website,
     status,
     notes,
+    paymentTerms,
     mainBillingLocationId,
     mainShippingLocationId,
   } = body
@@ -83,6 +84,7 @@ export async function PATCH(
       website,
       status,
       notes,
+      paymentTerms: paymentTerms || null,
       mainBillingLocationId: mainBillingLocationId || null,
       mainShippingLocationId: mainShippingLocationId || null,
     },

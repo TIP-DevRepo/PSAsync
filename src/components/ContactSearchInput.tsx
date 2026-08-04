@@ -14,6 +14,7 @@ export interface ContactSearchResult {
     name: string
     email: string | null
     phone: string | null
+    paymentTerms: string | null
     mainBillingLocation: {
       name: string
       address: string | null

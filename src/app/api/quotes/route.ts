@@ -198,6 +198,7 @@ export async function POST(req: NextRequest) {
       shipState: body.shipState || null,
       shipZip: body.shipZip || null,
       shipCountry: body.shipCountry || null,
+      paymentTerms: body.paymentTerms || null,
       expiresAt,
       sections: templateSections,
       lineItems: {

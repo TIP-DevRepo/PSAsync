@@ -341,6 +341,7 @@ model Quote {
   useDefaultTerms      Boolean        @default(true)
   internalNotes       String?        @db.Text
   clientPoNumber      String?
+  paymentTerms        String?
   shipAddress         String?
   shipAddress2        String?
   shipCity            String?
@@ -438,6 +439,7 @@ model SalesOrder {
 
   soNumber       String
   clientPoNumber String?
+  paymentTerms   String?
   status         SalesOrderStatus @default(DRAFT)
   internalNotes  String? @db.Text
   clientNotes    String? @db.Text

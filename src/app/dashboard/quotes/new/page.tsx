@@ -59,6 +59,7 @@ function NewQuoteForm() {
     shipState: "",
     shipZip: "",
     shipCountry: "",
+    paymentTerms: "",
   })
 
   function update(field: string, value: string) {
@@ -104,6 +105,7 @@ function NewQuoteForm() {
       shipState: loc?.state ?? "",
       shipZip: loc?.zip ?? "",
       shipCountry: loc?.country ?? "",
+      paymentTerms: contact.client.paymentTerms ?? "",
     }))
   }
 
@@ -186,6 +188,23 @@ function NewQuoteForm() {
                 placeholder="e.g. Q3 Network Upgrade"
                 className="w-full rounded-md border px-3 py-2 text-sm"
               />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium mb-1">Payment Terms</label>
+              <select
+                value={form.paymentTerms}
+                onChange={(e) => update("paymentTerms", e.target.value)}
+                className="w-full rounded-md border px-3 py-2 text-sm"
+              >
+                <option value="">Select terms...</option>
+                <option value="Due on Receipt">Due on Receipt</option>
+                <option value="Net15">Net15</option>
+                <option value="Net30">Net30</option>
+                <option value="Net45">Net45</option>
+                <option value="Net60">Net60</option>
+                <option value="Prepaid">Prepaid</option>
+              </select>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
