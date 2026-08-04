@@ -1,12 +1,16 @@
 import { prisma } from "@/lib/prisma"
 import type { QuoteLineItem } from "@/generated/prisma"
 
+type QuoteLineItemWithCatalog = QuoteLineItem & {
+  catalogItem: { vendorId: string | null; sku: string | null } | null
+}
+
 // Only line items that were actually "chosen" become part of the Sales
 // Order. Unselected optional items and unselected choice-group options are
 // both flagged the same way (isOptional && !optionalSelected), so this one
 // condition correctly drops both cases. Bundle headers, bundle children,
 // and text blocks are always kept as-is.
-function resolveOrderedLineItems(lineItems: QuoteLineItem[]) {
+function resolveOrderedLineItems(lineItems: QuoteLineItemWithCatalog[]) {
   return lineItems.filter((li) => !li.isTextBlock && !(li.isOptional && !li.optionalSelected))
 }
 
@@ -22,7 +26,10 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
   const quote = await prisma.quote.findUnique({
     where: { id: quoteId },
     include: {
-      lineItems: { orderBy: { sortOrder: "asc" } },
+      lineItems: {
+        orderBy: { sortOrder: "asc" },
+        include: { catalogItem: { select: { vendorId: true, sku: true } } },
+      },
       client: { include: { mainShippingLocation: true } },
       company: { include: { settings: true } },
     },
@@ -53,6 +60,14 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
       shipCountry: null,
       lineItems: {
         create: orderedItems.map((li) => ({
+          catalogItemId: li.catalogItemId,
+          // A catalog-sourced item's own part number/SKU carries through
+          // as partNumber, and its assigned Vendor (who you'd buy it from)
+          // carries through as vendorId. Ad-hoc quote items have no
+          // catalogItem link, so both simply stay null — there's no vendor
+          // data anywhere upstream for those.
+          vendorId: li.catalogItem?.vendorId ?? null,
+          partNumber: li.sku,
           name: li.name,
           description: li.description,
           sku: li.sku,

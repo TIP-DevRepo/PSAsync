@@ -20,6 +20,8 @@ export async function GET() {
       cost: true,
       taxable: true,
       active: true,
+      vendorId: true,
+      vendor: { select: { id: true, name: true } },
     },
     orderBy: { name: "asc" },
   })

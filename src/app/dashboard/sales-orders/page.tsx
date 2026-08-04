@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import Link from "next/link"
 
 interface SalesOrder {
   id: string
@@ -152,7 +153,14 @@ export default function SalesOrdersPage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-display font-semibold tracking-tight text-foreground">Sales Orders</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-display font-semibold tracking-tight text-foreground">Sales Orders</h1>
+        <Link href="/dashboard/sales-orders/new">
+          <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity">
+            + New Sales Order
+          </button>
+        </Link>
+      </div>
 
       <div className="flex items-center justify-between gap-3">
         <div className="flex gap-3">
@@ -231,7 +239,7 @@ export default function SalesOrdersPage() {
             {sorted.length === 0 && (
               <tr>
                 <td colSpan={7} className="py-6 text-center text-muted-foreground">
-                  No Sales Orders found. They&apos;re created automatically when a quote is accepted.
+                  No Sales Orders found. Create one manually or accept a Quote to generate one automatically.
                 </td>
               </tr>
             )}

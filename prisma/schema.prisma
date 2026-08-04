@@ -438,8 +438,8 @@ model SalesOrder {
   id        String  @id @default(cuid())
   companyId String
   company   Company @relation(fields: [companyId], references: [id])
-  quoteId   String  @unique
-  quote     Quote   @relation(fields: [quoteId], references: [id])
+  quoteId   String? @unique
+  quote     Quote?  @relation(fields: [quoteId], references: [id])
   clientId  String
   client    Client  @relation(fields: [clientId], references: [id])
   userId    String
@@ -452,12 +452,23 @@ model SalesOrder {
   internalNotes  String? @db.Text
   clientNotes    String? @db.Text
 
+  // Billing
+  billContactName String?
+  billAddress     String?
+  billAddress2    String?
+  billCity        String?
+  billState       String?
+  billZip         String?
+  billCountry     String?
+
   // Shipping
-  shipAddress String?
-  shipCity    String?
-  shipState   String?
-  shipZip     String?
-  shipCountry String?
+  shipContactName String?
+  shipAddress     String?
+  shipAddress2    String?
+  shipCity        String?
+  shipState       String?
+  shipZip         String?
+  shipCountry     String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

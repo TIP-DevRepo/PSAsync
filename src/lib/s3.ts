@@ -11,9 +11,10 @@ const s3Client = new S3Client({
 export async function uploadFileToS3(
   file: Buffer,
   fileName: string,
-  contentType: string
+  contentType: string,
+  folder: string = "logos"
 ): Promise<string> {
-  const key = `logos/${Date.now()}-${fileName}`
+  const key = `${folder}/${Date.now()}-${fileName}`
 
   await s3Client.send(
     new PutObjectCommand({

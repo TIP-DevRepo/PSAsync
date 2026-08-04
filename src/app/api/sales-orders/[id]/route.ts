@@ -33,7 +33,10 @@ export async function GET(
       quote: { select: { id: true, quoteNumber: true } },
       lineItems: {
         orderBy: { sortOrder: "asc" },
-        include: { fulfillingPOLineItems: { select: { id: true } } },
+        include: {
+          fulfillingPOLineItems: { select: { id: true } },
+          vendor: { select: { id: true, name: true } },
+        },
       },
       purchaseOrders: {
         include: {
@@ -88,9 +91,19 @@ export async function PATCH(
   }
 
   if (body.clientPoNumber !== undefined) data.clientPoNumber = body.clientPoNumber || null
+  if (body.paymentTerms !== undefined) data.paymentTerms = body.paymentTerms || null
   if (body.internalNotes !== undefined) data.internalNotes = body.internalNotes || null
   if (body.clientNotes !== undefined) data.clientNotes = body.clientNotes || null
+  if (body.billContactName !== undefined) data.billContactName = body.billContactName || null
+  if (body.billAddress !== undefined) data.billAddress = body.billAddress || null
+  if (body.billAddress2 !== undefined) data.billAddress2 = body.billAddress2 || null
+  if (body.billCity !== undefined) data.billCity = body.billCity || null
+  if (body.billState !== undefined) data.billState = body.billState || null
+  if (body.billZip !== undefined) data.billZip = body.billZip || null
+  if (body.billCountry !== undefined) data.billCountry = body.billCountry || null
+  if (body.shipContactName !== undefined) data.shipContactName = body.shipContactName || null
   if (body.shipAddress !== undefined) data.shipAddress = body.shipAddress || null
+  if (body.shipAddress2 !== undefined) data.shipAddress2 = body.shipAddress2 || null
   if (body.shipCity !== undefined) data.shipCity = body.shipCity || null
   if (body.shipState !== undefined) data.shipState = body.shipState || null
   if (body.shipZip !== undefined) data.shipZip = body.shipZip || null
