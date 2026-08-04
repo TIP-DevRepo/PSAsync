@@ -15,7 +15,7 @@ const pdfButtonStyle = `
     background: white;
     white-space: nowrap;
     text-decoration: none;
-    color: inherit;
+    color: #18181b;
   }
   .pdf-download-btn:hover {
     background: #fafafa;
@@ -56,6 +56,7 @@ interface PortalQuote {
   title: string | null
   introText: string | null
   terms: string | null
+  sections: string[]
   clientPoNumber: string | null
   shipAddress: string | null
   shipCity: string | null
@@ -73,6 +74,7 @@ interface PortalQuote {
   company: {
     name: string
     logoUrl: string | null
+    secondaryLogoUrl: string | null
     settings: { primaryColor: string; accentColor: string } | null
   }
   lineItems: LineItem[]
@@ -220,7 +222,7 @@ export default function PortalPage({
       return (
         <tr key={li.id} className="border-b last:border-0">
           <td colSpan={4} className="py-3 px-4">
-            <p className="font-semibold">{li.name}</p>
+            <p className="font-semibold text-zinc-900">{li.name}</p>
             {li.description && (
               <p className="text-sm text-zinc-500 whitespace-pre-wrap mt-1">{li.description}</p>
             )}
@@ -249,7 +251,7 @@ export default function PortalPage({
           )}
         </td>
         <td className="py-3 pr-2">
-          <p className="font-medium">
+          <p className="font-medium text-zinc-900">
             {li.name}
             {li.choiceGroup ? (
               <span className="ml-2 text-xs text-zinc-400">(choose one: {li.choiceGroup})</span>
@@ -282,7 +284,7 @@ export default function PortalPage({
             <>{li.quantity} × {money(li.unitPrice)}</>
           )}
         </td>
-        <td className="py-3 pr-4 text-right font-medium whitespace-nowrap">
+        <td className="py-3 pr-4 text-right font-medium whitespace-nowrap text-zinc-900">
           {li.isOptional && !li.optionalSelected ? (
             <span className="text-zinc-400">Not included</span>
           ) : (
@@ -333,14 +335,23 @@ export default function PortalPage({
   }
 
   // ─── Sections ────────────────────────────────────────────────────────────
-  const sectionKeys: string[] = []
+  // Same ordering rule as the editor (LineItemBuilder): the persisted
+  // sections list is the real, stable order — it only changes when a
+  // section is explicitly added/removed, never as a side effect of items
+  // moving around. Any section that only exists because a line item
+  // references it (no matching entry in quote.sections — e.g. older data
+  // from before sections were persisted) is appended after, as a fallback.
+  const itemDerivedSections: string[] = []
   quote.lineItems
     .slice()
     .sort((a, b) => a.sortOrder - b.sortOrder)
     .forEach((li) => {
       const key = li.section ?? NO_SECTION
-      if (!sectionKeys.includes(key)) sectionKeys.push(key)
+      if (!itemDerivedSections.includes(key)) itemDerivedSections.push(key)
     })
+  const sectionKeys = [...quote.sections, ...itemDerivedSections].filter(
+    (v, i, arr) => arr.indexOf(v) === i
+  )
 
   // ─── Totals (client view — only counted items) ──────────────────────────
   const countedItems = quote.lineItems.filter(
@@ -369,9 +380,13 @@ export default function PortalPage({
       <div style={{ backgroundColor: primary }} className="text-white">
         <div className="max-w-3xl mx-auto px-6 py-8 flex items-center justify-between">
           <div className="flex items-center gap-3">
-            {quote.company.logoUrl && (
+            {(quote.company.secondaryLogoUrl || quote.company.logoUrl) && (
               // eslint-disable-next-line @next/next/no-img-element
-              <img src={quote.company.logoUrl} alt={quote.company.name} className="h-10 w-auto" />
+              <img
+                src={quote.company.secondaryLogoUrl || quote.company.logoUrl || ""}
+                alt={quote.company.name}
+                className="h-10 w-auto"
+              />
             )}
             <span className="text-lg font-semibold">{quote.company.name}</span>
           </div>
@@ -392,7 +407,7 @@ export default function PortalPage({
       <div className="max-w-3xl mx-auto px-6 py-8 space-y-6">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold">
+            <h1 className="text-2xl font-bold text-zinc-900">
               {quote.quoteNumber}
               {quote.version > 1 && (
                 <span className="text-base font-normal text-zinc-400"> v{quote.version}</span>
@@ -417,7 +432,7 @@ export default function PortalPage({
         </div>
 
         {quote.introText && (
-          <div className="rounded-md border bg-white p-4 text-sm whitespace-pre-wrap">
+          <div className="rounded-md border bg-white p-4 text-sm text-zinc-700 whitespace-pre-wrap">
             {quote.introText}
           </div>
         )}
@@ -485,9 +500,9 @@ export default function PortalPage({
                               <tr className="border-b bg-zinc-50">
                                 <td className="py-3 pl-4 pr-2 w-8"></td>
                                 <td className="py-3 pr-2" colSpan={2}>
-                                  <p className="font-medium">{g.header.name}</p>
+                                  <p className="font-medium text-zinc-900">{g.header.name}</p>
                                 </td>
-                                <td className="py-3 pr-4 text-right font-medium whitespace-nowrap">
+                                <td className="py-3 pr-4 text-right font-medium whitespace-nowrap text-zinc-900">
                                   {money(bundleTotal)}
                                 </td>
                               </tr>
@@ -529,7 +544,7 @@ export default function PortalPage({
         </div>
 
         {/* Totals */}
-        <div className="rounded-md border bg-white p-4 space-y-1 text-sm max-w-md ml-auto">
+        <div className="rounded-md border bg-white p-4 space-y-1 text-sm max-w-md ml-auto text-zinc-900">
           <div className="flex justify-between">
             <span className="text-zinc-500">Subtotal</span>
             <span>{money(oneTimeSubtotal)}</span>
@@ -563,15 +578,18 @@ export default function PortalPage({
         </div>
 
         {quote.terms && (
-          <div className="rounded-md border bg-white p-4 text-xs text-zinc-500 whitespace-pre-wrap">
-            <p className="font-medium text-zinc-700 mb-1">Terms & Conditions</p>
-            {quote.terms}
+          <div className="rounded-md border bg-white p-4 text-xs text-zinc-500">
+            <p className="font-medium text-zinc-700 mb-1">Terms &amp; Conditions</p>
+            <div
+              className="[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
+              dangerouslySetInnerHTML={{ __html: quote.terms }}
+            />
           </div>
         )}
 
         {/* Actions */}
         {actionMessage && (
-          <div className="rounded-md border bg-white p-3 text-sm text-center">{actionMessage}</div>
+          <div className="rounded-md border bg-white p-3 text-sm text-center text-zinc-900">{actionMessage}</div>
         )}
 
         {showClientActions && (
@@ -596,7 +614,7 @@ export default function PortalPage({
               </div>
             ) : (
               <div className="space-y-2">
-                <label className="block text-sm font-medium">
+                <label className="block text-sm font-medium text-zinc-900">
                   Let us know why (optional)
                 </label>
                 <textarea
@@ -627,14 +645,14 @@ export default function PortalPage({
 
         {isLocked && quote.status === "DECLINED" && quote.declineReason && (
           <div className="rounded-md border bg-white p-4 text-sm">
-            <p className="font-medium mb-1">Decline reason</p>
+            <p className="font-medium mb-1 text-zinc-900">Decline reason</p>
             <p className="text-zinc-600">{quote.declineReason}</p>
           </div>
         )}
 
         {/* Comments thread */}
         <div className="rounded-md border bg-white p-4 space-y-3">
-          <label className="block text-sm font-medium">Messages</label>
+          <label className="block text-sm font-medium text-zinc-900">Messages</label>
           <div className="space-y-2 max-h-80 overflow-y-auto">
             {comments.length === 0 && (
               <p className="text-sm text-zinc-500">No messages yet — ask a question below.</p>
@@ -651,7 +669,7 @@ export default function PortalPage({
                 <p className="text-xs font-medium text-zinc-500 mb-1">
                   {c.authorName} · {new Date(c.createdAt).toLocaleString()}
                 </p>
-                <p className="whitespace-pre-wrap">{c.message}</p>
+                <p className="whitespace-pre-wrap text-zinc-900">{c.message}</p>
               </div>
             ))}
           </div>

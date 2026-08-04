@@ -12,6 +12,8 @@ export async function POST(req: NextRequest) {
 
   const formData = await req.formData()
   const file = formData.get("file") as File | null
+  // "primary" (default) or "secondary" — which logo slot this upload fills
+  const slot = (formData.get("slot") as string | null) === "secondary" ? "secondary" : "primary"
 
   if (!file) {
     return NextResponse.json({ error: "No file provided" }, { status: 400 })
@@ -22,8 +24,8 @@ export async function POST(req: NextRequest) {
 
   await prisma.company.update({
     where: { id: session.user.companyId },
-    data: { logoUrl },
+    data: slot === "secondary" ? { secondaryLogoUrl: logoUrl } : { logoUrl },
   })
 
-  return NextResponse.json({ logoUrl })
+  return NextResponse.json({ logoUrl, slot })
 }

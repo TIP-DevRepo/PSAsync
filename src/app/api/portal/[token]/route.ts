@@ -25,6 +25,7 @@ export async function GET(
         select: {
           name: true,
           logoUrl: true,
+          secondaryLogoUrl: true,
           settings: { select: { primaryColor: true, accentColor: true } },
         },
       },

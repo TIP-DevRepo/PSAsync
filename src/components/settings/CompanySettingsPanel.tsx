@@ -7,6 +7,7 @@ import { toast } from "@/lib/toast"
 interface CompanyData {
   name: string
   logoUrl: string | null
+  secondaryLogoUrl: string | null
   primaryColor: string
   accentColor: string
 }
@@ -15,10 +16,12 @@ export function CompanySettingsPanel() {
   const [data, setData] = useState<CompanyData>({
     name: "",
     logoUrl: null,
+    secondaryLogoUrl: null,
     primaryColor: "#1B3A5C",
     accentColor: "#2E86AB",
   })
   const [logoFile, setLogoFile] = useState<File | null>(null)
+  const [secondaryLogoFile, setSecondaryLogoFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
   const [loading, setLoading] = useState(true)
 
@@ -37,6 +40,7 @@ export function CompanySettingsPanel() {
     if (logoFile) {
       const formData = new FormData()
       formData.append("file", logoFile)
+      formData.append("slot", "primary")
       const res = await fetch("/api/company-settings/logo", {
         method: "POST",
         body: formData,
@@ -48,6 +52,23 @@ export function CompanySettingsPanel() {
       }
       const json = await res.json()
       data.logoUrl = json.logoUrl
+    }
+
+    if (secondaryLogoFile) {
+      const formData = new FormData()
+      formData.append("file", secondaryLogoFile)
+      formData.append("slot", "secondary")
+      const res = await fetch("/api/company-settings/logo", {
+        method: "POST",
+        body: formData,
+      })
+      if (!res.ok) {
+        setSaving(false)
+        toast.error("Couldn't upload secondary logo")
+        return
+      }
+      const json = await res.json()
+      data.secondaryLogoUrl = json.logoUrl
     }
 
     const res = await fetch("/api/company-settings", {
@@ -85,7 +106,10 @@ export function CompanySettingsPanel() {
       </div>
 
       <div>
-        <label className="block text-sm font-medium mb-1">Logo</label>
+        <label className="block text-sm font-medium mb-1">Primary Logo</label>
+        <p className="text-xs text-muted-foreground mb-2">
+          Used across the app (sidebar, favicon-adjacent branding). Keep this on a neutral/transparent background.
+        </p>
         {data.logoUrl && (
           <img
             src={data.logoUrl}
@@ -97,6 +121,27 @@ export function CompanySettingsPanel() {
           type="file"
           accept="image/*"
           onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+          className="text-sm"
+        />
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium mb-1">Secondary Logo (optional)</label>
+        <p className="text-xs text-muted-foreground mb-2">
+          Shown on client-facing quotes instead of the primary logo — useful if your primary logo
+          is the same color as your brand's primary color and would blend into the quote header.
+        </p>
+        {data.secondaryLogoUrl && (
+          <img
+            src={data.secondaryLogoUrl}
+            alt="Secondary company logo"
+            className="h-16 mb-2 rounded border"
+          />
+        )}
+        <input
+          type="file"
+          accept="image/*"
+          onChange={(e) => setSecondaryLogoFile(e.target.files?.[0] ?? null)}
           className="text-sm"
         />
       </div>

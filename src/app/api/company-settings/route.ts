@@ -21,6 +21,7 @@ export async function GET() {
   return NextResponse.json({
     name: company.name,
     logoUrl: company.logoUrl,
+    secondaryLogoUrl: company.secondaryLogoUrl,
     primaryColor: company.settings?.primaryColor ?? "#1B3A5C",
     accentColor: company.settings?.accentColor ?? "#2E86AB",
   })
