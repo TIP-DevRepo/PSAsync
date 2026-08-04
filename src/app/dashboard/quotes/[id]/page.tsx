@@ -642,9 +642,10 @@ export default function QuoteDetailPage({
         </div>
       )}
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-        {/* Left: main content */}
-        <div className="lg:col-span-3 space-y-6">
+      <div className="overflow-x-auto">
+        <div className="w-full max-w-[2256px] mx-auto grid grid-cols-1 lg:grid-cols-[auto_minmax(20rem,1fr)] gap-6 items-start">
+          {/* Left: main content — sized to the Line Item table's own natural width, not a fraction of the container */}
+          <div className="space-y-6">
           <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 text-sm">
             {!showEditableHeader ? (
               <>
@@ -819,7 +820,7 @@ export default function QuoteDetailPage({
         </div>
 
         {/* Right: Version History + Comments */}
-        <div className="lg:col-span-2 space-y-6">
+        <div className="space-y-6">
           <div className="rounded-lg border border-border bg-card shadow-card p-4 text-sm">
               <h2 className="font-semibold text-sm mb-2 text-foreground">Version History</h2>
               <div className="space-y-1">
@@ -896,6 +897,7 @@ export default function QuoteDetailPage({
               </HeroButton>
             </div>
           </div>
+        </div>
         </div>
       </div>
 
