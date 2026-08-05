@@ -1,11 +1,12 @@
 "use client"
 
-import { useState, useEffect, use, useRef } from "react"
+import { useState, useEffect, use } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { POLineItemBuilder, type POLineItemBuilderItem, type POCatalogOption } from "@/components/purchase-orders/POLineItemBuilder"
+import { FileUploadZone } from "@/components/attachments/FileUploadZone"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Shipment {
@@ -101,8 +102,6 @@ export default function PurchaseOrderDetailPage({
   const [postingComment, setPostingComment] = useState(false)
 
   const [attachments, setAttachments] = useState<POAttachmentType[]>([])
-  const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [catalog, setCatalog] = useState<POCatalogOption[]>([])
 
@@ -166,30 +165,6 @@ export default function PurchaseOrderDetailPage({
     setNewComment("")
     setPostingComment(false)
     loadComments()
-  }
-
-  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setUploading(true)
-    const formData = new FormData()
-    formData.append("file", file)
-
-    const res = await fetch(`/api/purchase-orders/${id}/attachments`, {
-      method: "POST",
-      body: formData,
-    })
-    setUploading(false)
-
-    if (res.ok) {
-      toast.success("File uploaded")
-      loadAttachments()
-    } else {
-      toast.error("Couldn't upload file")
-    }
-
-    if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
   async function handleDeleteAttachment(attachmentId: string) {
@@ -403,21 +378,11 @@ export default function PurchaseOrderDetailPage({
 
         {activeTab === "attachments" && (
           <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 max-w-2xl">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-sm text-foreground">Attachments</h2>
-              <div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={handleFileSelected}
-                  className="hidden"
-                  id="po-attachment-upload"
-                />
-                <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                  {uploading ? "Uploading..." : "+ Upload File"}
-                </Button>
-              </div>
-            </div>
+            <h2 className="font-semibold text-sm text-foreground">Attachments</h2>
+            <FileUploadZone
+              uploadUrl={`/api/purchase-orders/${id}/attachments`}
+              onUploaded={loadAttachments}
+            />
             <div className="space-y-2">
               {attachments.length === 0 && (
                 <p className="text-sm text-muted-foreground">No files attached yet.</p>

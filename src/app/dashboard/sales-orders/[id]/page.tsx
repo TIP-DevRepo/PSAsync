@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, use, useRef } from "react"
+import { useState, useEffect, use } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
@@ -8,6 +8,7 @@ import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { SOLineItemBuilder, type SOCatalogOption, type SOVendorOption, type SOLineItemBuilderItem } from "@/components/sales-orders/SOLineItemBuilder"
+import { FileUploadZone } from "@/components/attachments/FileUploadZone"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface SOLineItem {
@@ -171,8 +172,6 @@ export default function SalesOrderDetailPage({
   const [postingComment, setPostingComment] = useState(false)
 
   const [attachments, setAttachments] = useState<SOAttachmentType[]>([])
-  const [uploading, setUploading] = useState(false)
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const [catalog, setCatalog] = useState<SOCatalogOption[]>([])
   const [vendors, setVendors] = useState<SOVendorOption[]>([])
@@ -242,30 +241,6 @@ export default function SalesOrderDetailPage({
     loadComments()
   }
 
-  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setUploading(true)
-    const formData = new FormData()
-    formData.append("file", file)
-
-    const res = await fetch(`/api/sales-orders/${id}/attachments`, {
-      method: "POST",
-      body: formData,
-    })
-    setUploading(false)
-
-    if (res.ok) {
-      toast.success("File uploaded")
-      loadAttachments()
-    } else {
-      toast.error("Couldn't upload file")
-    }
-
-    if (fileInputRef.current) fileInputRef.current.value = ""
-  }
-
   async function handleDeleteAttachment(attachmentId: string) {
     await fetch(`/api/sales-orders/${id}/attachments/${attachmentId}`, { method: "DELETE" })
     toast.success("Attachment removed")
@@ -282,12 +257,27 @@ export default function SalesOrderDetailPage({
   }
 
   async function updateLineItem(lineItemId: string, patch: Record<string, unknown>) {
-    await fetch(`/api/sales-orders/${id}/line-items/${lineItemId}`, {
+    // Optimistic update — unlike Purchase Orders, no SO line item field
+    // triggers a server-side side effect (no auto status advance), so
+    // there's never a reason to wait on a full reload here. Matches the
+    // Doherty Threshold rule: perceived speed matters more than a
+    // "confirmed by the server" round trip for a reversible field edit.
+    setSo((prev) =>
+      prev
+        ? { ...prev, lineItems: prev.lineItems.map((li) => (li.id === lineItemId ? { ...li, ...patch } : li)) }
+        : prev
+    )
+
+    const res = await fetch(`/api/sales-orders/${id}/line-items/${lineItemId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     })
-    loadSO()
+
+    if (!res.ok) {
+      toast.error("Couldn't save that change")
+      loadSO()
+    }
   }
 
   async function deleteLineItem(lineItemId: string) {
@@ -539,21 +529,11 @@ export default function SalesOrderDetailPage({
 
         {activeTab === "attachments" && (
           <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 max-w-2xl">
-            <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-sm text-foreground">Attachments</h2>
-              <div>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  onChange={handleFileSelected}
-                  className="hidden"
-                  id="so-attachment-upload"
-                />
-                <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
-                  {uploading ? "Uploading..." : "+ Upload File"}
-                </Button>
-              </div>
-            </div>
+            <h2 className="font-semibold text-sm text-foreground">Attachments</h2>
+            <FileUploadZone
+              uploadUrl={`/api/sales-orders/${id}/attachments`}
+              onUploaded={loadAttachments}
+            />
             <div className="space-y-2">
               {attachments.length === 0 && (
                 <p className="text-sm text-muted-foreground">No files attached yet.</p>

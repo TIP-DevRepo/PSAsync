@@ -92,7 +92,7 @@ export function AddLineItemModal<T extends CatalogOptionBase>({
               type="number"
               value={quantity}
               onChange={(e) => setQuantity(Number(e.target.value) || 1)}
-              className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground"
+              className="w-20 rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>
         </div>

@@ -177,36 +177,36 @@ export function SOLineItemBuilder({
         {isEditing ? (
           <>
             <td className="py-2 pr-2 align-top">
-              <input type="text" defaultValue={partNumberValue} onBlur={(e) => onUpdate(li.id, { partNumber: e.target.value })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground" />
+              <input type="text" defaultValue={partNumberValue} onBlur={(e) => onUpdate(li.id, { partNumber: e.target.value })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground" />
             </td>
             <td className="py-2 pr-2 align-top">
-              <input type="text" defaultValue={li.name} onBlur={(e) => onUpdate(li.id, { name: e.target.value })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs font-medium text-foreground" />
-              <input type="text" defaultValue={li.description ?? ""} placeholder="Description" onBlur={(e) => onUpdate(li.id, { description: e.target.value })} className="mt-1 w-full rounded border border-border bg-background px-2 py-1 text-xs text-muted-foreground" />
+              <input type="text" defaultValue={li.name} onBlur={(e) => onUpdate(li.id, { name: e.target.value })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring font-medium text-foreground" />
+              <input type="text" defaultValue={li.description ?? ""} placeholder="Description" onBlur={(e) => onUpdate(li.id, { description: e.target.value })} className="mt-1 w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-muted-foreground" />
             </td>
             <td className="py-2 pr-2 align-top">
-              <select value={li.vendorId ?? ""} onChange={(e) => onUpdate(li.id, { vendorId: e.target.value || null })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground">
+              <select value={li.vendorId ?? ""} onChange={(e) => onUpdate(li.id, { vendorId: e.target.value || null })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground">
                 <option value="">—</option>
                 {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
             </td>
             <td className="py-2 pr-2 align-top">
-              <input type="text" defaultValue={li.vendorSku ?? ""} onBlur={(e) => onUpdate(li.id, { vendorSku: e.target.value })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground" />
+              <input type="text" defaultValue={li.vendorSku ?? ""} onBlur={(e) => onUpdate(li.id, { vendorSku: e.target.value })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground" />
             </td>
             <td className="py-2 pr-2 align-top text-right">
-              <input type="number" defaultValue={li.quantity} onBlur={(e) => onUpdate(li.id, { quantity: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
+              <input type="number" defaultValue={li.quantity} onBlur={(e) => onUpdate(li.id, { quantity: Number(e.target.value) })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-right text-foreground tabular-nums" />
             </td>
             <td className="py-2 pr-2 align-top text-right">
-              <input type="number" step="0.01" defaultValue={li.cost} onBlur={(e) => onUpdate(li.id, { cost: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
+              <input type="number" step="0.01" defaultValue={li.cost} onBlur={(e) => onUpdate(li.id, { cost: Number(e.target.value) })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-right text-foreground tabular-nums" />
             </td>
             <td className="py-2 pr-2 align-top text-right">
-              <input type="number" step="0.01" defaultValue={li.unitPrice} onBlur={(e) => onUpdate(li.id, { unitPrice: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
+              <input type="number" step="0.01" defaultValue={li.unitPrice} onBlur={(e) => onUpdate(li.id, { unitPrice: Number(e.target.value) })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-right text-foreground tabular-nums" />
             </td>
             <td className="py-2 pr-2 align-top text-right">
-              <input type="number" step="1" defaultValue={li.discount} onBlur={(e) => onUpdate(li.id, { discount: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
+              <input type="number" step="1" defaultValue={li.discount} onBlur={(e) => onUpdate(li.id, { discount: Number(e.target.value) })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-right text-foreground tabular-nums" />
             </td>
             <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
             <td className="py-2 pr-2 align-top">
-              <select value={typeValueOf(li)} onChange={(e) => onUpdate(li.id, typePatchFor(e.target.value as TypeValue))} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground">
+              <select value={typeValueOf(li)} onChange={(e) => onUpdate(li.id, typePatchFor(e.target.value as TypeValue))} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground">
                 <option value="ONE_TIME">One-time</option>
                 <option value="MONTHLY">Monthly</option>
                 <option value="QUARTERLY">Quarterly</option>
@@ -261,8 +261,8 @@ export function SOLineItemBuilder({
                   <td className="py-2 pl-4" colSpan={COLUMNS.length}>
                     <div className="flex items-center gap-2 flex-wrap">
                       <span className="text-xs font-semibold text-primary">📦</span>
-                      <input type="text" defaultValue={li.name} disabled={locked} onBlur={(e) => onUpdate(li.id, { name: e.target.value })} className="rounded border border-border bg-background px-2 py-1 text-xs font-semibold text-foreground" />
-                      <select value={li.bundleDisplayMode ?? "COLLAPSED"} disabled={locked} onChange={(e) => onUpdate(li.id, { bundleDisplayMode: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-xs text-foreground">
+                      <input type="text" defaultValue={li.name} disabled={locked} onBlur={(e) => onUpdate(li.id, { name: e.target.value })} className="rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring font-semibold text-foreground" />
+                      <select value={li.bundleDisplayMode ?? "COLLAPSED"} disabled={locked} onChange={(e) => onUpdate(li.id, { bundleDisplayMode: e.target.value })} className="rounded-md border border-border bg-background px-1 py-0.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground">
                         <option value="COLLAPSED">Combined price</option>
                         <option value="ITEMIZED">Itemized</option>
                       </select>
@@ -310,35 +310,35 @@ export function SOLineItemBuilder({
             <div className="space-y-3">
               <div>
                 <label className="block text-sm font-medium mb-1 text-foreground">Name *</label>
-                <input type="text" value={adhoc.name} onChange={(e) => setAdhoc({ ...adhoc, name: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                <input type="text" value={adhoc.name} onChange={(e) => setAdhoc({ ...adhoc, name: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-sm font-medium mb-1 text-foreground">Part #</label>
-                  <input type="text" value={adhoc.partNumber} onChange={(e) => setAdhoc({ ...adhoc, partNumber: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                  <input type="text" value={adhoc.partNumber} onChange={(e) => setAdhoc({ ...adhoc, partNumber: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1 text-foreground">Vendor</label>
-                  <select value={adhoc.vendorId} onChange={(e) => setAdhoc({ ...adhoc, vendorId: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground">
+                  <select value={adhoc.vendorId} onChange={(e) => setAdhoc({ ...adhoc, vendorId: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                     <option value="">—</option>
                     {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
                   </select>
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1 text-foreground">Vendor SKU</label>
-                  <input type="text" value={adhoc.vendorSku} onChange={(e) => setAdhoc({ ...adhoc, vendorSku: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                  <input type="text" value={adhoc.vendorSku} onChange={(e) => setAdhoc({ ...adhoc, vendorSku: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1 text-foreground">Qty</label>
-                  <input type="number" value={adhoc.quantity} onChange={(e) => setAdhoc({ ...adhoc, quantity: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                  <input type="number" value={adhoc.quantity} onChange={(e) => setAdhoc({ ...adhoc, quantity: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1 text-foreground">Price</label>
-                  <input type="number" step="0.01" value={adhoc.unitPrice} onChange={(e) => setAdhoc({ ...adhoc, unitPrice: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                  <input type="number" step="0.01" value={adhoc.unitPrice} onChange={(e) => setAdhoc({ ...adhoc, unitPrice: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <div>
                   <label className="block text-sm font-medium mb-1 text-foreground">Cost</label>
-                  <input type="number" step="0.01" value={adhoc.cost} onChange={(e) => setAdhoc({ ...adhoc, cost: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground" />
+                  <input type="number" step="0.01" value={adhoc.cost} onChange={(e) => setAdhoc({ ...adhoc, cost: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
               </div>
               <div className="flex justify-end">
