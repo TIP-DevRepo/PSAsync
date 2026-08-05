@@ -208,19 +208,35 @@ export default function PurchaseOrderDetailPage({
   }
 
   async function updateLineItem(lineItemId: string, patch: Record<string, unknown>) {
-    // Optimistic update for the common toggles (received) so the checkbox
-    // feels instant — everything else just waits on the reload.
+    // Optimistic update applies immediately for every field.
     setPo((prev) =>
       prev
         ? { ...prev, lineItems: prev.lineItems.map((li) => (li.id === lineItemId ? { ...li, ...patch } : li)) }
         : prev
     )
-    await fetch(`/api/purchase-orders/${id}/line-items/${lineItemId}`, {
+
+    const res = await fetch(`/api/purchase-orders/${id}/line-items/${lineItemId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(patch),
     })
-    loadPO()
+
+    if (!res.ok) {
+      toast.error("Couldn't save that change")
+      loadPO()
+      return
+    }
+
+    // Only "received" has a real server-side side effect (auto-advancing
+    // the PO's own status once every item is checked) — that's the only
+    // case where a full reload is actually needed. Reloading after every
+    // field edit was what caused the race: blurring an unrelated field
+    // (e.g. Serial #) right before checking "received" fired its own
+    // reload, which could land AFTER the received reload and stomp the
+    // checkbox back to its old value.
+    if ("received" in patch) {
+      loadPO()
+    }
   }
 
   async function deleteLineItem(lineItemId: string) {
