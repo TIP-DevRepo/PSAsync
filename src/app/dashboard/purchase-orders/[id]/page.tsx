@@ -1,22 +1,13 @@
 "use client"
 
-import { useState, useEffect, use } from "react"
+import { useState, useEffect, use, useRef } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { TabsBar } from "@/components/ui/tabs-bar"
+import { POLineItemBuilder, type POLineItemBuilderItem, type POCatalogOption } from "@/components/purchase-orders/POLineItemBuilder"
 
-interface POLineItem {
-  id: string
-  name: string
-  description: string | null
-  sku: string | null
-  quantity: number
-  unitCost: number
-  serialNumber: string | null
-  received: boolean
-  sortOrder: number
-}
-
+// ─── Types ────────────────────────────────────────────────────────────────
 interface Shipment {
   id: string
   carrier: string | null
@@ -34,13 +25,44 @@ interface PODetail {
   sentAt: string | null
   expectedAt: string | null
   receivedAt: string | null
+  shipToClient: boolean
+  shipContactName: string | null
+  shipAddress: string | null
+  shipAddress2: string | null
+  shipCity: string | null
+  shipState: string | null
+  shipZip: string | null
+  shipCountry: string | null
   createdAt: string
   vendor: { id: string; name: string; email: string | null }
   user: { id: string; name: string }
   salesOrder: { id: string; soNumber: string } | null
-  lineItems: POLineItem[]
+  lineItems: (POLineItemBuilderItem & { sku: string | null })[]
   shipments: Shipment[]
 }
+
+interface POCommentType {
+  id: string
+  authorName: string
+  message: string
+  createdAt: string
+}
+
+interface POAttachmentType {
+  id: string
+  fileName: string
+  fileUrl: string
+  fileSize: number | null
+  createdAt: string
+}
+
+type POTabKey = "details" | "notes" | "attachments"
+
+const PO_TABS: { key: POTabKey; label: string }[] = [
+  { key: "details", label: "Details" },
+  { key: "notes", label: "Internal Notes" },
+  { key: "attachments", label: "Attachments" },
+]
 
 const STATUS_OPTIONS = ["DRAFT", "PARTS_ORDERED", "RECEIVED", "ON_HOLD", "BACKORDERED", "CANCELLED"]
 
@@ -55,6 +77,13 @@ function money(n: number) {
   return `$${n.toFixed(2)}`
 }
 
+function fileSizeLabel(bytes: number | null) {
+  if (!bytes) return ""
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+}
+
 export default function PurchaseOrderDetailPage({
   params,
 }: {
@@ -65,6 +94,17 @@ export default function PurchaseOrderDetailPage({
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [changingStatus, setChangingStatus] = useState(false)
+  const [activeTab, setActiveTab] = useState<POTabKey>("details")
+
+  const [comments, setComments] = useState<POCommentType[]>([])
+  const [newComment, setNewComment] = useState("")
+  const [postingComment, setPostingComment] = useState(false)
+
+  const [attachments, setAttachments] = useState<POAttachmentType[]>([])
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const [catalog, setCatalog] = useState<POCatalogOption[]>([])
 
   function loadPO() {
     fetch(`/api/purchase-orders/${id}`)
@@ -81,8 +121,25 @@ export default function PurchaseOrderDetailPage({
       })
   }
 
+  function loadComments() {
+    fetch(`/api/purchase-orders/${id}/comments`)
+      .then((res) => res.json())
+      .then((data) => Array.isArray(data) && setComments(data))
+  }
+
+  function loadAttachments() {
+    fetch(`/api/purchase-orders/${id}/attachments`)
+      .then((res) => res.json())
+      .then((data) => Array.isArray(data) && setAttachments(data))
+  }
+
   useEffect(() => {
     loadPO()
+    loadComments()
+    loadAttachments()
+    fetch("/api/catalog")
+      .then((res) => res.json())
+      .then((data) => Array.isArray(data) && setCatalog(data.filter((i: { active: boolean }) => i.active)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -98,31 +155,99 @@ export default function PurchaseOrderDetailPage({
     loadPO()
   }
 
-  async function handleToggleReceived(lineItemId: string, received: boolean) {
-    // Optimistic update
+  async function handlePostComment() {
+    if (!newComment.trim()) return
+    setPostingComment(true)
+    await fetch(`/api/purchase-orders/${id}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ message: newComment.trim() }),
+    })
+    setNewComment("")
+    setPostingComment(false)
+    loadComments()
+  }
+
+  async function handleFileSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    setUploading(true)
+    const formData = new FormData()
+    formData.append("file", file)
+
+    const res = await fetch(`/api/purchase-orders/${id}/attachments`, {
+      method: "POST",
+      body: formData,
+    })
+    setUploading(false)
+
+    if (res.ok) {
+      toast.success("File uploaded")
+      loadAttachments()
+    } else {
+      toast.error("Couldn't upload file")
+    }
+
+    if (fileInputRef.current) fileInputRef.current.value = ""
+  }
+
+  async function handleDeleteAttachment(attachmentId: string) {
+    await fetch(`/api/purchase-orders/${id}/attachments/${attachmentId}`, { method: "DELETE" })
+    toast.success("Attachment removed")
+    loadAttachments()
+  }
+
+  async function createLineItem(payload: Record<string, unknown>) {
+    await fetch(`/api/purchase-orders/${id}/line-items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    loadPO()
+  }
+
+  async function updateLineItem(lineItemId: string, patch: Record<string, unknown>) {
+    // Optimistic update for the common toggles (received) so the checkbox
+    // feels instant — everything else just waits on the reload.
     setPo((prev) =>
       prev
-        ? { ...prev, lineItems: prev.lineItems.map((li) => (li.id === lineItemId ? { ...li, received } : li)) }
+        ? { ...prev, lineItems: prev.lineItems.map((li) => (li.id === lineItemId ? { ...li, ...patch } : li)) }
         : prev
     )
     await fetch(`/api/purchase-orders/${id}/line-items/${lineItemId}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ received }),
+      body: JSON.stringify(patch),
     })
     loadPO()
   }
 
-  async function handleUpdateSerial(lineItemId: string, serialNumber: string) {
-    await fetch(`/api/purchase-orders/${id}/line-items/${lineItemId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ serialNumber }),
-    })
+  async function deleteLineItem(lineItemId: string) {
+    await fetch(`/api/purchase-orders/${id}/line-items/${lineItemId}`, { method: "DELETE" })
+    loadPO()
   }
 
-  if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
-  if (notFound || !po) return <p className="text-sm text-red-600">Purchase Order not found.</p>
+  async function duplicateLineItem(li: POLineItemBuilderItem) {
+    await fetch(`/api/purchase-orders/${id}/line-items`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        catalogItemId: li.catalogItemId,
+        name: li.name,
+        description: li.description ?? undefined,
+        partNumber: li.partNumber ?? undefined,
+        sku: li.sku ?? undefined,
+        vendorSku: li.vendorSku ?? undefined,
+        quantity: li.quantity,
+        unitCost: li.unitCost,
+      }),
+    })
+    loadPO()
+  }
+
+  if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
+  if (notFound || !po) return <p className="text-sm text-danger">Purchase Order not found.</p>
 
   const total = po.lineItems.reduce((sum, li) => sum + li.unitCost * li.quantity, 0)
   const receivedCount = po.lineItems.filter((li) => li.received).length
@@ -130,16 +255,16 @@ export default function PurchaseOrderDetailPage({
   return (
     <div className="w-full space-y-6">
       <div>
-        <Link href="/dashboard/purchase-orders" className="text-sm text-zinc-500 hover:underline inline-block mb-2">
+        <Link href="/dashboard/purchase-orders" className="text-sm text-muted-foreground hover:text-foreground hover:underline inline-block mb-2">
           ← Back to Purchase Orders
         </Link>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-2xl font-bold">{po.poNumber}</h1>
+            <h1 className="text-display font-semibold tracking-tight text-foreground">{po.poNumber}</h1>
             {po.salesOrder && (
-              <p className="text-sm text-zinc-500">
+              <p className="text-sm text-muted-foreground">
                 From{" "}
-                <Link href={`/dashboard/sales-orders/${po.salesOrder.id}`} className="hover:underline font-medium">
+                <Link href={`/dashboard/sales-orders/${po.salesOrder.id}`} className="hover:underline font-medium text-foreground">
                   {po.salesOrder.soNumber}
                 </Link>
               </p>
@@ -149,7 +274,7 @@ export default function PurchaseOrderDetailPage({
             value={po.status}
             onChange={(e) => handleChangeStatus(e.target.value)}
             disabled={changingStatus}
-            className="rounded-full bg-zinc-100 px-3 py-1.5 text-xs font-medium text-zinc-600 dark:bg-zinc-800 border-0"
+            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             {STATUS_OPTIONS.map((s) => (
               <option key={s} value={s}>{statusLabel(s)}</option>
@@ -158,100 +283,148 @@ export default function PurchaseOrderDetailPage({
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-6 items-start">
-        {/* Left: main content */}
-        <div className="lg:col-span-3 space-y-6">
-          <div className="rounded-md border p-4 space-y-1 text-sm">
-            <p><span className="text-zinc-500">Vendor:</span> {po.vendor.name}</p>
-            <p><span className="text-zinc-500">Owner:</span> {po.user.name}</p>
-            <p><span className="text-zinc-500">Payment Terms:</span> {po.paymentType}</p>
-            <p><span className="text-zinc-500">Created:</span> {new Date(po.createdAt).toLocaleDateString()}</p>
-          </div>
+      <TabsBar tabs={PO_TABS} activeTab={activeTab} onChange={setActiveTab} ariaLabel="Purchase Order sections" />
 
-          <div className="space-y-3">
+      <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
+        {activeTab === "details" && (
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            {/* Left: main content */}
+            <div className="lg:col-span-2 space-y-6">
+              <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1 text-sm">
+                <p><span className="text-muted-foreground">Vendor:</span> <span className="text-foreground">{po.vendor.name}</span></p>
+                <p><span className="text-muted-foreground">Owner:</span> <span className="text-foreground">{po.user.name}</span></p>
+                <p><span className="text-muted-foreground">Payment Terms:</span> <span className="text-foreground">{po.paymentType}</span></p>
+                <p><span className="text-muted-foreground">Created:</span> <span className="text-foreground">{new Date(po.createdAt).toLocaleDateString()}</span></p>
+              </div>
+
+              <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1 text-sm">
+                <h2 className="font-semibold text-sm mb-1 text-foreground">
+                  Ship To {po.shipToClient ? "(Client)" : "(Us)"}
+                </h2>
+                <p className="text-foreground">{po.shipContactName ?? "—"}</p>
+                <p className="text-muted-foreground">{po.shipAddress ?? "—"}</p>
+                {po.shipAddress2 && <p className="text-muted-foreground">{po.shipAddress2}</p>}
+                <p className="text-muted-foreground">{[po.shipCity, po.shipState, po.shipZip].filter(Boolean).join(", ")}</p>
+              </div>
+
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h2 className="font-semibold text-heading text-foreground">Line Items</h2>
+                  <span className="text-sm text-muted-foreground">
+                    {receivedCount} / {po.lineItems.length} received
+                  </span>
+                </div>
+
+                <POLineItemBuilder
+                  items={po.lineItems}
+                  catalog={catalog}
+                  locked={po.status === "CANCELLED" || po.status === "RECEIVED"}
+                  onCreate={createLineItem}
+                  onUpdate={updateLineItem}
+                  onDelete={deleteLineItem}
+                  onDuplicate={duplicateLineItem}
+                />
+
+                <div className="flex justify-end">
+                  <div className="rounded-lg border border-border bg-card shadow-card p-3 text-sm">
+                    <span className="text-muted-foreground mr-3">Total</span>
+                    <span className="font-semibold text-foreground tabular-nums">{money(total)}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Right: Shipments */}
+            <div className="space-y-3">
+              <h2 className="font-semibold text-sm text-foreground">Shipments</h2>
+              {po.shipments.length === 0 && (
+                <p className="text-sm text-muted-foreground">No shipments logged yet.</p>
+              )}
+              {po.shipments.map((s) => (
+                <div key={s.id} className="rounded-lg border border-border bg-card shadow-card p-3 text-sm space-y-0.5">
+                  <p className="font-medium text-foreground">{s.carrier ?? "Unknown carrier"}</p>
+                  <p className="text-muted-foreground">{s.trackingNumber ?? "No tracking number"}</p>
+                  {s.shippedAt && (
+                    <p className="text-xs text-muted-foreground">Shipped {new Date(s.shippedAt).toLocaleDateString()}</p>
+                  )}
+                  {s.notes && <p className="text-xs text-muted-foreground">{s.notes}</p>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "notes" && (
+          <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 max-w-2xl">
+            <h2 className="font-semibold text-sm text-foreground">Internal Notes</h2>
+            <div className="space-y-2 max-h-96 overflow-y-auto">
+              {comments.length === 0 && (
+                <p className="text-sm text-muted-foreground">No notes yet.</p>
+              )}
+              {comments.map((c) => (
+                <div key={c.id} className="rounded-md bg-muted p-3 text-sm">
+                  <p className="text-xs font-medium text-muted-foreground mb-1">
+                    {c.authorName} · {new Date(c.createdAt).toLocaleString()}
+                  </p>
+                  <p className="whitespace-pre-wrap text-foreground">{c.message}</p>
+                </div>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <textarea
+                value={newComment}
+                onChange={(e) => setNewComment(e.target.value)}
+                placeholder="Add an internal note..."
+                rows={2}
+                className="flex-1 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+              <Button onClick={handlePostComment} disabled={postingComment || !newComment.trim()}>
+                {postingComment ? "Posting..." : "Post"}
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {activeTab === "attachments" && (
+          <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 max-w-2xl">
             <div className="flex items-center justify-between">
-              <h2 className="font-semibold text-lg">Line Items</h2>
-              <span className="text-sm text-zinc-500">
-                {receivedCount} / {po.lineItems.length} received
-              </span>
-            </div>
-
-            <div className="rounded-md border overflow-hidden">
-              <table className="w-full text-sm border-collapse">
-                <thead>
-                  <tr className="border-b text-left text-xs text-zinc-500">
-                    <th className="py-2 pl-4 w-10">✓</th>
-                    <th className="py-2">Part #</th>
-                    <th className="py-2">Description</th>
-                    <th className="py-2 w-16">Qty</th>
-                    <th className="py-2 w-24">Unit Cost</th>
-                    <th className="py-2 w-24">Total</th>
-                    <th className="py-2 w-32 pr-4">Serial #</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {po.lineItems.map((li) => (
-                    <tr key={li.id} className="border-b last:border-0">
-                      <td className="py-2 pl-4">
-                        <input
-                          type="checkbox"
-                          checked={li.received}
-                          onChange={(e) => handleToggleReceived(li.id, e.target.checked)}
-                        />
-                      </td>
-                      <td className="py-2">{li.sku ?? "—"}</td>
-                      <td className="py-2">{li.name}</td>
-                      <td className="py-2">{li.quantity}</td>
-                      <td className="py-2">{money(li.unitCost)}</td>
-                      <td className="py-2 font-medium">{money(li.unitCost * li.quantity)}</td>
-                      <td className="py-2 pr-4">
-                        <input
-                          type="text"
-                          defaultValue={li.serialNumber ?? ""}
-                          onBlur={(e) => handleUpdateSerial(li.id, e.target.value)}
-                          placeholder="—"
-                          className="w-28 rounded border px-2 py-1 text-xs"
-                        />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="flex justify-end">
-              <div className="rounded-md border p-3 text-sm">
-                <span className="text-zinc-500 mr-3">Total</span>
-                <span className="font-semibold">{money(total)}</span>
+              <h2 className="font-semibold text-sm text-foreground">Attachments</h2>
+              <div>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  onChange={handleFileSelected}
+                  className="hidden"
+                  id="po-attachment-upload"
+                />
+                <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+                  {uploading ? "Uploading..." : "+ Upload File"}
+                </Button>
               </div>
             </div>
+            <div className="space-y-2">
+              {attachments.length === 0 && (
+                <p className="text-sm text-muted-foreground">No files attached yet.</p>
+              )}
+              {attachments.map((a) => (
+                <div key={a.id} className="flex items-center justify-between rounded-md border border-border p-3 text-sm">
+                  <a href={a.fileUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                    {a.fileName}
+                  </a>
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs text-muted-foreground">{fileSizeLabel(a.fileSize)}</span>
+                    <button
+                      onClick={() => handleDeleteAttachment(a.id)}
+                      className="text-xs text-danger hover:underline"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
-        </div>
-
-        {/* Right: Shipments + Notes */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="rounded-md border p-4 space-y-3">
-            <h2 className="font-semibold text-sm">Shipments</h2>
-            {po.shipments.length === 0 && (
-              <p className="text-sm text-zinc-500">No shipments logged yet.</p>
-            )}
-            {po.shipments.map((s) => (
-              <div key={s.id} className="rounded-md border p-3 text-sm space-y-0.5">
-                <p className="font-medium">{s.carrier ?? "Unknown carrier"}</p>
-                <p className="text-zinc-500">{s.trackingNumber ?? "No tracking number"}</p>
-                {s.shippedAt && (
-                  <p className="text-xs text-zinc-400">Shipped {new Date(s.shippedAt).toLocaleDateString()}</p>
-                )}
-                {s.notes && <p className="text-xs text-zinc-500">{s.notes}</p>}
-              </div>
-            ))}
-          </div>
-
-          <div className="rounded-md border p-4 space-y-2">
-            <h2 className="font-semibold text-sm">Notes</h2>
-            <p className="text-sm text-zinc-500">{po.internalNotes || "No notes."}</p>
-          </div>
-        </div>
+        )}
       </div>
     </div>
   )

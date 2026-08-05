@@ -542,6 +542,18 @@ model PurchaseOrder {
   expectedAt    DateTime?
   receivedAt    DateTime?
 
+  // Shipping — true means it ships straight to the client (pulled from
+  // the linked Sales Order's ship-to snapshot); false means it ships to
+  // one of your own company's locations (the Client flagged isInternal)
+  shipToClient    Boolean @default(false)
+  shipContactName String?
+  shipAddress     String?
+  shipAddress2    String?
+  shipCity        String?
+  shipState       String?
+  shipZip         String?
+  shipCountry     String?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 

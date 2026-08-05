@@ -54,28 +54,12 @@ export async function POST(req: NextRequest) {
   if (!body.vendorId) {
     return NextResponse.json({ error: "A vendor is required" }, { status: 400 })
   }
-  if (!Array.isArray(body.soLineItemIds) || body.soLineItemIds.length === 0) {
-    return NextResponse.json({ error: "At least one line item is required" }, { status: 400 })
-  }
 
   const vendor = await prisma.vendor.findUnique({ where: { id: body.vendorId, companyId } })
   if (!vendor) {
     return NextResponse.json({ error: "Vendor not found" }, { status: 404 })
   }
 
-  // Confirm every requested line item actually belongs to this company's SO
-  const soLineItems = await prisma.sOLineItem.findMany({
-    where: {
-      id: { in: body.soLineItemIds },
-      salesOrder: { companyId },
-    },
-    include: { salesOrder: { select: { id: true } } },
-  })
-  if (soLineItems.length === 0) {
-    return NextResponse.json({ error: "No valid line items found" }, { status: 400 })
-  }
-
-  const salesOrderId = soLineItems[0].salesOrderId
   const settings = await prisma.companySettings.findUnique({ where: { companyId } })
   const prefix = settings?.poPrefix ?? "PO"
   const paymentType = body.paymentType || settings?.poDefaultPaymentType || "Net30"
@@ -83,6 +67,46 @@ export async function POST(req: NextRequest) {
   const year = new Date().getFullYear()
   const existingCount = await prisma.purchaseOrder.count({ where: { companyId } })
   const poNumber = `${prefix}-${year}-${String(existingCount + 1).padStart(4, "0")}`
+
+  // Two ways into this route: generating a PO from selected SO line items
+  // (the existing "Generate Purchase Order" flow on a Sales Order), or
+  // creating a blank PO manually with no line items yet — line items get
+  // added afterward from the PO detail page in that case.
+  const isGeneratingFromSO = Array.isArray(body.soLineItemIds) && body.soLineItemIds.length > 0
+
+  let salesOrderId: string | null = body.salesOrderId || null
+  let lineItemsCreate: {
+    sourceSOLineItemId: string
+    name: string
+    description: string | null
+    sku: string | null
+    quantity: number
+    unitCost: number
+    sortOrder: number
+  }[] = []
+
+  if (isGeneratingFromSO) {
+    // Confirm every requested line item actually belongs to this company's SO
+    const soLineItems = await prisma.sOLineItem.findMany({
+      where: {
+        id: { in: body.soLineItemIds },
+        salesOrder: { companyId },
+      },
+    })
+    if (soLineItems.length === 0) {
+      return NextResponse.json({ error: "No valid line items found" }, { status: 400 })
+    }
+    salesOrderId = soLineItems[0].salesOrderId
+    lineItemsCreate = soLineItems.map((li, idx) => ({
+      sourceSOLineItemId: li.id,
+      name: li.name,
+      description: li.description,
+      sku: li.sku,
+      quantity: li.quantity,
+      unitCost: li.cost,
+      sortOrder: idx,
+    }))
+  }
 
   const purchaseOrder = await prisma.purchaseOrder.create({
     data: {
@@ -93,17 +117,16 @@ export async function POST(req: NextRequest) {
       poNumber,
       status: "DRAFT",
       paymentType,
-      lineItems: {
-        create: soLineItems.map((li, idx) => ({
-          sourceSOLineItemId: li.id,
-          name: li.name,
-          description: li.description,
-          sku: li.sku,
-          quantity: li.quantity,
-          unitCost: li.cost,
-          sortOrder: idx,
-        })),
-      },
+      internalNotes: body.internalNotes || null,
+      shipToClient: body.shipToClient ?? false,
+      shipContactName: body.shipContactName || null,
+      shipAddress: body.shipAddress || null,
+      shipAddress2: body.shipAddress2 || null,
+      shipCity: body.shipCity || null,
+      shipState: body.shipState || null,
+      shipZip: body.shipZip || null,
+      shipCountry: body.shipCountry || null,
+      ...(lineItemsCreate.length > 0 ? { lineItems: { create: lineItemsCreate } } : {}),
     },
   })
 

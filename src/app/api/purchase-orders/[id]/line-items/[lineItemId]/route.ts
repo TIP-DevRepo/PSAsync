@@ -32,6 +32,11 @@ export async function PATCH(
   if (body.serialNumber !== undefined) data.serialNumber = body.serialNumber || null
   if (body.unitCost !== undefined) data.unitCost = Number(body.unitCost)
   if (body.quantity !== undefined) data.quantity = Number(body.quantity)
+  if (body.name !== undefined) data.name = body.name
+  if (body.description !== undefined) data.description = body.description || null
+  if (body.partNumber !== undefined) data.partNumber = body.partNumber || null
+  if (body.sku !== undefined) data.sku = body.sku || null
+  if (body.sortOrder !== undefined) data.sortOrder = Number(body.sortOrder)
 
   const lineItem = await prisma.pOLineItem.update({ where: { id: lineItemId }, data })
 
@@ -51,4 +56,24 @@ export async function PATCH(
   }
 
   return NextResponse.json(lineItem)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ lineItemId: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+
+  const { lineItemId } = await params
+  const existing = await getOwnedLineItem(lineItemId, session.user.companyId)
+  if (!existing) {
+    return NextResponse.json({ error: "Line item not found" }, { status: 404 })
+  }
+
+  await prisma.pOLineItem.delete({ where: { id: lineItemId } })
+
+  return NextResponse.json({ deleted: true })
 }

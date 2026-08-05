@@ -16,6 +16,7 @@ export async function GET() {
       email: true,
       phone: true,
       status: true,
+      isInternal: true,
       industryRef: { select: { name: true } },
     },
     orderBy: { name: "asc" },

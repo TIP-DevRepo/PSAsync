@@ -24,6 +24,8 @@ export async function GET(
       salesOrder: { select: { id: true, soNumber: true } },
       lineItems: { orderBy: { sortOrder: "asc" } },
       shipments: { orderBy: { createdAt: "asc" } },
+      comments: { orderBy: { createdAt: "asc" } },
+      attachments: { orderBy: { createdAt: "desc" } },
     },
   })
 
@@ -68,6 +70,14 @@ export async function PATCH(
   if (body.paymentType !== undefined) data.paymentType = body.paymentType
   if (body.internalNotes !== undefined) data.internalNotes = body.internalNotes || null
   if (body.expectedAt !== undefined) data.expectedAt = body.expectedAt ? new Date(body.expectedAt) : null
+  if (body.shipToClient !== undefined) data.shipToClient = body.shipToClient
+  if (body.shipContactName !== undefined) data.shipContactName = body.shipContactName || null
+  if (body.shipAddress !== undefined) data.shipAddress = body.shipAddress || null
+  if (body.shipAddress2 !== undefined) data.shipAddress2 = body.shipAddress2 || null
+  if (body.shipCity !== undefined) data.shipCity = body.shipCity || null
+  if (body.shipState !== undefined) data.shipState = body.shipState || null
+  if (body.shipZip !== undefined) data.shipZip = body.shipZip || null
+  if (body.shipCountry !== undefined) data.shipCountry = body.shipCountry || null
 
   const updated = await prisma.purchaseOrder.update({ where: { id }, data })
 
