@@ -34,7 +34,7 @@ interface FieldConfig {
   hint?: string
 }
 
-const LIVE_DISTRIBUTORS: DistributorKey[] = ["INGRAM_MICRO", "TD_SYNNEX"]
+const LIVE_DISTRIBUTORS: DistributorKey[] = ["INGRAM_MICRO", "TD_SYNNEX", "DH"]
 
 const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fields: FieldConfig[] }> = {
   INGRAM_MICRO: {
@@ -56,8 +56,12 @@ const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fi
   },
   DH: {
     label: "D&H",
-    note: "API Key only. Strong in SMB/MSP space.",
-    fields: [{ key: "apiKey", label: "API Key" }],
+    note: "OAuth 2.0 Client Credentials + Account Number. Strong in SMB/MSP space.",
+    fields: [
+      { key: "clientId", label: "Client ID" },
+      { key: "clientSecret", label: "Client Secret" },
+      { key: "apiKey", label: "Account Number", hint: "Your 10-digit D&H customer account number" },
+    ],
   },
   AMAZON_BUSINESS: {
     label: "Amazon Business",
