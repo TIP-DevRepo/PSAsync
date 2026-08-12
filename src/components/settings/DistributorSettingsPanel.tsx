@@ -34,7 +34,7 @@ interface FieldConfig {
   hint?: string
 }
 
-const LIVE_DISTRIBUTORS: DistributorKey[] = ["INGRAM_MICRO", "TD_SYNNEX", "DH"]
+const LIVE_DISTRIBUTORS: DistributorKey[] = ["INGRAM_MICRO", "TD_SYNNEX", "DH", "AMAZON_BUSINESS"]
 
 const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fields: FieldConfig[] }> = {
   INGRAM_MICRO: {
@@ -65,10 +65,12 @@ const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fi
   },
   AMAZON_BUSINESS: {
     label: "Amazon Business",
-    note: "OAuth via Amazon Seller/Business account.",
+    note: "LWA refresh token flow. Useful for commodity items.",
     fields: [
       { key: "clientId", label: "Client ID" },
       { key: "clientSecret", label: "Client Secret" },
+      { key: "partnerId", label: "Refresh Token", hint: "From the Solution Provider Portal" },
+      { key: "apiKey", label: "Account Email", hint: "Email tied to your Amazon Business account" },
     ],
   },
 }
