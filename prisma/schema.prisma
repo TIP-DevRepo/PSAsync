@@ -261,6 +261,7 @@ model Vendor {
   distributorKey String?
   isVendor       Boolean      @default(true)
   isManufacturer Boolean      @default(false)
+  logoUrl        String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

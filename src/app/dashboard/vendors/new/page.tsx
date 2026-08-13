@@ -21,6 +21,8 @@ export default function NewVendorPage() {
     leadTimeDays: "",
     notes: "",
     isDistributor: false,
+    isVendor: true,
+    isManufacturer: false,
   })
 
   function update(field: string, value: string | boolean) {
@@ -139,13 +141,19 @@ export default function NewVendorPage() {
         <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium mb-1">Payment Terms</label>
-            <input
-              type="text"
-              placeholder="e.g. Net30"
+            <select
               value={form.paymentTerms}
               onChange={(e) => update("paymentTerms", e.target.value)}
               className="w-full rounded-md border px-3 py-2 text-sm"
-            />
+            >
+              <option value="">Not set</option>
+              <option value="Due on Receipt">Due on Receipt</option>
+              <option value="Net15">Net 15</option>
+              <option value="Net30">Net 30</option>
+              <option value="Net45">Net 45</option>
+              <option value="Net60">Net 60</option>
+              <option value="Prepaid">Prepaid</option>
+            </select>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Lead Time (days)</label>
@@ -158,14 +166,32 @@ export default function NewVendorPage() {
           </div>
         </div>
 
-        <label className="flex items-center gap-2 text-sm">
-          <input
-            type="checkbox"
-            checked={form.isDistributor}
-            onChange={(e) => update("isDistributor", e.target.checked)}
-          />
-          This vendor is a distributor (for quote pricing lookups)
-        </label>
+        <div className="flex flex-wrap gap-6">
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.isVendor}
+              onChange={(e) => update("isVendor", e.target.checked)}
+            />
+            Vendor (I can buy from them)
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.isManufacturer}
+              onChange={(e) => update("isManufacturer", e.target.checked)}
+            />
+            Manufacturer (they make the item)
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={form.isDistributor}
+              onChange={(e) => update("isDistributor", e.target.checked)}
+            />
+            Distributor (for quote pricing lookups)
+          </label>
+        </div>
       </div>
 
       <div className="rounded-md border p-4">
