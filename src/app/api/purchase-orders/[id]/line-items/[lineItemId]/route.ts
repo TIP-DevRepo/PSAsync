@@ -36,6 +36,7 @@ export async function PATCH(
   if (body.description !== undefined) data.description = body.description || null
   if (body.partNumber !== undefined) data.partNumber = body.partNumber || null
   if (body.sku !== undefined) data.sku = body.sku || null
+  if (body.vendorSku !== undefined) data.vendorSku = body.vendorSku || null
   if (body.sortOrder !== undefined) data.sortOrder = Number(body.sortOrder)
 
   const lineItem = await prisma.pOLineItem.update({ where: { id: lineItemId }, data })

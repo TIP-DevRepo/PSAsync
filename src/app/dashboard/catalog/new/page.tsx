@@ -1,18 +1,34 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+
+const UNIT_OPTIONS = [
+  { value: "each", label: "Each" },
+  { value: "hour", label: "Hour" },
+  { value: "user", label: "User" },
+  { value: "device", label: "Device" },
+  { value: "gb", label: "GB" },
+  { value: "license", label: "License" },
+]
+
+interface VendorOption {
+  id: string
+  name: string
+  isVendor: boolean
+  isManufacturer: boolean
+}
 
 export default function NewCatalogItemPage() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [vendors, setVendors] = useState<VendorOption[]>([])
 
   const [form, setForm] = useState({
     name: "",
     description: "",
-    sku: "",
     category: "",
     subcategory: "",
     type: "PHYSICAL",
@@ -21,7 +37,17 @@ export default function NewCatalogItemPage() {
     unit: "each",
     taxable: true,
     active: true,
+    vendorId: "",
+    vendorSku: "",
+    manufacturerId: "",
+    manufacturerSku: "",
   })
+
+  useEffect(() => {
+    fetch("/api/vendors")
+      .then((res) => res.json())
+      .then((data) => Array.isArray(data) && setVendors(data))
+  }, [])
 
   function update(field: string, value: string | boolean) {
     setForm({ ...form, [field]: value })
@@ -52,8 +78,11 @@ export default function NewCatalogItemPage() {
     router.push(`/dashboard/catalog/${item.id}`)
   }
 
+  const vendorOptions = vendors.filter((v) => v.isVendor)
+  const manufacturerOptions = vendors.filter((v) => v.isManufacturer)
+
   return (
-    <div className="w-full space-y-6:">
+    <div className="w-full space-y-6">
       <h1 className="text-2xl font-bold">Add Catalog Item</h1>
 
       <div className="rounded-md border p-4 space-y-3">
@@ -79,15 +108,6 @@ export default function NewCatalogItemPage() {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className="block text-sm font-medium mb-1">SKU</label>
-            <input
-              type="text"
-              value={form.sku}
-              onChange={(e) => update("sku", e.target.value)}
-              className="w-full rounded-md border px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
             <label className="block text-sm font-medium mb-1">Type</label>
             <select
               value={form.type}
@@ -98,6 +118,18 @@ export default function NewCatalogItemPage() {
               <option value="SERVICE">Service</option>
               <option value="SUBSCRIPTION">Subscription</option>
               <option value="BUNDLE">Bundle</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Billing Unit</label>
+            <select
+              value={form.unit}
+              onChange={(e) => update("unit", e.target.value)}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            >
+              {UNIT_OPTIONS.map((u) => (
+                <option key={u.value} value={u.value}>{u.label}</option>
+              ))}
             </select>
           </div>
         </div>
@@ -125,7 +157,7 @@ export default function NewCatalogItemPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-2 gap-3">
           <div>
             <label className="block text-sm font-medium mb-1">Cost Price ($)</label>
             <input
@@ -143,15 +175,6 @@ export default function NewCatalogItemPage() {
               step="0.01"
               value={form.msrp}
               onChange={(e) => update("msrp", e.target.value)}
-              className="w-full rounded-md border px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Unit</label>
-            <input
-              type="text"
-              value={form.unit}
-              onChange={(e) => update("unit", e.target.value)}
               className="w-full rounded-md border px-3 py-2 text-sm"
             />
           </div>
@@ -174,6 +197,53 @@ export default function NewCatalogItemPage() {
             />
             Active
           </label>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 pt-2 border-t">
+          <div>
+            <label className="block text-sm font-medium mb-1">Vendor</label>
+            <select
+              value={form.vendorId}
+              onChange={(e) => update("vendorId", e.target.value)}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            >
+              <option value="">Not set</option>
+              {vendorOptions.map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Vendor SKU</label>
+            <input
+              type="text"
+              value={form.vendorSku}
+              onChange={(e) => update("vendorSku", e.target.value)}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Manufacturer</label>
+            <select
+              value={form.manufacturerId}
+              onChange={(e) => update("manufacturerId", e.target.value)}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            >
+              <option value="">Not set</option>
+              {manufacturerOptions.map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Manufacturer SKU</label>
+            <input
+              type="text"
+              value={form.manufacturerSku}
+              onChange={(e) => update("manufacturerSku", e.target.value)}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            />
+          </div>
         </div>
       </div>
 

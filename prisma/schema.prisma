@@ -107,6 +107,8 @@ model User {
   poComments                   POComment[]
   soAttachments                SOAttachment[]
   poAttachments                POAttachment[]
+  vendorAttachments             VendorAttachment[]
+  catalogItemChangeLogs         CatalogItemChangeLog[]
   triggeredWorkflows          ApprovalWorkflow[]    @relation("WorkflowTriggerUser")
   approvalDecisions           QuoteApproval[]       @relation("ApprovalDecidedBy")
 }
@@ -257,13 +259,72 @@ model Vendor {
   notes          String?      @db.Text
   isDistributor  Boolean      @default(false)
   distributorKey String?
+  isVendor       Boolean      @default(true)
+  isManufacturer Boolean      @default(false)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  catalogItems   CatalogItem[]
-  purchaseOrders PurchaseOrder[]
-  soLineItems    SOLineItem[]
+  catalogItems         CatalogItem[] @relation("CatalogItemVendor")
+  catalogItemsAsMaker  CatalogItem[] @relation("CatalogItemManufacturer")
+  purchaseOrders       PurchaseOrder[]
+  soLineItems          SOLineItem[]
+  locations            VendorLocation[]
+  contacts             VendorContact[]
+  attachments          VendorAttachment[]
+}
+
+// ─── VENDOR LOCATION ──────────────────────────────────────────────────────
+model VendorLocation {
+  id        String   @id @default(cuid())
+  vendorId  String
+  vendor    Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  name      String
+  address   String?
+  address2  String?
+  city      String?
+  state     String?
+  zip       String?
+  country   String?
+  phone     String?
+  notes     String?
+  isPrimary Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  contacts VendorContact[]
+}
+
+// ─── VENDOR CONTACT ───────────────────────────────────────────────────────
+model VendorContact {
+  id         String          @id @default(cuid())
+  vendorId   String
+  vendor     Vendor          @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  firstName  String
+  lastName   String
+  title      String?
+  email      String?
+  phone      String?
+  mobile     String?
+  locationId String?
+  location   VendorLocation? @relation(fields: [locationId], references: [id])
+  isPrimary  Boolean         @default(false)
+  notes      String?         @db.Text
+  createdAt  DateTime        @default(now())
+  updatedAt  DateTime        @updatedAt
+}
+
+// ─── VENDOR ATTACHMENTS ───────────────────────────────────────────────────
+model VendorAttachment {
+  id               String   @id @default(cuid())
+  vendorId         String
+  vendor           Vendor   @relation(fields: [vendorId], references: [id], onDelete: Cascade)
+  fileName         String
+  fileUrl          String
+  fileSize         Int?
+  uploadedByUserId String
+  uploadedByUser   User     @relation(fields: [uploadedByUserId], references: [id])
+  createdAt        DateTime @default(now())
 }
 
 enum VendorType {
@@ -281,14 +342,17 @@ enum VendorStatus {
 
 // ─── CATALOG ITEM ─────────────────────────────────────────────────────────────
 model CatalogItem {
-  id          String   @id @default(cuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  vendorId    String?
-  vendor      Vendor?  @relation(fields: [vendorId], references: [id])
+  id               String   @id @default(cuid())
+  companyId        String
+  company          Company  @relation(fields: [companyId], references: [id])
+  vendorId         String?
+  vendor           Vendor?  @relation("CatalogItemVendor", fields: [vendorId], references: [id])
+  vendorSku        String?
+  manufacturerId   String?
+  manufacturer     Vendor?  @relation("CatalogItemManufacturer", fields: [manufacturerId], references: [id])
+  manufacturerSku  String?
   name        String
   description String?  @db.Text
-  sku         String?
   category    String?
   subcategory String?
   type        ItemType @default(PHYSICAL)
@@ -305,6 +369,20 @@ model CatalogItem {
   templateLineItems QuoteTemplateLineItem[]
   soLineItems       SOLineItem[]
   poLineItems       POLineItem[]
+  changeLogs        CatalogItemChangeLog[]
+}
+
+// ─── CATALOG ITEM CHANGE LOG ──────────────────────────────────────────────
+model CatalogItemChangeLog {
+  id              String      @id @default(cuid())
+  catalogItemId   String
+  catalogItem     CatalogItem @relation(fields: [catalogItemId], references: [id], onDelete: Cascade)
+  changedByUserId String
+  changedByUser   User        @relation(fields: [changedByUserId], references: [id])
+  fieldName       String
+  oldValue        String?
+  newValue        String?
+  createdAt       DateTime    @default(now())
 }
 
 enum ItemType {

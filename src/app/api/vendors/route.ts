@@ -18,6 +18,8 @@ export async function GET() {
       email: true,
       phone: true,
       isDistributor: true,
+      isVendor: true,
+      isManufacturer: true,
     },
     orderBy: { name: "asc" },
   })
@@ -47,6 +49,8 @@ export async function POST(req: NextRequest) {
       leadTimeDays: body.leadTimeDays ? Number(body.leadTimeDays) : null,
       notes: body.notes || null,
       isDistributor: body.isDistributor || false,
+      isVendor: body.isVendor ?? true,
+      isManufacturer: body.isManufacturer || false,
     },
   })
 

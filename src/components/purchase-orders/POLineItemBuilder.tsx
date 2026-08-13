@@ -25,7 +25,8 @@ export interface POLineItemBuilderItem {
 export interface POCatalogOption {
   id: string
   name: string
-  sku: string | null
+  vendorSku: string | null
+  manufacturerSku: string | null
   cost: number
 }
 
@@ -173,10 +174,10 @@ export function POLineItemBuilder({
       {showAddModal && (
         <AddLineItemModal
           catalog={catalog}
-          catalogSubtitle={(item) => `${item.sku ?? "No SKU"} · $${item.cost.toFixed(2)}`}
+          catalogSubtitle={(item) => `${item.manufacturerSku ?? item.vendorSku ?? "No SKU"} · $${item.cost.toFixed(2)}`}
           onClose={() => setShowAddModal(false)}
           onAddCatalog={(item, quantity) =>
-            onCreate({ catalogItemId: item.id, name: item.name, partNumber: item.sku ?? undefined, unitCost: item.cost, quantity })
+            onCreate({ catalogItemId: item.id, name: item.name, partNumber: item.manufacturerSku ?? item.vendorSku ?? undefined, vendorSku: item.vendorSku ?? undefined, unitCost: item.cost, quantity })
           }
           adhocForm={
             <div className="space-y-3">

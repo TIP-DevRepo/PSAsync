@@ -7,7 +7,6 @@ import { Modal } from "@/components/Modal"
 export interface CatalogOptionBase {
   id: string
   name: string
-  sku: string | null
 }
 
 // Shared shell for "Add Line Item" modals across Sales Orders and
@@ -35,10 +34,8 @@ export function AddLineItemModal<T extends CatalogOptionBase>({
   const [search, setSearch] = useState("")
   const [quantity, setQuantity] = useState(1)
 
-  const filtered = catalog.filter(
-    (c) =>
-      c.name.toLowerCase().includes(search.toLowerCase()) ||
-      (c.sku ?? "").toLowerCase().includes(search.toLowerCase())
+  const filtered = catalog.filter((c) =>
+    c.name.toLowerCase().includes(search.toLowerCase())
   )
 
   return (

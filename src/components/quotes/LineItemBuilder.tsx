@@ -113,7 +113,8 @@ export interface LineItemBuilderItem {
 export interface CatalogOption {
   id: string
   name: string
-  sku: string | null
+  vendorSku: string | null
+  manufacturerSku: string | null
   msrp: number
   cost: number
   taxable: boolean
@@ -1313,7 +1314,7 @@ export function LineItemBuilder({
             onCreate(addModalSection === NO_SECTION ? null : addModalSection, {
               catalogItemId: item.id,
               name: item.name,
-              sku: item.sku ?? undefined,
+              sku: item.manufacturerSku ?? item.vendorSku ?? undefined,
               unitPrice: item.msrp,
               cost: item.cost,
               taxable: item.taxable,
@@ -1458,7 +1459,8 @@ function AddLineItemModal({
   const filtered = catalog.filter(
     (c) =>
       c.name.toLowerCase().includes(search.toLowerCase()) ||
-      (c.sku ?? "").toLowerCase().includes(search.toLowerCase())
+      (c.vendorSku ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (c.manufacturerSku ?? "").toLowerCase().includes(search.toLowerCase())
   )
 
   return (
@@ -1505,7 +1507,7 @@ function AddLineItemModal({
                   <div>
                     <p className="font-medium">{item.name}</p>
                     <p className="text-xs text-zinc-500">
-                      {item.sku ?? "No SKU"} · ${item.msrp.toFixed(2)}
+                      {item.manufacturerSku ?? item.vendorSku ?? "No SKU"} · ${item.msrp.toFixed(2)}
                     </p>
                   </div>
                   <Button

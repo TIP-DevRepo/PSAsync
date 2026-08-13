@@ -2,7 +2,7 @@ import { prisma } from "@/lib/prisma"
 import type { QuoteLineItem } from "@/generated/prisma"
 
 type QuoteLineItemWithCatalog = QuoteLineItem & {
-  catalogItem: { vendorId: string | null; sku: string | null } | null
+  catalogItem: { vendorId: string | null; vendorSku: string | null; manufacturerSku: string | null } | null
 }
 
 // Only line items that were actually "chosen" become part of the Sales
@@ -28,7 +28,7 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
     include: {
       lineItems: {
         orderBy: { sortOrder: "asc" },
-        include: { catalogItem: { select: { vendorId: true, sku: true } } },
+        include: { catalogItem: { select: { vendorId: true, vendorSku: true, manufacturerSku: true } } },
       },
       client: { include: { mainShippingLocation: true } },
       company: { include: { settings: true } },
@@ -67,7 +67,7 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
           // catalogItem link, so both simply stay null — there's no vendor
           // data anywhere upstream for those.
           vendorId: li.catalogItem?.vendorId ?? null,
-          partNumber: li.sku,
+          partNumber: li.catalogItem?.manufacturerSku ?? li.catalogItem?.vendorSku ?? li.sku,
           name: li.name,
           description: li.description,
           sku: li.sku,

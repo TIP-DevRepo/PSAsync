@@ -32,6 +32,7 @@ export async function POST(
       description: body.description || null,
       partNumber: body.partNumber || null,
       sku: body.sku || null,
+      vendorSku: body.vendorSku || null,
       quantity: Number(body.quantity) || 1,
       unitCost: Number(body.unitCost) || 0,
       sortOrder: siblingCount,

@@ -9,16 +9,19 @@ import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 interface CatalogItem {
   id: string
   name: string
-  sku: string | null
   category: string | null
   type: string
   msrp: number
   cost: number
   taxable: boolean
   active: boolean
+  vendor: { name: string } | null
+  vendorSku: string | null
+  manufacturer: { name: string } | null
+  manufacturerSku: string | null
 }
 
-type SortColumn = "name" | "sku" | "category" | "type" | "cost" | "msrp" | "status"
+type SortColumn = "name" | "category" | "type" | "cost" | "msrp" | "status"
 type SortDirection = "asc" | "desc" | null
 type Density = "compact" | "default" | "comfortable"
 
@@ -32,8 +35,6 @@ function compareItems(a: CatalogItem, b: CatalogItem, column: SortColumn): numbe
   switch (column) {
     case "name":
       return a.name.localeCompare(b.name)
-    case "sku":
-      return (a.sku ?? "").localeCompare(b.sku ?? "")
     case "category":
       return (a.category ?? "").localeCompare(b.category ?? "")
     case "type":
@@ -106,7 +107,8 @@ export default function CatalogListPage() {
   const filtered = items.filter((i) => {
     const matchesSearch =
       i.name.toLowerCase().includes(search.toLowerCase()) ||
-      (i.sku ?? "").toLowerCase().includes(search.toLowerCase())
+      (i.vendorSku ?? "").toLowerCase().includes(search.toLowerCase()) ||
+      (i.manufacturerSku ?? "").toLowerCase().includes(search.toLowerCase())
     const matchesCategory = categoryFilter === "ALL" || i.category === categoryFilter
     return matchesSearch && matchesCategory
   })
@@ -150,10 +152,10 @@ export default function CatalogListPage() {
         <div className="flex gap-3">
           <input
             type="text"
-            placeholder="Search by name or SKU..."
+            placeholder="Search by name, vendor SKU, or manufacturer SKU..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-64 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            className="w-72 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           <select
             value={categoryFilter}
@@ -188,7 +190,6 @@ export default function CatalogListPage() {
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-left text-caption text-muted-foreground">
               <SortableHeader label="Name" column="name" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
-              <SortableHeader label="SKU" column="sku" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="Category" column="category" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="Type" column="type" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="Cost" column="cost" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" />
@@ -213,7 +214,6 @@ export default function CatalogListPage() {
                     {item.name}
                   </Link>
                 </td>
-                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{item.sku ?? "—"}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{item.category ?? "—"}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{item.type}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-right tabular-nums text-foreground`}>${item.cost.toFixed(2)}</td>
@@ -230,7 +230,7 @@ export default function CatalogListPage() {
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={8} className="py-6 text-center text-muted-foreground">
+                <td colSpan={7} className="py-6 text-center text-muted-foreground">
                   No catalog items found.
                 </td>
               </tr>

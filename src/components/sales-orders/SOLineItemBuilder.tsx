@@ -36,7 +36,8 @@ export interface SOLineItemBuilderItem {
 export interface SOCatalogOption {
   id: string
   name: string
-  sku: string | null
+  vendorSku: string | null
+  manufacturerSku: string | null
   msrp: number
   cost: number
   taxable: boolean
@@ -291,14 +292,15 @@ export function SOLineItemBuilder({
       {showAddModal && (
         <AddLineItemModal
           catalog={catalog}
-          catalogSubtitle={(item) => `${item.sku ?? "No SKU"} · ${item.vendor?.name ?? "No vendor"} · $${item.msrp.toFixed(2)}`}
+          catalogSubtitle={(item) => `${item.manufacturerSku ?? item.vendorSku ?? "No SKU"} · ${item.vendor?.name ?? "No vendor"} · $${item.msrp.toFixed(2)}`}
           onClose={() => { setShowAddModal(false); setAddToBundleName(null) }}
           onAddCatalog={(item, quantity) =>
             onCreate({
               catalogItemId: item.id,
               name: item.name,
-              partNumber: item.sku ?? undefined,
+              partNumber: item.manufacturerSku ?? item.vendorSku ?? undefined,
               vendorId: item.vendorId ?? undefined,
+              vendorSku: item.vendorSku ?? undefined,
               unitPrice: item.msrp,
               cost: item.cost,
               taxable: item.taxable,

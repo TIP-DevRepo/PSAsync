@@ -13,7 +13,6 @@ export async function GET() {
     select: {
       id: true,
       name: true,
-      sku: true,
       category: true,
       type: true,
       msrp: true,
@@ -22,6 +21,10 @@ export async function GET() {
       active: true,
       vendorId: true,
       vendor: { select: { id: true, name: true } },
+      vendorSku: true,
+      manufacturerId: true,
+      manufacturer: { select: { id: true, name: true } },
+      manufacturerSku: true,
     },
     orderBy: { name: "asc" },
   })
@@ -41,9 +44,11 @@ export async function POST(req: NextRequest) {
     data: {
       companyId: session.user.companyId,
       vendorId: body.vendorId || null,
+      vendorSku: body.vendorSku || null,
+      manufacturerId: body.manufacturerId || null,
+      manufacturerSku: body.manufacturerSku || null,
       name: body.name,
       description: body.description || null,
-      sku: body.sku || null,
       category: body.category || null,
       subcategory: body.subcategory || null,
       type: body.type || "PHYSICAL",
