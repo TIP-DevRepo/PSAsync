@@ -92,6 +92,7 @@ model User {
   active      Boolean  @default(true)
   maxDiscount Float    @default(10)
   microsoftId String?  @unique
+  preferredDistributors String[] @default([])
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 

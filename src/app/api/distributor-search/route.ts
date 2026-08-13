@@ -21,10 +21,23 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "A search term is required" }, { status: 400 })
   }
 
-  const enabled = await prisma.distributorIntegration.findMany({
+  const distributorsParam = req.nextUrl.searchParams.get("distributors")
+  const requestedKeys = distributorsParam
+    ? distributorsParam.split(",").map((k) => k.trim()).filter(Boolean)
+    : null
+
+  const allEnabled = await prisma.distributorIntegration.findMany({
     where: { companyId: session.user.companyId, enabled: true },
     orderBy: { priority: "asc" },
   })
+
+  // A distributor filter narrows the already-enabled set, it can never
+  // re-enable something the company hasn't turned on. Omitting the param
+  // entirely (older callers, or none selected) falls back to every
+  // enabled distributor, same as before this filter existed.
+  const enabled = requestedKeys
+    ? allEnabled.filter((r) => requestedKeys.includes(r.distributor))
+    : allEnabled
 
   if (enabled.length === 0) {
     return NextResponse.json({

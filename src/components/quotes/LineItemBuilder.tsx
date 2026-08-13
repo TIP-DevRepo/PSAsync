@@ -1377,10 +1377,63 @@ function AddLineItemModal({
   const [distQty, setDistQty] = useState(1)
   const [selectedOffers, setSelectedOffers] = useState<Record<string, DistributorKey>>({})
 
+  // Which distributors to include in a search — defaults to every enabled
+  // distributor the first time, then remembers whatever the user last
+  // picked (saved server-side per user, so it stays consistent across
+  // devices instead of resetting per-browser).
+  const [distributorOptions, setDistributorOptions] = useState<{ key: DistributorKey; label: string }[]>([])
+  const [selectedDistributors, setSelectedDistributors] = useState<Set<DistributorKey>>(new Set())
+  const [distFiltersLoaded, setDistFiltersLoaded] = useState(false)
+
+  useEffect(() => {
+    if (mode !== "distributor" || distFiltersLoaded) return
+
+    Promise.all([
+      fetch("/api/distributors/enabled").then((res) => res.json()),
+      fetch("/api/distributor-search/preferences").then((res) => res.json()),
+    ]).then(([enabledList, prefs]) => {
+      const options: { key: DistributorKey; label: string }[] = Array.isArray(enabledList) ? enabledList : []
+      setDistributorOptions(options)
+
+      const saved: DistributorKey[] = Array.isArray(prefs?.distributors) ? prefs.distributors : []
+      const enabledKeys = options.map((o) => o.key)
+      // No saved preference yet (first time ever) -> everything enabled
+      // starts checked. Otherwise use the saved list, but only keep
+      // entries that are still actually enabled (a distributor may have
+      // been disabled since the user last picked it).
+      const initial = saved.length > 0 ? saved.filter((k) => enabledKeys.includes(k)) : enabledKeys
+      setSelectedDistributors(new Set(initial))
+      setDistFiltersLoaded(true)
+    })
+  }, [mode, distFiltersLoaded])
+
+  function toggleDistributor(key: DistributorKey) {
+    setSelectedDistributors((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+
+      fetch("/api/distributor-search/preferences", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ distributors: Array.from(next) }),
+      })
+
+      return next
+    })
+  }
+
   async function runDistributorSearch() {
     if (!distQuery.trim()) return
+    if (selectedDistributors.size === 0) {
+      setDistMessage("Select at least one distributor to search.")
+      return
+    }
     setDistLoading(true)
-    const res = await fetch(`/api/distributor-search?q=${encodeURIComponent(distQuery)}`)
+    const distributorParam = Array.from(selectedDistributors).join(",")
+    const res = await fetch(
+      `/api/distributor-search?q=${encodeURIComponent(distQuery)}&distributors=${encodeURIComponent(distributorParam)}`
+    )
     const data = await res.json()
     const products: DistributorProductGroup[] = data.products ?? []
     setDistProducts(products)
@@ -1484,6 +1537,20 @@ function AddLineItemModal({
 
         {mode === "distributor" && (
           <div className="space-y-3">
+            {distributorOptions.length > 0 && (
+              <div className="flex flex-wrap gap-3 rounded-md border px-3 py-2">
+                {distributorOptions.map((d) => (
+                  <label key={d.key} className="flex items-center gap-1.5 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={selectedDistributors.has(d.key)}
+                      onChange={() => toggleDistributor(d.key)}
+                    />
+                    {d.label}
+                  </label>
+                ))}
+              </div>
+            )}
             <div className="flex gap-2">
               <input
                 type="text"
