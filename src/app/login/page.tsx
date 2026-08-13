@@ -7,6 +7,13 @@ import dynamic from "next/dynamic"
 
 const Lightfall = dynamic(() => import("@/components/effects/Lightfall"), { ssr: false })
 
+// Defined once, outside the component, so this array's reference never
+// changes between renders — passing a fresh inline array literal here
+// instead would give Lightfall's internal useEffect a "new" colors prop
+// on every keystroke (since typing re-renders LoginPage), causing it to
+// tear down and rebuild the entire WebGL renderer from scratch each time.
+const LIGHTFALL_COLORS = ["#2E86AB", "#1B3A5C", "#A6C8FF"]
+
 export default function LoginPageWrapper() {
   return (
     <Suspense fallback={<div className="min-h-screen bg-gray-50" />}>
@@ -78,7 +85,7 @@ function LoginPage() {
     <div className="min-h-screen flex items-center justify-center bg-gray-50 relative overflow-hidden">
       <div className="absolute inset-0 z-0">
         <Lightfall
-          colors={["#2E86AB", "#1B3A5C", "#A6C8FF"]}
+          colors={LIGHTFALL_COLORS}
           backgroundColor="#0F2038"
           speed={0.4}
           streakCount={2}
