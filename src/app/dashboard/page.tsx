@@ -1,7 +1,7 @@
 export default function DashboardPage() {
   return (
     <div className="p-8">
-      <h1 className="text-2xl font-semibold">Welcome to PetaCore</h1>
+      <h1 className="text-2xl font-semibold">Welcome to PSAsync</h1>
       <p className="text-gray-500 mt-2">Dashboard coming soon.</p>
     </div>
   )

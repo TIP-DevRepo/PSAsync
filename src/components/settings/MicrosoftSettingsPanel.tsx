@@ -146,8 +146,8 @@ export function MicrosoftSettingsPanel() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-zinc-500">
-        Connect your own Microsoft 365 tenant so PetaCore can send and receive email through
-        Outlook. This uses your own Azure App Registration — PetaCore never has access to any
+        Connect your own Microsoft 365 tenant so PSAsync can send and receive email through
+        Outlook. This uses your own Azure App Registration — PSAsync never has access to any
         Microsoft account beyond what's explicitly connected here. You can connect more than
         one mailbox (e.g. a shared "quotes@" inbox alongside individual reps), and choose which
         one to use in other settings pages later (like which mailbox quotes get sent from).
@@ -285,8 +285,8 @@ export function MicrosoftSettingsPanel() {
       <div className="rounded-md border p-4 space-y-3">
         <h2 className="font-semibold text-sm">Step 4: Single Sign-On</h2>
         <p className="text-xs text-zinc-500">
-          Once turned on, every user in your company signs into PetaCore with their Microsoft
-          account instead of a password. Their PetaCore account must already exist (an admin
+          Once turned on, every user in your company signs into PSAsync with their Microsoft
+          account instead of a password. Their PSAsync account must already exist (an admin
           invites them under Settings → Users) — SSO links to that account by matching email, it
           doesn't create new accounts on its own.
         </p>

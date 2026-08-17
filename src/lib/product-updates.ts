@@ -1,7 +1,7 @@
 export type UpdateCategory = "New Feature" | "Improvement" | "Fix"
 
-export const PETACORE_OVERVIEW =
-  "PetaCore is a unified PSA (Professional Services Automation) platform built for MSPs and IT resellers. It brings quoting, ticketing, accounting, and HR into one connected system — Kilobid for quotes, MegaTicket for support tickets, NanoBooks for accounting, and TeraTalent for HR — so your team isn't juggling five disconnected tools to run the business."
+export const PSASYNC_OVERVIEW =
+  "PSAsync is a unified PSA (Professional Services Automation) platform built for MSPs and IT resellers. It brings quoting, ticketing, accounting, and HR into one connected system — Quotes, Tickets, Accounting, and HR — so your team isn't juggling five disconnected tools to run the business."
 
 export interface ProductUpdate {
   version: string
@@ -29,7 +29,7 @@ export const PRODUCT_UPDATES: ProductUpdate[] = [
     title: "Features & Updates page",
     category: "New Feature",
     description:
-      "A new page showing what's changed in PetaCore over time, with the most recent release spotlighted at the top. Click the PetaCore logo in the sidebar to view it.",
+      "A new page showing what's changed in PSAsync over time, with the most recent release spotlighted at the top. Click the PSAsync logo in the sidebar to view it.",
   },
   {
     version: "v0.6.01",
@@ -37,7 +37,7 @@ export const PRODUCT_UPDATES: ProductUpdate[] = [
     title: "Custom branding, favicon, and dynamic tab title",
     category: "Improvement",
     description:
-      "PetaCore now shows your company logo as the browser tab icon, and the tab title displays your company name. Also fixed the site's root URL, which was still showing a placeholder page.",
+      "PSAsync now shows your company logo as the browser tab icon, and the tab title displays your company name. Also fixed the site's root URL, which was still showing a placeholder page.",
   },
   {
     version: "v0.6.00",
