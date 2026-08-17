@@ -100,7 +100,7 @@
      matching both shadcn's --primary and HeroUI's --accent to the SAME
      real color, which is what actually makes the two libraries look
      unified. */
-  --brand-primary-base: oklch(0.55 0.18 255);
+  --brand-primary-base: oklch(0.52 0.19 275);
   --brand-secondary-base: oklch(0.6 0.15 300);
 
   /* Full 50-900 scale generated from the one base color above, using
