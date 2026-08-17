@@ -12,7 +12,7 @@ const Lightfall = dynamic(() => import("@/components/effects/Lightfall"), { ssr:
 // instead would give Lightfall's internal useEffect a "new" colors prop
 // on every keystroke (since typing re-renders LoginPage), causing it to
 // tear down and rebuild the entire WebGL renderer from scratch each time.
-const LIGHTFALL_COLORS = ["#2E86AB", "#1B3A5C", "#A6C8FF"]
+const LIGHTFALL_COLORS = ["#4e56d3", "#2f3195", "#c1c4f0"]
 
 export default function LoginPageWrapper() {
   return (
@@ -33,12 +33,12 @@ function LoginPage() {
 
   const ssoError = searchParams.get("error")
   const ssoErrorMessages: Record<string, string> = {
-    no_account_found: "No PetaCore account was found for your Microsoft email. Ask an admin to invite you first.",
+    no_account_found: "No PSAsync account was found for your Microsoft email. Ask an admin to invite you first.",
     sso_not_available: "Single sign-on isn't set up for your company yet.",
     invalid_state: "That sign-in attempt expired. Please try again.",
     token_exchange_failed: "Microsoft sign-in failed. Please try again.",
     could_not_read_profile: "Couldn't read your Microsoft profile. Please try again.",
-    no_email_on_account: "Your Microsoft account doesn't have an email address PetaCore can use.",
+    no_email_on_account: "Your Microsoft account doesn't have an email address PSAsync can use.",
   }
 
   async function handleEmailContinue(e: React.FormEvent) {
@@ -103,7 +103,7 @@ function LoginPage() {
         />
       </div>
       <div className="bg-white p-8 rounded-xl shadow-sm border border-gray-200 w-full max-w-md relative z-10">
-        <h1 className="text-2xl font-semibold text-gray-900 mb-2">PetaCore</h1>
+        <h1 className="text-2xl font-semibold text-gray-900 mb-2">PSAsync</h1>
         <p className="text-gray-500 text-sm mb-6">Sign in to your account</p>
 
         {ssoError && (
@@ -120,7 +120,7 @@ function LoginPage() {
                 type="email"
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-blue-500"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-[var(--accent)]"
                 placeholder="you@company.com"
                 required
                 autoFocus
@@ -132,7 +132,7 @@ function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              className="w-full bg-[var(--accent)] text-[var(--accent-foreground)] rounded-lg py-2 text-sm font-medium hover:bg-[var(--accent-hover)] disabled:opacity-50"
             >
               {loading ? "Checking..." : "Continue"}
             </button>
@@ -148,7 +148,7 @@ function LoginPage() {
                 <button
                   type="button"
                   onClick={() => setStep("email")}
-                  className="text-xs text-blue-600 hover:underline"
+                  className="text-xs text-[var(--accent)] hover:underline"
                 >
                   Change
                 </button>
@@ -161,7 +161,7 @@ function LoginPage() {
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-blue-500"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-900 bg-white focus:outline-none focus:border-[var(--accent)]"
                 placeholder="••••••••"
                 required
                 autoFocus
@@ -173,7 +173,7 @@ function LoginPage() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full bg-blue-600 text-white rounded-lg py-2 text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+              className="w-full bg-[var(--accent)] text-[var(--accent-foreground)] rounded-lg py-2 text-sm font-medium hover:bg-[var(--accent-hover)] disabled:opacity-50"
             >
               {loading ? "Signing in..." : "Sign in"}
             </button>

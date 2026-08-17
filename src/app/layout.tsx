@@ -32,7 +32,7 @@ export async function generateMetadata(): Promise<Metadata> {
   }
 
   return {
-    title: companyName ? `PetaCore: ${companyName}` : "PetaCore",
+    title: companyName ? `PSAsync: ${companyName}` : "PSAsync",
     description: "Multi-tenant PSA platform",
   }
 }

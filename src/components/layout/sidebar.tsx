@@ -51,7 +51,7 @@ export function Sidebar({ pagePermissions = {} }: { pagePermissions?: PagePermis
         title="Features & Updates"
       >
         <Image src="/icon.png" alt="" width={20} height={20} className="rounded-sm" />
-        <span className="text-lg font-bold tracking-tight">PetaCore</span>
+        <span className="text-lg font-bold tracking-tight">PSAsync</span>
       </Link>
       {visibleItems.map((item) => {
         const isActive = item.href === "/dashboard/settings"
