@@ -257,10 +257,6 @@ export default function ClientDetailPage() {
   }
 
   async function handleSaveDetails() {
-    if (!detailsDraft.prefix.trim()) {
-      toast.error("Company Prefix is required")
-      return
-    }
     const res = await fetch(`/api/clients/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -441,7 +437,7 @@ export default function ClientDetailPage() {
                       className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                     <p className="mt-1 text-xs text-muted-foreground">
-                      A short code used to identify this client across the platform, including generating Asset Tags for their hardware (e.g. ACM-0001).
+                      A short code used to identify this client across the platform, including generating Asset Tags for their hardware (e.g. ACM-0001). Can be added later, but is required before hardware can be received for this client.
                     </p>
                   </div>
                   <div>

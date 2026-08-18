@@ -55,6 +55,7 @@ export async function POST(req: NextRequest) {
 
     const website = (row.website ?? "").trim()
     const domain = website ? normalizeDomain(website) : null
+    const prefix = (row.prefix ?? "").trim().toUpperCase() || null
 
     const nameMatches = existingNames.has(name.toLowerCase())
     const domainMatches = domain ? existingDomains.has(domain) : false
@@ -76,6 +77,7 @@ export async function POST(req: NextRequest) {
       data: {
         companyId,
         name,
+        prefix,
         email: row.email?.trim() || null,
         phone: row.phone?.trim() || null,
         website: website || null,

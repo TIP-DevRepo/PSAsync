@@ -77,9 +77,6 @@ export async function PATCH(
   if (name !== undefined && !name.trim()) {
     return NextResponse.json({ error: "Client name can't be blank" }, { status: 400 })
   }
-  if (prefix !== undefined && !prefix.trim()) {
-    return NextResponse.json({ error: "Company Prefix can't be blank" }, { status: 400 })
-  }
 
   // Only one client per company can be marked as "your own company" at a
   // time. If this update is turning isInternal on, clear it from whichever
@@ -96,7 +93,7 @@ export async function PATCH(
     where: { id },
     data: {
       name,
-      prefix: prefix !== undefined ? prefix.trim().toUpperCase() : undefined,
+      prefix: prefix !== undefined ? (prefix.trim() ? prefix.trim().toUpperCase() : null) : undefined,
       industryId: industryId || null,
       email,
       phone,

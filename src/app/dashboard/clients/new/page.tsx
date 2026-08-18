@@ -39,10 +39,6 @@ export default function NewClientPage() {
       setError("Company name is required.")
       return
     }
-    if (!form.prefix.trim()) {
-      setError("Company Prefix is required.")
-      return
-    }
 
     setSaving(true)
     setError("")
@@ -82,7 +78,7 @@ export default function NewClientPage() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium mb-1">Company Prefix *</label>
+          <label className="block text-sm font-medium mb-1">Company Prefix</label>
           <input
             type="text"
             value={form.prefix}
@@ -92,7 +88,7 @@ export default function NewClientPage() {
             className="w-full rounded-md border px-3 py-2 text-sm uppercase"
           />
           <p className="mt-1 text-xs text-muted-foreground">
-            A short code used to identify this client across the platform, including generating Asset Tags for their hardware (e.g. ACM-0001).
+            A short code used to identify this client across the platform, including generating Asset Tags for their hardware (e.g. ACM-0001). Can be added later, but is required before hardware can be received for this client.
           </p>
         </div>
 

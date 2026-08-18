@@ -28,6 +28,7 @@ model Company {
   users                   User[]
   clients                 Client[]
   industries              Industry[]
+  categories              Category[]
   vendors                 Vendor[]
   quotes                  Quote[]
   salesOrders             SalesOrder[]
@@ -129,7 +130,7 @@ model Client {
   companyId         String
   company           Company      @relation(fields: [companyId], references: [id])
   name              String
-  prefix            String
+  prefix            String?
   nextAssetSequence Int          @default(1)
   email             String?
   phone             String?
@@ -370,6 +371,26 @@ enum VendorStatus {
   PREFERRED
 }
 
+// ─── CATEGORY ─────────────────────────────────────────────────────────────
+model Category {
+  id        String     @id @default(cuid())
+  companyId String
+  company   Company    @relation(fields: [companyId], references: [id])
+  name      String
+  parentId  String?
+  parent    Category?  @relation("CategoryChildren", fields: [parentId], references: [id])
+  children  Category[] @relation("CategoryChildren")
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  catalogItems CatalogItem[]
+
+  // Name must be unique per company regardless of where it sits in the
+  // tree — no two categories anywhere can share a name, even under
+  // different parents (e.g. only one "Cables" category ever exists).
+  @@unique([companyId, name])
+}
+
 // ─── CATALOG ITEM ─────────────────────────────────────────────────────────────
 model CatalogItem {
   id               String   @id @default(cuid())
@@ -385,6 +406,8 @@ model CatalogItem {
   description String?  @db.Text
   category    String?
   subcategory String?
+  categoryId  String?
+  categoryRef Category? @relation(fields: [categoryId], references: [id])
   type        ItemType @default(PHYSICAL)
   msrp        Float    @default(0)
   cost        Float    @default(0)

@@ -7,6 +7,7 @@ import type { ImportFieldConfig } from "@/components/import-export/ImportModal"
 
 export const CLIENT_IMPORT_FIELDS: ImportFieldConfig[] = [
   { key: "name", label: "Company Name", required: true },
+  { key: "prefix", label: "Company Prefix" },
   { key: "email", label: "Email" },
   { key: "phone", label: "Phone" },
   { key: "website", label: "Website" },
@@ -21,6 +22,7 @@ export const CLIENT_EXPORT_HEADERS = CLIENT_IMPORT_FIELDS.map((f) => f.label)
 // ready to hand to the shared CSV export helper.
 export function clientToExportRow(client: {
   name: string
+  prefix: string | null
   email: string | null
   phone: string | null
   website?: string | null
@@ -30,6 +32,7 @@ export function clientToExportRow(client: {
 }): Record<string, unknown> {
   return {
     "Company Name": client.name,
+    "Company Prefix": client.prefix ?? "",
     Email: client.email ?? "",
     Phone: client.phone ?? "",
     Website: client.website ?? "",

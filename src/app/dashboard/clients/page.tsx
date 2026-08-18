@@ -13,6 +13,7 @@ import { CLIENT_IMPORT_FIELDS, CLIENT_EXPORT_HEADERS, clientToExportRow } from "
 interface Client {
   id: string
   name: string
+  prefix: string | null
   email: string | null
   phone: string | null
   website: string | null
