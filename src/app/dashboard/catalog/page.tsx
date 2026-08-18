@@ -9,7 +9,8 @@ import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 interface CatalogItem {
   id: string
   name: string
-  category: string | null
+  categoryId: string
+  categoryRef: { name: string; parent: { name: string } | null }
   type: string
   msrp: number
   cost: number
@@ -31,14 +32,18 @@ const ROW_PADDING: Record<Density, string> = {
   comfortable: "py-5",
 }
 
+function categoryLabel(item: CatalogItem): string {
+  return item.categoryRef.parent
+    ? `${item.categoryRef.parent.name} > ${item.categoryRef.name}`
+    : item.categoryRef.name
+}
+
 function compareItems(a: CatalogItem, b: CatalogItem, column: SortColumn): number {
   switch (column) {
     case "name":
       return a.name.localeCompare(b.name)
     case "category":
-      return (a.category ?? "").localeCompare(b.category ?? "")
-    case "type":
-      return a.type.localeCompare(b.type)
+      return categoryLabel(a).localeCompare(categoryLabel(b))
     case "cost":
       return a.cost - b.cost
     case "msrp":
@@ -100,16 +105,14 @@ export default function CatalogListPage() {
       })
   }, [])
 
-  const categories = Array.from(
-    new Set(items.map((i) => i.category).filter(Boolean))
-  ) as string[]
+  const categories = Array.from(new Set(items.map((i) => categoryLabel(i))))
 
   const filtered = items.filter((i) => {
     const matchesSearch =
       i.name.toLowerCase().includes(search.toLowerCase()) ||
       (i.vendorSku ?? "").toLowerCase().includes(search.toLowerCase()) ||
       (i.manufacturerSku ?? "").toLowerCase().includes(search.toLowerCase())
-    const matchesCategory = categoryFilter === "ALL" || i.category === categoryFilter
+    const matchesCategory = categoryFilter === "ALL" || categoryLabel(i) === categoryFilter
     return matchesSearch && matchesCategory
   })
 
@@ -214,7 +217,7 @@ export default function CatalogListPage() {
                     {item.name}
                   </Link>
                 </td>
-                <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{item.category ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{categoryLabel(item)}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{item.type}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-right tabular-nums text-foreground`}>${item.cost.toFixed(2)}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-right tabular-nums font-medium text-foreground`}>${item.msrp.toFixed(2)}</td>

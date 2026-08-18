@@ -30,8 +30,7 @@ export async function GET(
 const FIELD_LABELS = {
   name: "Item Name",
   description: "Description",
-  category: "Category",
-  subcategory: "Subcategory",
+  categoryId: "Category",
   type: "Type",
   msrp: "MSRP",
   cost: "Cost Price",
@@ -47,8 +46,7 @@ const FIELD_LABELS = {
 const TRACKED_FIELDS: { key: keyof typeof FIELD_LABELS; label: string }[] = [
   { key: "name", label: "Item Name" },
   { key: "description", label: "Description" },
-  { key: "category", label: "Category" },
-  { key: "subcategory", label: "Subcategory" },
+  { key: "categoryId", label: "Category" },
   { key: "type", label: "Type" },
   { key: "msrp", label: "MSRP" },
   { key: "cost", label: "Cost Price" },
@@ -90,29 +88,17 @@ export async function PATCH(
     return NextResponse.json({ error: "Category is required" }, { status: 400 })
   }
 
-  let categoryText: string | null = null
-  let subcategoryText: string | null = null
   const category = await prisma.category.findUnique({
     where: { id: body.categoryId, companyId: session.user.companyId },
-    include: { parent: true },
   })
   if (!category) {
     return NextResponse.json({ error: "Category not found" }, { status: 404 })
-  }
-  if (category.parent) {
-    categoryText = category.parent.name
-    subcategoryText = category.name
-  } else {
-    categoryText = category.name
-    subcategoryText = null
   }
 
   const newValues = {
     name: body.name,
     description: body.description || null,
     categoryId: body.categoryId,
-    category: categoryText,
-    subcategory: subcategoryText,
     type: body.type,
     msrp: Number(body.msrp) || 0,
     cost: Number(body.cost) || 0,

@@ -13,7 +13,8 @@ export async function GET() {
     select: {
       id: true,
       name: true,
-      category: true,
+      categoryId: true,
+      categoryRef: { select: { name: true, parent: { select: { name: true } } } },
       type: true,
       msrp: true,
       cost: true,
@@ -44,24 +45,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Category is required" }, { status: 400 })
   }
 
-  // Old category/subcategory text fields are kept in sync automatically
-  // so existing pages (like the Catalog list filter) keep working during
-  // the transition, until those fields are removed entirely later.
-  let categoryText: string | null = null
-  let subcategoryText: string | null = null
   const category = await prisma.category.findUnique({
     where: { id: body.categoryId, companyId: session.user.companyId },
-    include: { parent: true },
   })
   if (!category) {
     return NextResponse.json({ error: "Category not found" }, { status: 404 })
-  }
-  if (category.parent) {
-    categoryText = category.parent.name
-    subcategoryText = category.name
-  } else {
-    categoryText = category.name
-    subcategoryText = null
   }
 
   const item = await prisma.catalogItem.create({
@@ -74,8 +62,6 @@ export async function POST(req: NextRequest) {
       name: body.name,
       description: body.description || null,
       categoryId: body.categoryId,
-      category: categoryText,
-      subcategory: subcategoryText,
       type: body.type || "PHYSICAL",
       msrp: Number(body.msrp) || 0,
       cost: Number(body.cost) || 0,

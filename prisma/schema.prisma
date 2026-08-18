@@ -404,10 +404,8 @@ model CatalogItem {
   manufacturerSku  String?
   name        String
   description String?  @db.Text
-  category    String?
-  subcategory String?
-  categoryId  String?
-  categoryRef Category? @relation(fields: [categoryId], references: [id])
+  categoryId  String
+  categoryRef Category @relation(fields: [categoryId], references: [id])
   type        ItemType @default(PHYSICAL)
   msrp        Float    @default(0)
   cost        Float    @default(0)
