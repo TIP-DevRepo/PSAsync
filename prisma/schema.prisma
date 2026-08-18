@@ -129,7 +129,7 @@ model Client {
   companyId         String
   company           Company      @relation(fields: [companyId], references: [id])
   name              String
-  prefix            String?
+  prefix            String
   nextAssetSequence Int          @default(1)
   email             String?
   phone             String?
