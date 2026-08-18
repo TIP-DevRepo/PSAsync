@@ -38,6 +38,7 @@ model Company {
   microsoftConnections    MicrosoftConnection[]
   approvalWorkflows       ApprovalWorkflow[]
   roles                   Role[]
+  contactTags             ContactTag[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -226,7 +227,7 @@ model Contact {
   locationType ContactLocationType @default(IN_OFFICE)
   locationId   String?
   location     ClientLocation?     @relation(fields: [locationId], references: [id])
-  isPrimary    Boolean             @default(false)
+    isPrimary    Boolean             @default(false)
   role         String?
   notes        String?             @db.Text
   createdAt    DateTime            @default(now())
@@ -235,6 +236,32 @@ model Contact {
   quotes                  Quote[]
   billingForLocations     ClientLocation[] @relation("LocationBillingContact")
   shippingForLocations    ClientLocation[] @relation("LocationShippingContact")
+  tags                    ContactTagAssignment[]
+}
+
+// ─── CONTACT TAG ─────────────────────────────────────────────────────────────
+model ContactTag {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  color     String?
+  createdAt DateTime @default(now())
+
+  contacts ContactTagAssignment[]
+
+  @@unique([companyId, name])
+}
+
+model ContactTagAssignment {
+  id           String     @id @default(cuid())
+  contactId    String
+  contact      Contact    @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  contactTagId String
+  contactTag   ContactTag @relation(fields: [contactTagId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([contactId, contactTagId])
 }
 
 enum ContactLocationType {

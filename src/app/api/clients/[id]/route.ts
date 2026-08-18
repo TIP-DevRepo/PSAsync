@@ -16,7 +16,9 @@ export async function GET(
   const client = await prisma.client.findUnique({
     where: { id, companyId: session.user.companyId },
     include: {
-      contacts: true,
+      contacts: {
+        include: { tags: { include: { contactTag: true } } },
+      },
       locations: {
         include: { billingContact: true, shippingContact: true },
       },

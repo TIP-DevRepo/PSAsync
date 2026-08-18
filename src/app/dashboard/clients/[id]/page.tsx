@@ -10,6 +10,12 @@ import { Combobox } from "@/components/ui/combobox"
 import { Modal } from "@/components/Modal"
 import { Ticket, Target, Package, FileText, KeyRound, FolderOpen, Radar } from "lucide-react"
 
+interface ContactTag {
+  id: string
+  name: string
+  color: string | null
+}
+
 interface Contact {
   id: string
   firstName: string
@@ -22,6 +28,7 @@ interface Contact {
   locationId: string | null
   isPrimary: boolean
   notes: string | null
+  tags: { contactTag: ContactTag }[]
 }
 
 interface ClientLocation {
@@ -193,15 +200,23 @@ export default function ClientDetailPage() {
     locationId: "",
     notes: "",
     isPrimary: false,
+    tagIds: [] as string[],
   })
   const [viewingContact, setViewingContact] = useState<Contact | null>(null)
 
   const [industries, setIndustries] = useState<{ id: string; name: string }[]>([])
+  const [contactTags, setContactTags] = useState<ContactTag[]>([])
 
   function loadIndustries() {
     fetch("/api/industries")
       .then((res) => res.json())
       .then((data) => setIndustries(data))
+  }
+
+  function loadContactTags() {
+    fetch("/api/contact-tags")
+      .then((res) => res.json())
+      .then((data) => setContactTags(data))
   }
 
   function loadClient() {
@@ -216,6 +231,7 @@ export default function ClientDetailPage() {
   useEffect(() => {
     loadClient()
     loadIndustries()
+    loadContactTags()
   }, [id])
 
   // ─── Details tab ────────────────────────────────────────────────────
@@ -307,6 +323,7 @@ export default function ClientDetailPage() {
       locationId: "",
       notes: "",
       isPrimary: false,
+      tagIds: [],
     })
     setShowAddContact(false)
     loadClient()
@@ -788,6 +805,38 @@ export default function ClientDetailPage() {
                   />
                   Set as primary contact
                 </label>
+                <div>
+                  <label className="block text-xs text-muted-foreground mb-1">Tags</label>
+                  <div className="flex flex-wrap gap-2">
+                    {contactTags.map((tag) => {
+                      const selected = newContact.tagIds.includes(tag.id)
+                      return (
+                        <button
+                          key={tag.id}
+                          type="button"
+                          onClick={() =>
+                            setNewContact({
+                              ...newContact,
+                              tagIds: selected
+                                ? newContact.tagIds.filter((t) => t !== tag.id)
+                                : [...newContact.tagIds, tag.id],
+                            })
+                          }
+                          className={`rounded-full px-3 py-1 text-xs border transition-colors ${
+                            selected
+                              ? "bg-primary text-primary-foreground border-primary"
+                              : "bg-card text-muted-foreground border-border hover:bg-surface-hover"
+                          }`}
+                        >
+                          {tag.name}
+                        </button>
+                      )
+                    })}
+                    {contactTags.length === 0 && (
+                      <p className="text-xs text-muted-foreground">No tags yet, add some in Settings → Clients → Contact Tags.</p>
+                    )}
+                  </div>
+                </div>
                 <Button onClick={handleAddContact}>Save Contact</Button>
               </div>
             )}
@@ -814,11 +863,16 @@ export default function ClientDetailPage() {
                     onClick={() => setViewingContact(contact)}
                     className="w-full text-left rounded-lg border border-border bg-card shadow-card p-3 text-sm hover:bg-surface-hover transition-colors"
                   >
-                    <p className="font-medium text-foreground">
-                      {contact.firstName} {contact.lastName}
+                    <p className="font-medium text-foreground flex flex-wrap items-center gap-2">
+                      <span>{contact.firstName} {contact.lastName}</span>
                       {contact.isPrimary && (
-                        <span className="ml-2 rounded-full bg-info-bg px-2 py-0.5 text-xs text-info">Primary</span>
+                        <span className="rounded-full bg-info-bg px-2 py-0.5 text-xs text-info">Primary</span>
                       )}
+                      {contact.tags.map((t) => (
+                        <span key={t.contactTag.id} className="rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
+                          {t.contactTag.name}
+                        </span>
+                      ))}
                     </p>
                     <p className="text-muted-foreground">{contact.title}</p>
                     <p className="text-muted-foreground">{contact.email} {contact.phone && `· ${contact.phone}`}</p>
@@ -919,6 +973,7 @@ export default function ClientDetailPage() {
         <ContactDetailModal
           contact={viewingContact}
           locations={client.locations}
+          contactTags={contactTags}
           onClose={() => setViewingContact(null)}
           onSave={handleSaveContact}
         />
@@ -1093,11 +1148,13 @@ function LocationDetailModal({
 function ContactDetailModal({
   contact,
   locations,
+  contactTags,
   onClose,
   onSave,
 }: {
   contact: Contact
   locations: ClientLocation[]
+  contactTags: ContactTag[]
   onClose: () => void
   onSave: (contactId: string, data: Record<string, unknown>) => void
 }) {
@@ -1113,6 +1170,7 @@ function ContactDetailModal({
     locationId: contact.locationId ?? "",
     notes: contact.notes ?? "",
     isPrimary: contact.isPrimary,
+    tagIds: contact.tags.map((t) => t.contactTag.id),
   })
 
   const currentLocation = locations.find((l) => l.id === contact.locationId)
@@ -1133,6 +1191,18 @@ function ContactDetailModal({
           <p><span className="font-medium text-foreground">Type:</span> <span className="text-muted-foreground">{contact.locationType === "REMOTE" ? "Remote" : "In-Office"}</span></p>
           <p><span className="font-medium text-foreground">Location:</span> <span className="text-muted-foreground">{currentLocation?.name ?? "—"}</span></p>
           {contact.notes && <p><span className="font-medium text-foreground">Notes:</span> <span className="text-muted-foreground">{contact.notes}</span></p>}
+          {contact.tags.length > 0 && (
+            <div>
+              <span className="font-medium text-foreground">Tags:</span>
+              <div className="mt-1 flex flex-wrap gap-1">
+                {contact.tags.map((t) => (
+                  <span key={t.contactTag.id} className="rounded-full bg-secondary px-2 py-0.5 text-xs text-secondary-foreground">
+                    {t.contactTag.name}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       ) : (
         <div className="space-y-3 text-sm">
@@ -1218,6 +1288,38 @@ function ContactDetailModal({
             />
             Primary contact
           </label>
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Tags</label>
+            <div className="flex flex-wrap gap-2">
+              {contactTags.map((tag) => {
+                const selected = draft.tagIds.includes(tag.id)
+                return (
+                  <button
+                    key={tag.id}
+                    type="button"
+                    onClick={() =>
+                      setDraft({
+                        ...draft,
+                        tagIds: selected
+                          ? draft.tagIds.filter((t) => t !== tag.id)
+                          : [...draft.tagIds, tag.id],
+                      })
+                    }
+                    className={`rounded-full px-3 py-1 text-xs border transition-colors ${
+                      selected
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-card text-muted-foreground border-border hover:bg-surface-hover"
+                    }`}
+                  >
+                    {tag.name}
+                  </button>
+                )
+              })}
+              {contactTags.length === 0 && (
+                <p className="text-xs text-muted-foreground">No tags yet, add some in Settings → Clients → Contact Tags.</p>
+              )}
+            </div>
+          </div>
         </div>
       )}
 

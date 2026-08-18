@@ -6,6 +6,7 @@ import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mai
 import { cn } from "@/lib/utils"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
 import { IndustriesSettingsPanel } from "@/components/settings/IndustriesSettingsPanel"
+import { ContactTagsSettingsPanel } from "@/components/settings/ContactTagsSettingsPanel"
 import { UsersSettingsPanel } from "@/components/settings/UsersSettingsPanel"
 import { RolesPermissionsPanel } from "@/components/settings/RolesPermissionsPanel"
 import { QuoteSettingsPanel } from "@/components/settings/QuoteSettingsPanel"
@@ -20,6 +21,7 @@ type PanelKey =
   | "users"
   | "roles"
   | "industries"
+  | "contactTags"
   | "salesOrders"
   | "quotes"
   | "approval-workflows"
@@ -52,7 +54,10 @@ const settingsCategories: SettingsCategory[] = [
   },
   {
     label: "Clients",
-    items: [{ key: "industries", label: "Industries", icon: Briefcase }],
+    items: [
+      { key: "industries", label: "Industries", icon: Briefcase },
+      { key: "contactTags", label: "Contact Tags", icon: Briefcase },
+    ],
   },
   {
     label: "Quotes",
@@ -99,6 +104,8 @@ function renderPanel(key: PanelKey | null) {
       return <RolesPermissionsPanel />
     case "industries":
       return <IndustriesSettingsPanel />
+    case "contactTags":
+      return <ContactTagsSettingsPanel />
     case "salesOrders":
       return <SalesOrderSettingsPanel />
     case "quotes":

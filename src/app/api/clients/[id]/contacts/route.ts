@@ -38,5 +38,11 @@ export async function POST(
     },
   })
 
+  if (body.tagIds?.length > 0) {
+    await prisma.contactTagAssignment.createMany({
+      data: (body.tagIds as string[]).map((tagId) => ({ contactId: contact.id, contactTagId: tagId })),
+    })
+  }
+
   return NextResponse.json(contact)
 }
