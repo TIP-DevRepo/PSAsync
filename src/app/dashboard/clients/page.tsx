@@ -5,13 +5,20 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { ImportModal, type ImportResult } from "@/components/import-export/ImportModal"
+import { ExportButton } from "@/components/import-export/ExportButton"
+import { DownloadTemplateButton } from "@/components/import-export/DownloadTemplateButton"
+import { CLIENT_IMPORT_FIELDS, CLIENT_EXPORT_HEADERS, clientToExportRow } from "@/lib/import-export/clientsConfig"
 
 interface Client {
   id: string
   name: string
   email: string | null
   phone: string | null
+  website: string | null
   status: string
+  paymentTerms: string | null
+  notes: string | null
   industryRef: { name: string } | null
 }
 
@@ -87,14 +94,19 @@ export default function ClientsListPage() {
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
   const [density, setDensity] = useState<Density>("default")
+  const [showImportModal, setShowImportModal] = useState(false)
 
-  useEffect(() => {
+  function loadClients() {
     fetch("/api/clients")
       .then((res) => res.json())
       .then((json) => {
         setClients(json)
         setLoading(false)
       })
+  }
+
+  useEffect(() => {
+    loadClients()
   }, [])
 
   const filtered = clients.filter((c) => {
@@ -125,6 +137,18 @@ export default function ClientsListPage() {
     }
   }
 
+  // Actually creates the imported clients via the API, and hands the
+  // resulting report back to ImportModal to display.
+  async function handleImport(rows: Record<string, string>[]): Promise<ImportResult> {
+    const res = await fetch("/api/clients/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rows }),
+    })
+    if (!res.ok) throw new Error("Import failed")
+    return res.json()
+  }
+
   if (loading) {
     return <p className="text-sm text-muted-foreground">Loading...</p>
   }
@@ -133,9 +157,21 @@ export default function ClientsListPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-display font-semibold tracking-tight text-foreground">Clients</h1>
-        <Link href="/dashboard/clients/new">
-          <Button>Add Client</Button>
-        </Link>
+        <div className="flex items-center gap-2">
+          <DownloadTemplateButton filename="client-import-template.csv" headers={CLIENT_EXPORT_HEADERS} />
+          <ExportButton
+            filename="clients-export.csv"
+            headers={CLIENT_EXPORT_HEADERS}
+            visibleRows={sorted.map(clientToExportRow)}
+            allRows={clients.map(clientToExportRow)}
+          />
+          <Button variant="outline" onClick={() => setShowImportModal(true)}>
+            Import
+          </Button>
+          <Link href="/dashboard/clients/new">
+            <Button>Add Client</Button>
+          </Link>
+        </div>
       </div>
 
       <div className="flex items-center justify-between gap-3">
@@ -223,6 +259,16 @@ export default function ClientsListPage() {
           </tbody>
         </table>
       </div>
+
+      {showImportModal && (
+        <ImportModal
+          entityLabel="Clients"
+          fields={CLIENT_IMPORT_FIELDS}
+          onImport={handleImport}
+          onClose={() => setShowImportModal(false)}
+          onComplete={loadClients}
+        />
+      )}
     </div>
   )
 }
