@@ -125,13 +125,15 @@ model Session {
 
 // ─── CLIENT ──────────────────────────────────────────────────────────────────
 model Client {
-  id           String       @id @default(cuid())
-  companyId    String
-  company      Company      @relation(fields: [companyId], references: [id])
-  name         String
-  email        String?
-  phone        String?
-  website      String?
+  id                String       @id @default(cuid())
+  companyId         String
+  company           Company      @relation(fields: [companyId], references: [id])
+  name              String
+  prefix            String?
+  nextAssetSequence Int          @default(1)
+  email             String?
+  phone             String?
+  website           String?
   industryId   String?
   industryRef  Industry? @relation(fields: [industryId], references: [id])
   status       ClientStatus @default(PROSPECT)
