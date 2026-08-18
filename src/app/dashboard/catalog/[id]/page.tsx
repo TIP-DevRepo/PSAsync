@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { Package, FileClock } from "lucide-react"
+import { CategoryPicker } from "@/components/categories/CategoryPicker"
 
 const UNIT_OPTIONS = [
   { value: "each", label: "Each" },
@@ -21,12 +22,18 @@ function unitLabel(value: string) {
   return UNIT_OPTIONS.find((u) => u.value === value)?.label ?? value
 }
 
+interface CategoryRef {
+  id: string
+  name: string
+  parent: { id: string; name: string } | null
+}
+
 interface CatalogItemDetail {
   id: string
   name: string
   description: string | null
-  category: string | null
-  subcategory: string | null
+  categoryId: string | null
+  categoryRef: CategoryRef | null
   type: string
   msrp: number
   cost: number
@@ -143,12 +150,16 @@ export default function CatalogItemDetailPage() {
     setEditing(true)
   }
 
-  function updateDraft(field: keyof CatalogItemDetail, value: string | number | boolean) {
+  function updateDraft(field: keyof CatalogItemDetail, value: string | number | boolean | CategoryRef | null) {
     setDraft((prev) => (prev ? { ...prev, [field]: value } : prev))
   }
 
   async function handleSave() {
     if (!draft) return
+    if (!draft.categoryId) {
+      toast.error("Category is required")
+      return
+    }
     setSaving(true)
 
     const res = await fetch(`/api/catalog/${id}`, {
@@ -212,8 +223,16 @@ export default function CatalogItemDetailPage() {
                   <p><span className="font-medium text-foreground">Item Name:</span> <span className="text-muted-foreground">{item.name}</span></p>
                   <p><span className="font-medium text-foreground">Description:</span> <span className="text-muted-foreground">{item.description || "—"}</span></p>
                   <p><span className="font-medium text-foreground">Type:</span> <span className="text-muted-foreground">{item.type}</span></p>
-                  <p><span className="font-medium text-foreground">Category:</span> <span className="text-muted-foreground">{item.category || "—"}</span></p>
-                  <p><span className="font-medium text-foreground">Subcategory:</span> <span className="text-muted-foreground">{item.subcategory || "—"}</span></p>
+                  <p>
+                    <span className="font-medium text-foreground">Category:</span>{" "}
+                    <span className="text-muted-foreground">
+                      {item.categoryRef
+                        ? item.categoryRef.parent
+                          ? `${item.categoryRef.parent.name} > ${item.categoryRef.name}`
+                          : item.categoryRef.name
+                        : "—"}
+                    </span>
+                  </p>
                   <p><span className="font-medium text-foreground">Cost Price:</span> <span className="text-muted-foreground">{money(item.cost)}</span></p>
                   <p><span className="font-medium text-foreground">MSRP:</span> <span className="text-muted-foreground">{money(item.msrp)}</span></p>
                   <p><span className="font-medium text-foreground">Billing Unit:</span> <span className="text-muted-foreground">{unitLabel(item.unit)}</span></p>
@@ -271,26 +290,10 @@ export default function CatalogItemDetailPage() {
                       </select>
                     </div>
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-xs text-muted-foreground mb-1">Category</label>
-                      <input
-                        type="text"
-                        value={draft.category ?? ""}
-                        onChange={(e) => updateDraft("category", e.target.value)}
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-muted-foreground mb-1">Subcategory</label>
-                      <input
-                        type="text"
-                        value={draft.subcategory ?? ""}
-                        onChange={(e) => updateDraft("subcategory", e.target.value)}
-                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                      />
-                    </div>
-                  </div>
+                  <CategoryPicker
+                    value={draft.categoryId ?? ""}
+                    onChange={(categoryId) => updateDraft("categoryId", categoryId)}
+                  />
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-muted-foreground mb-1">Cost Price ($)</label>

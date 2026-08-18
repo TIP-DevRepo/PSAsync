@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { CategoryPicker } from "@/components/categories/CategoryPicker"
 
 const UNIT_OPTIONS = [
   { value: "each", label: "Each" },
@@ -29,8 +30,7 @@ export default function NewCatalogItemPage() {
   const [form, setForm] = useState({
     name: "",
     description: "",
-    category: "",
-    subcategory: "",
+    categoryId: "",
     type: "PHYSICAL",
     msrp: "",
     cost: "",
@@ -56,6 +56,10 @@ export default function NewCatalogItemPage() {
   async function handleSave() {
     if (!form.name.trim()) {
       setError("Item name is required.")
+      return
+    }
+    if (!form.categoryId) {
+      setError("Category is required.")
       return
     }
 
@@ -134,28 +138,7 @@ export default function NewCatalogItemPage() {
           </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm font-medium mb-1">Category</label>
-            <input
-              type="text"
-              placeholder="e.g. Networking"
-              value={form.category}
-              onChange={(e) => update("category", e.target.value)}
-              className="w-full rounded-md border px-3 py-2 text-sm"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium mb-1">Subcategory</label>
-            <input
-              type="text"
-              placeholder="e.g. Switches"
-              value={form.subcategory}
-              onChange={(e) => update("subcategory", e.target.value)}
-              className="w-full rounded-md border px-3 py-2 text-sm"
-            />
-          </div>
-        </div>
+        <CategoryPicker value={form.categoryId} onChange={(categoryId) => update("categoryId", categoryId)} />
 
         <div className="grid grid-cols-2 gap-3">
           <div>

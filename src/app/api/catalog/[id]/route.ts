@@ -15,6 +15,9 @@ export async function GET(
 
   const item = await prisma.catalogItem.findUnique({
     where: { id, companyId: session.user.companyId },
+    include: {
+      categoryRef: { include: { parent: true } },
+    },
   })
 
   if (!item) {
@@ -83,11 +86,33 @@ export async function PATCH(
     return NextResponse.json({ error: "Item not found" }, { status: 404 })
   }
 
+  if (!body.categoryId) {
+    return NextResponse.json({ error: "Category is required" }, { status: 400 })
+  }
+
+  let categoryText: string | null = null
+  let subcategoryText: string | null = null
+  const category = await prisma.category.findUnique({
+    where: { id: body.categoryId, companyId: session.user.companyId },
+    include: { parent: true },
+  })
+  if (!category) {
+    return NextResponse.json({ error: "Category not found" }, { status: 404 })
+  }
+  if (category.parent) {
+    categoryText = category.parent.name
+    subcategoryText = category.name
+  } else {
+    categoryText = category.name
+    subcategoryText = null
+  }
+
   const newValues = {
     name: body.name,
     description: body.description || null,
-    category: body.category || null,
-    subcategory: body.subcategory || null,
+    categoryId: body.categoryId,
+    category: categoryText,
+    subcategory: subcategoryText,
     type: body.type,
     msrp: Number(body.msrp) || 0,
     cost: Number(body.cost) || 0,
