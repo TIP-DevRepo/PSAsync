@@ -52,6 +52,7 @@ interface ClientLocation {
 interface ClientDetail {
   id: string
   name: string
+  prefix: string | null
   email: string | null
   phone: string | null
   website: string | null
@@ -160,6 +161,7 @@ export default function ClientDetailPage() {
   const [editingDetails, setEditingDetails] = useState(false)
   const [detailsDraft, setDetailsDraft] = useState({
     name: "",
+    prefix: "",
     industryId: "",
     email: "",
     phone: "",
@@ -239,6 +241,7 @@ export default function ClientDetailPage() {
     if (!client) return
     setDetailsDraft({
       name: client.name,
+      prefix: client.prefix ?? "",
       industryId: client.industryId ?? "",
       email: client.email ?? "",
       phone: client.phone ?? "",
@@ -254,6 +257,10 @@ export default function ClientDetailPage() {
   }
 
   async function handleSaveDetails() {
+    if (!detailsDraft.prefix.trim()) {
+      toast.error("Company Prefix is required")
+      return
+    }
     const res = await fetch(`/api/clients/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -381,6 +388,7 @@ export default function ClientDetailPage() {
             <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 text-sm">
               {!editingDetails ? (
                 <>
+                  <p><span className="font-medium text-foreground">Company Prefix:</span> <span className="text-muted-foreground">{client.prefix ?? "—"}</span></p>
                   <p><span className="font-medium text-foreground">Status:</span> <span className="text-muted-foreground">{client.status}</span></p>
                   <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{client.email ?? "—"}</span></p>
                   <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{client.phone ?? "—"}</span></p>
@@ -421,6 +429,20 @@ export default function ClientDetailPage() {
                       onChange={(e) => setDetailsDraft({ ...detailsDraft, name: e.target.value })}
                       className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-muted-foreground mb-1">Company Prefix</label>
+                    <input
+                      type="text"
+                      value={detailsDraft.prefix}
+                      onChange={(e) => setDetailsDraft({ ...detailsDraft, prefix: e.target.value.toUpperCase() })}
+                      placeholder="e.g. ACM"
+                      maxLength={10}
+                      className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      A short code used to identify this client across the platform, including generating Asset Tags for their hardware (e.g. ACM-0001).
+                    </p>
                   </div>
                   <div>
                     <label className="block text-xs text-muted-foreground mb-1">Industry</label>

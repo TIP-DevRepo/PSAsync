@@ -11,6 +11,7 @@ export default function NewClientPage() {
 
   const [form, setForm] = useState({
     name: "",
+    prefix: "",
     email: "",
     phone: "",
     website: "",
@@ -36,6 +37,10 @@ export default function NewClientPage() {
   async function handleSave() {
     if (!form.name.trim()) {
       setError("Company name is required.")
+      return
+    }
+    if (!form.prefix.trim()) {
+      setError("Company Prefix is required.")
       return
     }
 
@@ -74,6 +79,21 @@ export default function NewClientPage() {
             onChange={(e) => update("name", e.target.value)}
             className="w-full rounded-md border px-3 py-2 text-sm"
           />
+        </div>
+
+        <div>
+          <label className="block text-sm font-medium mb-1">Company Prefix *</label>
+          <input
+            type="text"
+            value={form.prefix}
+            onChange={(e) => update("prefix", e.target.value.toUpperCase())}
+            placeholder="e.g. ACM"
+            maxLength={10}
+            className="w-full rounded-md border px-3 py-2 text-sm uppercase"
+          />
+          <p className="mt-1 text-xs text-muted-foreground">
+            A short code used to identify this client across the platform, including generating Asset Tags for their hardware (e.g. ACM-0001).
+          </p>
         </div>
 
         <div className="grid grid-cols-2 gap-3">

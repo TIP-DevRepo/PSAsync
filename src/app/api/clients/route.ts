@@ -36,10 +36,15 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
 
+  if (!body.prefix || !body.prefix.trim()) {
+    return NextResponse.json({ error: "Company Prefix is required" }, { status: 400 })
+  }
+
   const client = await prisma.client.create({
     data: {
       companyId: session.user.companyId,
       name: body.name,
+      prefix: body.prefix.trim().toUpperCase(),
       email: body.email || null,
       phone: body.phone || null,
       website: body.website || null,

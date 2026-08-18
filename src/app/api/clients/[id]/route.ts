@@ -61,6 +61,7 @@ export async function PATCH(
 
   const {
     name,
+    prefix,
     industryId,
     email,
     phone,
@@ -75,6 +76,9 @@ export async function PATCH(
 
   if (name !== undefined && !name.trim()) {
     return NextResponse.json({ error: "Client name can't be blank" }, { status: 400 })
+  }
+  if (prefix !== undefined && !prefix.trim()) {
+    return NextResponse.json({ error: "Company Prefix can't be blank" }, { status: 400 })
   }
 
   // Only one client per company can be marked as "your own company" at a
@@ -92,6 +96,7 @@ export async function PATCH(
     where: { id },
     data: {
       name,
+      prefix: prefix !== undefined ? prefix.trim().toUpperCase() : undefined,
       industryId: industryId || null,
       email,
       phone,
