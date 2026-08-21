@@ -30,6 +30,7 @@ model Company {
   industries              Industry[]
   categories              Category[]
   inventoryLocations      InventoryLocation[]
+  inventoryCustomFields   InventoryCustomField[]
   vendors                 Vendor[]
   quotes                  Quote[]
   salesOrders             SalesOrder[]
@@ -385,11 +386,32 @@ model Category {
   updatedAt DateTime   @updatedAt
 
   catalogItems CatalogItem[]
+  customFields InventoryCustomField[]
 
   // Name must be unique per company regardless of where it sits in the
   // tree, no two categories anywhere can share a name, even under
   // different parents (e.g. only one "Cables" category ever exists).
   @@unique([companyId, name])
+}
+
+// ─── INVENTORY CUSTOM FIELD ─────────────────────────────────────────────────
+// Field definitions only, at this phase. The values (InventoryCustomFieldValue)
+// get built in Phase 5 alongside InventoryAsset, since a value has to attach
+// to an actual asset record, which doesn't exist yet.
+model InventoryCustomField {
+  id         String   @id @default(cuid())
+  companyId  String
+  company    Company  @relation(fields: [companyId], references: [id])
+  categoryId String
+  category   Category @relation(fields: [categoryId], references: [id])
+  name       String
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  // Field names only need to be unique within their own category, two
+  // different categories can each have their own "Color" field.
+  @@unique([categoryId, name])
 }
 
 // ─── INVENTORY LOCATION ─────────────────────────────────────────────────────

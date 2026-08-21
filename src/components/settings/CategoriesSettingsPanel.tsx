@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { ChevronRight, Plus, Pencil, Trash2, Check, X } from "lucide-react"
+import { useState, useEffect, useMemo } from "react"
+import { ChevronRight, Plus, Pencil, Trash2, Check, X, ListPlus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
@@ -14,6 +14,12 @@ interface Category {
 
 interface CategoryTreeItem extends Category {
   children: CategoryTreeItem[]
+}
+
+interface CustomField {
+  id: string
+  name: string
+  categoryId: string
 }
 
 function buildTree(flat: Category[]): CategoryTreeItem[] {
@@ -41,6 +47,7 @@ function buildTree(flat: Category[]): CategoryTreeItem[] {
 
 export function CategoriesSettingsPanel() {
   const [categories, setCategories] = useState<Category[]>([])
+  const [fields, setFields] = useState<CustomField[]>([])
   const [loading, setLoading] = useState(true)
   const [newTopLevelName, setNewTopLevelName] = useState("")
   const [creatingTopLevel, setCreatingTopLevel] = useState(false)
@@ -54,9 +61,26 @@ export function CategoriesSettingsPanel() {
       })
   }
 
+  function loadFields() {
+    fetch("/api/inventory-custom-fields")
+      .then((res) => res.json())
+      .then((data) => setFields(data))
+  }
+
   useEffect(() => {
     loadCategories()
+    loadFields()
   }, [])
+
+  const fieldsByCategory = useMemo(() => {
+    const map = new Map<string, CustomField[]>()
+    fields.forEach((f) => {
+      const list = map.get(f.categoryId) ?? []
+      list.push(f)
+      map.set(f.categoryId, list)
+    })
+    return map
+  }, [fields])
 
   async function handleCreate(name: string, parentId: string | null) {
     const res = await fetch("/api/categories", {
@@ -125,7 +149,7 @@ export function CategoriesSettingsPanel() {
   return (
     <div className="space-y-6">
       <p className="text-sm text-muted-foreground">
-        Manage the categories used across your Catalog and Inventory. Every catalog item needs a category, subcategories are optional. Category names must be unique across your whole company, even under different parents.
+        Manage the categories used across your Catalog and Inventory. Every catalog item needs a category, subcategories are optional. Category names must be unique across your whole company, even under different parents. Custom fields (for Inventory only) can be added per category, an asset inherits fields from both its own category and every parent category above it, so field names must also be unique across that whole chain.
       </p>
 
       <div className="flex gap-2">
@@ -148,9 +172,11 @@ export function CategoriesSettingsPanel() {
             key={node.id}
             node={node}
             depth={0}
+            fieldsByCategory={fieldsByCategory}
             onCreateChild={handleCreate}
             onRename={handleRename}
             onDelete={handleDelete}
+            onFieldsChanged={loadFields}
           />
         ))}
         {tree.length === 0 && (
@@ -164,15 +190,19 @@ export function CategoriesSettingsPanel() {
 function CategoryTreeNode({
   node,
   depth,
+  fieldsByCategory,
   onCreateChild,
   onRename,
   onDelete,
+  onFieldsChanged,
 }: {
   node: CategoryTreeItem
   depth: number
+  fieldsByCategory: Map<string, CustomField[]>
   onCreateChild: (name: string, parentId: string | null) => Promise<boolean>
   onRename: (id: string, name: string) => Promise<boolean>
   onDelete: (category: Category) => void
+  onFieldsChanged: () => void
 }) {
   const [expanded, setExpanded] = useState(true)
   const [addingChild, setAddingChild] = useState(false)
@@ -181,6 +211,9 @@ function CategoryTreeNode({
   const [renaming, setRenaming] = useState(false)
   const [renameValue, setRenameValue] = useState(node.name)
   const [savingRename, setSavingRename] = useState(false)
+  const [managingFields, setManagingFields] = useState(false)
+
+  const ownFields = fieldsByCategory.get(node.id) ?? []
 
   async function submitChild() {
     if (!childName.trim()) return
@@ -218,7 +251,17 @@ function CategoryTreeNode({
           )}
 
           {!renaming ? (
-            <span className="text-foreground truncate">{node.name}</span>
+            <span className="flex items-center gap-1.5 min-w-0">
+              <span className="text-foreground truncate">{node.name}</span>
+              {ownFields.length > 0 && (
+                <span
+                  title={`${ownFields.length} custom field${ownFields.length === 1 ? "" : "s"}`}
+                  className="shrink-0 rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
+                >
+                  {ownFields.length} field{ownFields.length === 1 ? "" : "s"}
+                </span>
+              )}
+            </span>
           ) : (
             <input
               autoFocus
@@ -240,6 +283,13 @@ function CategoryTreeNode({
                 className="text-muted-foreground hover:text-foreground"
               >
                 <Plus size={14} />
+              </button>
+              <button
+                onClick={() => setManagingFields((v) => !v)}
+                title="Manage custom fields"
+                className={managingFields ? "text-primary" : "text-muted-foreground hover:text-foreground"}
+              >
+                <ListPlus size={14} />
               </button>
               <button
                 onClick={() => {
@@ -292,6 +342,17 @@ function CategoryTreeNode({
         </div>
       )}
 
+      {managingFields && (
+        <div style={{ marginLeft: (depth + 1) * 20 }} className="mt-1">
+          <CategoryFieldsPanel
+            categoryId={node.id}
+            categoryName={node.name}
+            fields={ownFields}
+            onChanged={onFieldsChanged}
+          />
+        </div>
+      )}
+
       {expanded && node.children.length > 0 && (
         <div className="mt-1 space-y-1">
           {node.children.map((child) => (
@@ -299,13 +360,156 @@ function CategoryTreeNode({
               key={child.id}
               node={child}
               depth={depth + 1}
+              fieldsByCategory={fieldsByCategory}
               onCreateChild={onCreateChild}
               onRename={onRename}
               onDelete={onDelete}
+              onFieldsChanged={onFieldsChanged}
             />
           ))}
         </div>
       )}
+    </div>
+  )
+}
+
+function CategoryFieldsPanel({
+  categoryId,
+  categoryName,
+  fields,
+  onChanged,
+}: {
+  categoryId: string
+  categoryName: string
+  fields: CustomField[]
+  onChanged: () => void
+}) {
+  const [newFieldName, setNewFieldName] = useState("")
+  const [adding, setAdding] = useState(false)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [editValue, setEditValue] = useState("")
+
+  async function handleAdd() {
+    if (!newFieldName.trim()) return
+    setAdding(true)
+    const res = await fetch(`/api/categories/${categoryId}/custom-fields`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: newFieldName.trim() }),
+    })
+    setAdding(false)
+    if (res.ok) {
+      toast.success("Field added")
+      setNewFieldName("")
+      onChanged()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? "Couldn't add field")
+    }
+  }
+
+  async function handleRename(id: string) {
+    if (!editValue.trim()) return
+    const res = await fetch(`/api/inventory-custom-fields/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: editValue.trim() }),
+    })
+    if (res.ok) {
+      toast.success("Field renamed")
+      setEditingId(null)
+      onChanged()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? "Couldn't rename field")
+    }
+  }
+
+  async function handleDelete(field: CustomField) {
+    const confirmed = await confirmDialog({
+      title: `Delete "${field.name}"?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/inventory-custom-fields/${field.id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Field deleted")
+      onChanged()
+    } else {
+      toast.error("Couldn't delete field")
+    }
+  }
+
+  return (
+    <div className="rounded-md border border-border bg-card/50 p-3 space-y-2">
+      <p className="text-xs font-medium text-muted-foreground">Custom fields for &quot;{categoryName}&quot;</p>
+
+      <div className="space-y-1">
+        {fields.map((field) => (
+          <div key={field.id} className="flex items-center justify-between rounded border border-border bg-background px-2 py-1.5 text-sm">
+            {editingId !== field.id ? (
+              <span className="text-foreground">{field.name}</span>
+            ) : (
+              <input
+                autoFocus
+                type="text"
+                value={editValue}
+                onChange={(e) => setEditValue(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleRename(field.id)}
+                className="rounded border border-border bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              />
+            )}
+            <div className="flex items-center gap-2">
+              {editingId !== field.id ? (
+                <>
+                  <button
+                    onClick={() => { setEditingId(field.id); setEditValue(field.name) }}
+                    title="Rename"
+                    className="text-muted-foreground hover:text-foreground"
+                  >
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    onClick={() => handleDelete(field)}
+                    title="Delete"
+                    className="text-muted-foreground hover:text-danger"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button onClick={() => handleRename(field.id)} title="Save" className="text-success hover:opacity-80">
+                    <Check size={13} />
+                  </button>
+                  <button onClick={() => setEditingId(null)} title="Cancel" className="text-muted-foreground hover:text-foreground">
+                    <X size={13} />
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
+        ))}
+        {fields.length === 0 && (
+          <p className="text-xs text-muted-foreground">No custom fields yet.</p>
+        )}
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <input
+          type="text"
+          value={newFieldName}
+          onChange={(e) => setNewFieldName(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+          placeholder="New field name (e.g. MAC Address)"
+          className="flex-1 rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        />
+        <Button size="sm" onClick={handleAdd} disabled={adding || !newFieldName.trim()}>
+          {adding ? "Adding..." : "Add"}
+        </Button>
+      </div>
     </div>
   )
 }
