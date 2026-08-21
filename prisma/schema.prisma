@@ -43,6 +43,7 @@ model Company {
   roles                   Role[]
   contactTags             ContactTag[]
   inventoryAssets         InventoryAsset[]
+  inventoryStocks         InventoryStock[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -424,6 +425,29 @@ model InventoryCustomField {
   @@unique([categoryId, name])
 }
 
+// ─── INVENTORY STOCK ─────────────────────────────────────────────────────────
+// Pooled quantity tracking for non-serialized Catalog Items (cables, mice,
+// etc). One row per Catalog Item + Location combination — no individual
+// unit records and no Asset Tag, just a running count.
+model InventoryStock {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  catalogItemId String
+  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id])
+
+  locationId String
+  location   InventoryLocation @relation(fields: [locationId], references: [id])
+
+  quantity Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([catalogItemId, locationId])
+}
+
 // ─── INVENTORY LOCATION ─────────────────────────────────────────────────────
 model InventoryLocation {
   id              String              @id @default(cuid())
@@ -436,6 +460,7 @@ model InventoryLocation {
   createdAt       DateTime            @default(now())
   updatedAt       DateTime            @updatedAt
   inventoryAssets InventoryAsset[]
+  inventoryStocks InventoryStock[]
 }
 
 // ─── CATALOG ITEM ─────────────────────────────────────────────────────────────
@@ -470,6 +495,7 @@ model CatalogItem {
   poLineItems       POLineItem[]
   changeLogs        CatalogItemChangeLog[]
   inventoryAssets   InventoryAsset[]
+  inventoryStocks   InventoryStock[]
 }
 
 // ─── CATALOG ITEM CHANGE LOG ──────────────────────────────────────────────
