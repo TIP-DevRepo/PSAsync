@@ -10,20 +10,20 @@ datasource db {
 
 // ─── COMPANY ─────────────────────────────────────────────────────────────────
 model Company {
-  id        String   @id @default(cuid())
-  name      String
-  email     String?
-  phone     String?
-  website   String?
-  address   String?
-  city      String?
-  state     String?
-  zip       String?
-  country   String   @default("US")
+  id               String   @id @default(cuid())
+  name             String
+  email            String?
+  phone            String?
+  website          String?
+  address          String?
+  city             String?
+  state            String?
+  zip              String?
+  country          String   @default("US")
   logoUrl          String?
   secondaryLogoUrl String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
 
   users                   User[]
   clients                 Client[]
@@ -42,6 +42,7 @@ model Company {
   approvalWorkflows       ApprovalWorkflow[]
   roles                   Role[]
   contactTags             ContactTag[]
+  inventoryAssets         InventoryAsset[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -85,20 +86,20 @@ model CompanySettings {
 
 // ─── USER ─────────────────────────────────────────────────────────────────────
 model User {
-  id          String   @id @default(cuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  name        String
-  email       String   @unique
-  password    String?
-  roleId      String?
-  role        Role?    @relation(fields: [roleId], references: [id])
-  active      Boolean  @default(true)
-  maxDiscount Float    @default(10)
-  microsoftId String?  @unique
+  id                    String   @id @default(cuid())
+  companyId             String
+  company               Company  @relation(fields: [companyId], references: [id])
+  name                  String
+  email                 String   @unique
+  password              String?
+  roleId                String?
+  role                  Role?    @relation(fields: [roleId], references: [id])
+  active                Boolean  @default(true)
+  maxDiscount           Float    @default(10)
+  microsoftId           String?  @unique
   preferredDistributors String[] @default([])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   quotes                      Quote[]
   salesOrders                 SalesOrder[]
@@ -107,14 +108,15 @@ model User {
   notifications               Notification[]
   connectedMicrosoftMailboxes MicrosoftConnection[]
   quoteComments               QuoteComment[]
-  soComments                   SOComment[]
-  poComments                   POComment[]
-  soAttachments                SOAttachment[]
-  poAttachments                POAttachment[]
-  vendorAttachments             VendorAttachment[]
-  catalogItemChangeLogs         CatalogItemChangeLog[]
-  triggeredWorkflows          ApprovalWorkflow[]    @relation("WorkflowTriggerUser")
-  approvalDecisions           QuoteApproval[]       @relation("ApprovalDecidedBy")
+  soComments                  SOComment[]
+  poComments                  POComment[]
+  soAttachments               SOAttachment[]
+  poAttachments               POAttachment[]
+  vendorAttachments           VendorAttachment[]
+  catalogItemChangeLogs       CatalogItemChangeLog[]
+  triggeredWorkflows          ApprovalWorkflow[]     @relation("WorkflowTriggerUser")
+  approvalDecisions           QuoteApproval[]        @relation("ApprovalDecidedBy")
+  assignedInventoryAssets     InventoryAsset[]       @relation("InventoryAssetAssignedUser")
 }
 
 // ─── SESSION (Auth.js) ───────────────────────────────────────────────────────
@@ -137,15 +139,15 @@ model Client {
   email             String?
   phone             String?
   website           String?
-  industryId   String?
-  industryRef  Industry? @relation(fields: [industryId], references: [id])
-  status       ClientStatus @default(PROSPECT)
-  source       String?
-  tags         String[]
-  creditLimit  Float?
-  paymentTerms String?
-  notes        String?      @db.Text
-  isInternal   Boolean      @default(false)
+  industryId        String?
+  industryRef       Industry?    @relation(fields: [industryId], references: [id])
+  status            ClientStatus @default(PROSPECT)
+  source            String?
+  tags              String[]
+  creditLimit       Float?
+  paymentTerms      String?
+  notes             String?      @db.Text
+  isInternal        Boolean      @default(false)
 
   // Main billing/shipping now point at one of this client's Locations
   // rather than storing free-text address fields directly — the actual
@@ -158,11 +160,13 @@ model Client {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  contacts      Contact[]
-  locations     ClientLocation[]        @relation("ClientLocations")
-  quotes        Quote[]
-  salesOrders   SalesOrder[]
-  customPricing ClientCustomPrice[]
+  contacts              Contact[]
+  locations             ClientLocation[]    @relation("ClientLocations")
+  quotes                Quote[]
+  salesOrders           SalesOrder[]
+  customPricing         ClientCustomPrice[]
+  ownedInventoryAssets  InventoryAsset[]    @relation("InventoryAssetOwner")
+  loanedInventoryAssets InventoryAsset[]    @relation("InventoryAssetLoanedTo")
 }
 
 model Industry {
@@ -178,9 +182,9 @@ model Industry {
 }
 
 model ClientLocation {
-  id        String   @id @default(cuid())
+  id        String  @id @default(cuid())
   clientId  String
-  client    Client   @relation("ClientLocations", fields: [clientId], references: [id], onDelete: Cascade)
+  client    Client  @relation("ClientLocations", fields: [clientId], references: [id], onDelete: Cascade)
   name      String
   address   String?
   address2  String?
@@ -190,7 +194,7 @@ model ClientLocation {
   country   String?
   phone     String?
   notes     String?
-  isPrimary Boolean  @default(false)
+  isPrimary Boolean @default(false)
 
   billingContactId  String?
   billingContact    Contact? @relation("LocationBillingContact", fields: [billingContactId], references: [id])
@@ -205,8 +209,9 @@ model ClientLocation {
 
   // Back-relations required by Prisma since Client links to ClientLocation
   // through two additional named relations beyond the primary "locations" one
-  mainBillingForClients  Client[] @relation("ClientMainBilling")
-  mainShippingForClients Client[] @relation("ClientMainShipping")
+  mainBillingForClients  Client[]         @relation("ClientMainBilling")
+  mainShippingForClients Client[]         @relation("ClientMainShipping")
+  inventoryAssets        InventoryAsset[]
 
   @@index([clientId])
 }
@@ -232,16 +237,17 @@ model Contact {
   locationType ContactLocationType @default(IN_OFFICE)
   locationId   String?
   location     ClientLocation?     @relation(fields: [locationId], references: [id])
-    isPrimary    Boolean             @default(false)
+  isPrimary    Boolean             @default(false)
   role         String?
   notes        String?             @db.Text
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
-  quotes                  Quote[]
-  billingForLocations     ClientLocation[] @relation("LocationBillingContact")
-  shippingForLocations    ClientLocation[] @relation("LocationShippingContact")
-  tags                    ContactTagAssignment[]
+  quotes               Quote[]
+  billingForLocations  ClientLocation[]       @relation("LocationBillingContact")
+  shippingForLocations ClientLocation[]       @relation("LocationShippingContact")
+  tags                 ContactTagAssignment[]
+  inventoryAssets      InventoryAsset[]
 }
 
 // ─── CONTACT TAG ─────────────────────────────────────────────────────────────
@@ -298,13 +304,15 @@ model Vendor {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  catalogItems         CatalogItem[] @relation("CatalogItemVendor")
-  catalogItemsAsMaker  CatalogItem[] @relation("CatalogItemManufacturer")
-  purchaseOrders       PurchaseOrder[]
-  soLineItems          SOLineItem[]
-  locations            VendorLocation[]
-  contacts             VendorContact[]
-  attachments          VendorAttachment[]
+  catalogItems                  CatalogItem[]      @relation("CatalogItemVendor")
+  catalogItemsAsMaker           CatalogItem[]      @relation("CatalogItemManufacturer")
+  purchaseOrders                PurchaseOrder[]
+  soLineItems                   SOLineItem[]
+  locations                     VendorLocation[]
+  contacts                      VendorContact[]
+  attachments                   VendorAttachment[]
+  inventoryAssetsAsVendor       InventoryAsset[]   @relation("InventoryAssetOverrideVendor")
+  inventoryAssetsAsManufacturer InventoryAsset[]   @relation("InventoryAssetOverrideManufacturer")
 }
 
 // ─── VENDOR LOCATION ──────────────────────────────────────────────────────
@@ -409,6 +417,8 @@ model InventoryCustomField {
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
+  values InventoryCustomFieldValue[]
+
   // Field names only need to be unique within their own category, two
   // different categories can each have their own "Color" field.
   @@unique([categoryId, name])
@@ -416,40 +426,42 @@ model InventoryCustomField {
 
 // ─── INVENTORY LOCATION ─────────────────────────────────────────────────────
 model InventoryLocation {
-  id        String              @id @default(cuid())
-  companyId String
-  company   Company             @relation(fields: [companyId], references: [id])
-  name      String
-  parentId  String?
-  parent    InventoryLocation?  @relation("InventoryLocationChildren", fields: [parentId], references: [id])
-  children  InventoryLocation[] @relation("InventoryLocationChildren")
-  createdAt DateTime            @default(now())
-  updatedAt DateTime            @updatedAt
+  id              String              @id @default(cuid())
+  companyId       String
+  company         Company             @relation(fields: [companyId], references: [id])
+  name            String
+  parentId        String?
+  parent          InventoryLocation?  @relation("InventoryLocationChildren", fields: [parentId], references: [id])
+  children        InventoryLocation[] @relation("InventoryLocationChildren")
+  createdAt       DateTime            @default(now())
+  updatedAt       DateTime            @updatedAt
+  inventoryAssets InventoryAsset[]
 }
 
 // ─── CATALOG ITEM ─────────────────────────────────────────────────────────────
 model CatalogItem {
-  id               String   @id @default(cuid())
-  companyId        String
-  company          Company  @relation(fields: [companyId], references: [id])
-  vendorId         String?
-  vendor           Vendor?  @relation("CatalogItemVendor", fields: [vendorId], references: [id])
-  vendorSku        String?
-  manufacturerId   String?
-  manufacturer     Vendor?  @relation("CatalogItemManufacturer", fields: [manufacturerId], references: [id])
-  manufacturerSku  String?
-  name        String
-  description String?  @db.Text
-  categoryId  String
-  categoryRef Category @relation(fields: [categoryId], references: [id])
-  type        ItemType @default(PHYSICAL)
-  msrp        Float    @default(0)
-  cost        Float    @default(0)
-  unit        String   @default("each")
-  taxable     Boolean  @default(true)
-  active      Boolean  @default(true)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  companyId       String
+  company         Company  @relation(fields: [companyId], references: [id])
+  vendorId        String?
+  vendor          Vendor?  @relation("CatalogItemVendor", fields: [vendorId], references: [id])
+  vendorSku       String?
+  manufacturerId  String?
+  manufacturer    Vendor?  @relation("CatalogItemManufacturer", fields: [manufacturerId], references: [id])
+  manufacturerSku String?
+  name            String
+  description     String?  @db.Text
+  categoryId      String
+  categoryRef     Category @relation(fields: [categoryId], references: [id])
+  isSerialized    Boolean  @default(false)
+  type            ItemType @default(PHYSICAL)
+  msrp            Float    @default(0)
+  cost            Float    @default(0)
+  unit            String   @default("each")
+  taxable         Boolean  @default(true)
+  active          Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   quoteLineItems    QuoteLineItem[]
   customPricing     ClientCustomPrice[]
@@ -457,6 +469,7 @@ model CatalogItem {
   soLineItems       SOLineItem[]
   poLineItems       POLineItem[]
   changeLogs        CatalogItemChangeLog[]
+  inventoryAssets   InventoryAsset[]
 }
 
 // ─── CATALOG ITEM CHANGE LOG ──────────────────────────────────────────────
@@ -512,7 +525,7 @@ model Quote {
   title               String?
   introText           String?        @db.Text
   terms               String?        @db.Text
-  useDefaultTerms      Boolean        @default(true)
+  useDefaultTerms     Boolean        @default(true)
   internalNotes       String?        @db.Text
   clientPoNumber      String?
   paymentTerms        String?
@@ -530,10 +543,10 @@ model Quote {
   declinedAt          DateTime?
   declineReason       String?
   signatureType       String?
-  signatureData       String?    @db.Text
+  signatureData       String?        @db.Text
   signerName          String?
-  termsAgreedAt        DateTime?
-  portalComment       String?     @db.Text
+  termsAgreedAt       DateTime?
+  portalComment       String?        @db.Text
   portalCommentAt     DateTime?
   lastCommentViewedAt DateTime?
   accessToken         String         @unique @default(cuid())
@@ -615,8 +628,8 @@ model SalesOrder {
   clientPoNumber String?
   paymentTerms   String?
   status         SalesOrderStatus @default(DRAFT)
-  internalNotes  String? @db.Text
-  clientNotes    String? @db.Text
+  internalNotes  String?          @db.Text
+  clientNotes    String?          @db.Text
 
   // Billing
   billContactName String?
@@ -774,18 +787,18 @@ model POShipment {
 
 // ─── QUOTE TEMPLATE ───────────────────────────────────────────────────────
 model QuoteTemplate {
-  id          String   @id @default(cuid())
-  companyId   String
-  name        String
-  description String?  @db.Text
-  introText   String?  @db.Text
-  terms          String?  @db.Text
-  useDefaultTerms Boolean @default(true)
-  expiryDays  Int      @default(30)
-  active      Boolean  @default(true)
-  sections    String[] @default([])
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  companyId       String
+  name            String
+  description     String?  @db.Text
+  introText       String?  @db.Text
+  terms           String?  @db.Text
+  useDefaultTerms Boolean  @default(true)
+  expiryDays      Int      @default(30)
+  active          Boolean  @default(true)
+  sections        String[] @default([])
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   lineItems QuoteTemplateLineItem[]
   quotes    Quote[]
@@ -882,7 +895,7 @@ model ApprovalWorkflow {
   triggerUserId  String?
   triggerUser    User?               @relation("WorkflowTriggerUser", fields: [triggerUserId], references: [id])
   requiredRoleId String
-  requiredRole   Role     @relation(fields: [requiredRoleId], references: [id])
+  requiredRole   Role                @relation(fields: [requiredRoleId], references: [id])
   createdAt      DateTime            @default(now())
   updatedAt      DateTime            @updatedAt
 
@@ -1055,4 +1068,117 @@ model Role {
   approvalWorkflows ApprovalWorkflow[]
 
   @@unique([companyId, name])
+}
+
+// ─── INVENTORY ASSET ─────────────────────────────────────────────────────────
+enum InventoryAssetStatus {
+  IN_STOCK
+  INTERNAL
+  LOANED
+  SOLD
+  IN_REPAIR
+  REMOVED
+}
+
+enum InventoryOwnerType {
+  COMPANY
+  CLIENT
+}
+
+enum InventoryRemovedReason {
+  BROKEN_SCRAPPED
+  LOST
+  DONATED
+  RETURNED_TO_VENDOR
+  OTHER
+}
+
+enum InventoryRepairType {
+  SELF
+  VENDOR
+}
+
+model InventoryAsset {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  catalogItemId String
+  catalogItem   CatalogItem @relation(fields: [catalogItemId], references: [id])
+
+  assetTag     String
+  serialNumber String?
+
+  status    InventoryAssetStatus @default(IN_STOCK)
+  ownerType InventoryOwnerType   @default(COMPANY)
+
+  // Set only when ownerType is CLIENT (permanent, e.g. Sold, or shipped
+  // directly to a client on receipt and never touched our own stock).
+  ownerClientId String?
+  ownerClient   Client? @relation("InventoryAssetOwner", fields: [ownerClientId], references: [id])
+
+  // Company-owned warehouse position. Only meaningful while ownerType is
+  // COMPANY, kept around even while checked out so its last known shelf
+  // spot isn't lost.
+  locationId String?
+  location   InventoryLocation? @relation(fields: [locationId], references: [id])
+
+  // Which of the owning client's own sites this sits at, for client-owned assets.
+  clientLocationId String?
+  clientLocation   ClientLocation? @relation(fields: [clientLocationId], references: [id])
+
+  // Internal checkout holder — one of our own staff, permanent until changed.
+  assignedUserId String?
+  assignedUser   User?   @relation("InventoryAssetAssignedUser", fields: [assignedUserId], references: [id])
+
+  // Loaned checkout holder — client-only, with an expected return date.
+  loanedToClientId       String?
+  loanedToClient         Client?   @relation("InventoryAssetLoanedTo", fields: [loanedToClientId], references: [id])
+  loanedToContactId      String?
+  loanedToContact        Contact?  @relation(fields: [loanedToContactId], references: [id])
+  loanExpectedReturnDate DateTime?
+
+  removedReason InventoryRemovedReason?
+
+  repairType                InventoryRepairType?
+  repairEstimatedReturnDate DateTime?
+  // Remembers the status this asset was in right before it went IN_REPAIR,
+  // so "Back to Origin" after repair can restore it automatically.
+  statusBeforeRepair        InventoryAssetStatus?
+
+  warrantyType       String?
+  warrantyExpiration DateTime?
+
+  // Per-unit overrides — null means "use the Catalog Item's value."
+  overrideVendorId        String?
+  overrideVendor          Vendor? @relation("InventoryAssetOverrideVendor", fields: [overrideVendorId], references: [id])
+  overrideVendorSku       String?
+  overrideManufacturerId  String?
+  overrideManufacturer    Vendor? @relation("InventoryAssetOverrideManufacturer", fields: [overrideManufacturerId], references: [id])
+  overrideManufacturerSku String?
+
+  notes String? @db.Text
+
+  customFieldValues InventoryCustomFieldValue[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Asset Tags are generated from the owning client's prefix + a running
+  // sequence, unique per company (not globally), since two different
+  // companies on this platform could each independently generate "ACM-0001".
+  @@unique([companyId, assetTag])
+}
+
+model InventoryCustomFieldValue {
+  id            String               @id @default(cuid())
+  assetId       String
+  asset         InventoryAsset       @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  customFieldId String
+  customField   InventoryCustomField @relation(fields: [customFieldId], references: [id])
+  value         String?
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+
+  @@unique([assetId, customFieldId])
 }
