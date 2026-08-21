@@ -118,6 +118,8 @@ model User {
   triggeredWorkflows          ApprovalWorkflow[]     @relation("WorkflowTriggerUser")
   approvalDecisions           QuoteApproval[]        @relation("ApprovalDecidedBy")
   assignedInventoryAssets     InventoryAsset[]       @relation("InventoryAssetAssignedUser")
+  inventoryAssetEvents        InventoryAssetEvent[]
+  inventoryStockEvents        InventoryStockEvent[]
 }
 
 // ─── SESSION (Auth.js) ───────────────────────────────────────────────────────
@@ -442,10 +444,63 @@ model InventoryStock {
 
   quantity Int @default(0)
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  inventoryStockEvents InventoryStockEvent[]
 
   @@unique([catalogItemId, locationId])
+}
+
+// ─── INVENTORY EVENTS (AUDIT TRAIL) ──────────────────────────────────────────
+enum InventoryEventType {
+  CREATED
+  STATUS_CHANGED
+  CHECKED_OUT
+  RETURNED
+  MOVED
+  REPAIR_STARTED
+  REPAIR_COMPLETED
+  FIELD_UPDATED
+}
+
+model InventoryAssetEvent {
+  id      String         @id @default(cuid())
+  assetId String
+  asset   InventoryAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  eventType   InventoryEventType
+  description String             @db.Text
+
+  // Nullable so future automated events (not directly triggered by
+  // someone clicking a button) don't require a fabricated user.
+  performedByUserId String?
+  performedByUser   User?   @relation(fields: [performedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
+}
+
+enum InventoryStockEventType {
+  RECEIVED
+  CHECKED_OUT
+  ADJUSTED
+  MOVED
+}
+
+model InventoryStockEvent {
+  id      String         @id @default(cuid())
+  stockId String
+  stock   InventoryStock @relation(fields: [stockId], references: [id], onDelete: Cascade)
+
+  eventType      InventoryStockEventType
+  // Positive for increases (received, adjusted up), negative for
+  // decreases (checked out, adjusted down).
+  quantityChange Int
+  description    String                  @db.Text
+
+  performedByUserId String?
+  performedByUser   User?   @relation(fields: [performedByUserId], references: [id])
+
+  createdAt DateTime @default(now())
 }
 
 // ─── INVENTORY LOCATION ─────────────────────────────────────────────────────
@@ -1187,8 +1242,9 @@ model InventoryAsset {
 
   customFieldValues InventoryCustomFieldValue[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  inventoryAssetEvents InventoryAssetEvent[]
 
   // Asset Tags are generated from the owning client's prefix + a running
   // sequence, unique per company (not globally), since two different
