@@ -115,11 +115,12 @@ model User {
   poAttachments               POAttachment[]
   vendorAttachments           VendorAttachment[]
   catalogItemChangeLogs       CatalogItemChangeLog[]
-  triggeredWorkflows          ApprovalWorkflow[]     @relation("WorkflowTriggerUser")
-  approvalDecisions           QuoteApproval[]        @relation("ApprovalDecidedBy")
-  assignedInventoryAssets     InventoryAsset[]       @relation("InventoryAssetAssignedUser")
+  triggeredWorkflows          ApprovalWorkflow[]         @relation("WorkflowTriggerUser")
+  approvalDecisions           QuoteApproval[]            @relation("ApprovalDecidedBy")
+  assignedInventoryAssets     InventoryAsset[]           @relation("InventoryAssetAssignedUser")
   inventoryAssetEvents        InventoryAssetEvent[]
   inventoryStockEvents        InventoryStockEvent[]
+  inventoryAssetAttachments   InventoryAssetAttachment[]
 }
 
 // ─── SESSION (Auth.js) ───────────────────────────────────────────────────────
@@ -449,6 +450,19 @@ model InventoryStock {
   inventoryStockEvents InventoryStockEvent[]
 
   @@unique([catalogItemId, locationId])
+}
+
+// ─── INVENTORY ASSET ATTACHMENTS ─────────────────────────────────────────────
+model InventoryAssetAttachment {
+  id               String         @id @default(cuid())
+  assetId          String
+  asset            InventoryAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  fileName         String
+  fileUrl          String
+  fileSize         Int?
+  uploadedByUserId String
+  uploadedByUser   User           @relation(fields: [uploadedByUserId], references: [id])
+  createdAt        DateTime       @default(now())
 }
 
 // ─── INVENTORY EVENTS (AUDIT TRAIL) ──────────────────────────────────────────
@@ -1242,9 +1256,10 @@ model InventoryAsset {
 
   customFieldValues InventoryCustomFieldValue[]
 
-  createdAt            DateTime              @default(now())
-  updatedAt            DateTime              @updatedAt
-  inventoryAssetEvents InventoryAssetEvent[]
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  inventoryAssetEvents      InventoryAssetEvent[]
+  inventoryAssetAttachments InventoryAssetAttachment[]
 
   // Asset Tags are generated from the owning client's prefix + a running
   // sequence, unique per company (not globally), since two different
