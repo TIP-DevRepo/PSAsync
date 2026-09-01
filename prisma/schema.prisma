@@ -216,6 +216,7 @@ model ClientLocation {
   mainBillingForClients  Client[]         @relation("ClientMainBilling")
   mainShippingForClients Client[]         @relation("ClientMainShipping")
   inventoryAssets        InventoryAsset[]
+  purchaseOrders         PurchaseOrder[]
 
   @@index([clientId])
 }
@@ -828,6 +829,13 @@ model PurchaseOrder {
   shipZip         String?
   shipCountry     String?
 
+  // Since shipAddress above is a frozen text snapshot with no real link
+  // to a ClientLocation record, this is set explicitly the first time
+  // someone receives a serialized item on this PO, so Inventory knows
+  // which of the client's actual locations the resulting assets sit at.
+  receivingClientLocationId String?
+  receivingClientLocation   ClientLocation? @relation(fields: [receivingClientLocationId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -848,24 +856,39 @@ enum POStatus {
 
 // ─── PO LINE ITEM ─────────────────────────────────────────────────────────────
 model POLineItem {
-  id                 String        @id @default(cuid())
+  id                 String             @id @default(cuid())
   purchaseOrderId    String
-  purchaseOrder      PurchaseOrder @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
+  purchaseOrder      PurchaseOrder      @relation(fields: [purchaseOrderId], references: [id], onDelete: Cascade)
   sourceSOLineItemId String?
-  sourceSOLineItem   SOLineItem?   @relation(fields: [sourceSOLineItemId], references: [id])
+  sourceSOLineItem   SOLineItem?        @relation(fields: [sourceSOLineItemId], references: [id])
   catalogItemId      String?
-  catalogItem        CatalogItem?  @relation(fields: [catalogItemId], references: [id])
+  catalogItem        CatalogItem?       @relation(fields: [catalogItemId], references: [id])
   name               String
-  description        String?       @db.Text
+  description        String?            @db.Text
   partNumber         String?
   sku                String?
   vendorSku          String?
-  quantity           Float         @default(1)
-  unitCost           Float         @default(0)
+  quantity           Float              @default(1)
+  unitCost           Float              @default(0)
   serialNumber       String?
-  received           Boolean       @default(false)
-  sortOrder          Int           @default(0)
-  createdAt          DateTime      @default(now())
+  received           Boolean            @default(false)
+  sortOrder          Int                @default(0)
+  createdAt          DateTime           @default(now())
+  polineItemSerials  POLineItemSerial[]
+}
+
+// ─── PO LINE ITEM SERIALS ──────────────────────────────────────────────────
+// One row per physical unit being received on a serialized line item, since
+// a single POLineItem.serialNumber field can't hold multiple serials when
+// quantity > 1. Each becomes exactly one InventoryAsset once received.
+model POLineItemSerial {
+  id           String          @id @default(cuid())
+  lineItemId   String
+  lineItem     POLineItem      @relation(fields: [lineItemId], references: [id], onDelete: Cascade)
+  serialNumber String
+  assetId      String?         @unique
+  asset        InventoryAsset? @relation(fields: [assetId], references: [id])
+  createdAt    DateTime        @default(now())
 }
 
 // ─── PO SHIPMENT ─────────────────────────────────────────────────────────────
@@ -1260,6 +1283,7 @@ model InventoryAsset {
   updatedAt                 DateTime                   @updatedAt
   inventoryAssetEvents      InventoryAssetEvent[]
   inventoryAssetAttachments InventoryAssetAttachment[]
+  polineItemSerial          POLineItemSerial?
 
   // Asset Tags are generated from the owning client's prefix + a running
   // sequence, unique per company (not globally), since two different
