@@ -34,6 +34,7 @@ interface CatalogItemDetail {
   description: string | null
   categoryId: string | null
   categoryRef: CategoryRef | null
+  isSerialized: boolean
   type: string
   msrp: number
   cost: number
@@ -223,6 +224,7 @@ export default function CatalogItemDetailPage() {
                   <p><span className="font-medium text-foreground">Item Name:</span> <span className="text-muted-foreground">{item.name}</span></p>
                   <p><span className="font-medium text-foreground">Description:</span> <span className="text-muted-foreground">{item.description || "—"}</span></p>
                   <p><span className="font-medium text-foreground">Type:</span> <span className="text-muted-foreground">{item.type}</span></p>
+                  <p><span className="font-medium text-foreground">Serialized:</span> <span className="text-muted-foreground">{item.isSerialized ? "Yes" : "No"}</span></p>
                   <p>
                     <span className="font-medium text-foreground">Category:</span>{" "}
                     <span className="text-muted-foreground">
@@ -294,6 +296,15 @@ export default function CatalogItemDetailPage() {
                     value={draft.categoryId ?? ""}
                     onChange={(categoryId) => updateDraft("categoryId", categoryId)}
                   />
+                  <label className="flex items-center gap-2 text-sm text-foreground">
+                    <input
+                      type="checkbox"
+                      checked={draft.isSerialized}
+                      onChange={(e) => updateDraft("isSerialized", e.target.checked)}
+                      className="accent-primary"
+                    />
+                    Serialized (tracked as individual units in Inventory, e.g. laptops, switches)
+                  </label>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs text-muted-foreground mb-1">Cost Price ($)</label>

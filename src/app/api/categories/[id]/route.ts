@@ -36,7 +36,7 @@ export async function PATCH(
   }
 
   const body = await req.json()
-  const data: { name?: string; parentId?: string | null } = {}
+  const data: { name?: string; parentId?: string | null; defaultIsSerialized?: boolean } = {}
 
   if (body.name !== undefined) {
     const name = body.name.trim()
@@ -67,6 +67,10 @@ export async function PATCH(
       }
     }
     data.parentId = parentId
+  }
+
+  if (body.defaultIsSerialized !== undefined) {
+    data.defaultIsSerialized = Boolean(body.defaultIsSerialized)
   }
 
   const category = await prisma.category.update({ where: { id }, data })

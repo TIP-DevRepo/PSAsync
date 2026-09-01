@@ -10,6 +10,7 @@ interface Category {
   id: string
   name: string
   parentId: string | null
+  defaultIsSerialized: boolean
 }
 
 interface CategoryTreeItem extends Category {
@@ -116,6 +117,20 @@ export function CategoriesSettingsPanel() {
     }
   }
 
+  async function handleToggleDefaultSerialized(id: string, value: boolean) {
+    const res = await fetch(`/api/categories/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ defaultIsSerialized: value }),
+    })
+    if (res.ok) {
+      toast.success("Category default updated")
+      loadCategories()
+    } else {
+      toast.error("Couldn't update category default")
+    }
+  }
+
   async function handleDelete(category: Category) {
     const confirmed = await confirmDialog({
       title: `Delete "${category.name}"?`,
@@ -177,6 +192,7 @@ export function CategoriesSettingsPanel() {
             onRename={handleRename}
             onDelete={handleDelete}
             onFieldsChanged={loadFields}
+            onToggleDefaultSerialized={handleToggleDefaultSerialized}
           />
         ))}
         {tree.length === 0 && (
@@ -195,6 +211,7 @@ function CategoryTreeNode({
   onRename,
   onDelete,
   onFieldsChanged,
+  onToggleDefaultSerialized,
 }: {
   node: CategoryTreeItem
   depth: number
@@ -203,6 +220,7 @@ function CategoryTreeNode({
   onRename: (id: string, name: string) => Promise<boolean>
   onDelete: (category: Category) => void
   onFieldsChanged: () => void
+  onToggleDefaultSerialized: (id: string, value: boolean) => void
 }) {
   const [expanded, setExpanded] = useState(true)
   const [addingChild, setAddingChild] = useState(false)
@@ -343,7 +361,21 @@ function CategoryTreeNode({
       )}
 
       {managingFields && (
-        <div style={{ marginLeft: (depth + 1) * 20 }} className="mt-1">
+        <div style={{ marginLeft: (depth + 1) * 20 }} className="mt-1 space-y-2">
+          <div className="rounded-md border border-border bg-card/50 p-3">
+            <label className="flex items-center gap-2 text-sm text-foreground">
+              <input
+                type="checkbox"
+                checked={node.defaultIsSerialized}
+                onChange={(e) => onToggleDefaultSerialized(node.id, e.target.checked)}
+                className="accent-primary"
+              />
+              Default new items in this category to Serialized
+            </label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Only affects the checkbox when creating a new Catalog Item under this category, existing items are never changed.
+            </p>
+          </div>
           <CategoryFieldsPanel
             categoryId={node.id}
             categoryName={node.name}
@@ -365,6 +397,7 @@ function CategoryTreeNode({
               onRename={onRename}
               onDelete={onDelete}
               onFieldsChanged={onFieldsChanged}
+              onToggleDefaultSerialized={onToggleDefaultSerialized}
             />
           ))}
         </div>

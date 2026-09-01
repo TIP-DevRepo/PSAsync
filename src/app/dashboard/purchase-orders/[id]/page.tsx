@@ -6,7 +6,9 @@ import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { POLineItemBuilder, type POLineItemBuilderItem, type POCatalogOption } from "@/components/purchase-orders/POLineItemBuilder"
+import type { ReceivePayload } from "@/components/purchase-orders/ReceiveModal"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
+import { buildLocationPathOptions, type LocationPathOption } from "@/lib/inventory/locationPaths"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Shipment {
@@ -37,7 +39,8 @@ interface PODetail {
   createdAt: string
   vendor: { id: string; name: string; email: string | null }
   user: { id: string; name: string }
-  salesOrder: { id: string; soNumber: string } | null
+  salesOrder: { id: string; soNumber: string; clientId: string } | null
+  receivingClientLocation: { id: string; name: string } | null
   lineItems: (POLineItemBuilderItem & { sku: string | null })[]
   shipments: Shipment[]
 }
@@ -104,6 +107,8 @@ export default function PurchaseOrderDetailPage({
   const [attachments, setAttachments] = useState<POAttachmentType[]>([])
 
   const [catalog, setCatalog] = useState<POCatalogOption[]>([])
+  const [companyLocationOptions, setCompanyLocationOptions] = useState<LocationPathOption[]>([])
+  const [clientLocationOptions, setClientLocationOptions] = useState<LocationPathOption[]>([])
 
   function loadPO() {
     fetch(`/api/purchase-orders/${id}`)
@@ -139,8 +144,27 @@ export default function PurchaseOrderDetailPage({
     fetch("/api/catalog")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setCatalog(data.filter((i: { active: boolean }) => i.active)))
+    fetch("/api/inventory-locations")
+      .then((res) => res.json())
+      .then((data) => Array.isArray(data) && setCompanyLocationOptions(buildLocationPathOptions(data)))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  // Client locations are only relevant for ship-to-client POs, and only
+  // once we know which client — pulled from the linked Sales Order.
+  useEffect(() => {
+    if (!po?.shipToClient || !po.salesOrder?.clientId) {
+      setClientLocationOptions([])
+      return
+    }
+    fetch(`/api/clients/${po.salesOrder.clientId}`)
+      .then((res) => res.json())
+      .then((client) => {
+        if (Array.isArray(client.locations)) {
+          setClientLocationOptions(buildLocationPathOptions(client.locations))
+        }
+      })
+  }, [po?.shipToClient, po?.salesOrder?.clientId])
 
   async function handleChangeStatus(newStatus: string) {
     setChangingStatus(true)
@@ -212,6 +236,30 @@ export default function PurchaseOrderDetailPage({
     if ("received" in patch) {
       loadPO()
     }
+  }
+
+  async function handleReceiveMany(
+    receipts: { lineItemId: string; payload: ReceivePayload }[]
+  ): Promise<{ ok: boolean; error?: string }> {
+    // Sequential on purpose — each call may generate Asset Tags off a
+    // shared per-client counter, so they need to resolve one at a time
+    // rather than racing each other.
+    for (const { lineItemId, payload } of receipts) {
+      const res = await fetch(`/api/purchase-orders/${id}/line-items/${lineItemId}/receive`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        loadPO()
+        return { ok: false, error: data.error ?? "Couldn't complete receiving" }
+      }
+    }
+
+    toast.success(receipts.length === 1 ? "Line item received" : `${receipts.length} line items received`)
+    loadPO()
+    return { ok: true }
   }
 
   async function deleteLineItem(lineItemId: string) {
@@ -296,6 +344,11 @@ export default function PurchaseOrderDetailPage({
                 <p className="text-muted-foreground">{po.shipAddress ?? "—"}</p>
                 {po.shipAddress2 && <p className="text-muted-foreground">{po.shipAddress2}</p>}
                 <p className="text-muted-foreground">{[po.shipCity, po.shipState, po.shipZip].filter(Boolean).join(", ")}</p>
+                {po.shipToClient && po.receivingClientLocation && (
+                  <p className="text-xs text-muted-foreground pt-1">
+                    Inventory location for received items: <span className="text-foreground">{po.receivingClientLocation.name}</span>
+                  </p>
+                )}
               </div>
 
               <div className="space-y-3">
@@ -310,10 +363,16 @@ export default function PurchaseOrderDetailPage({
                   items={po.lineItems}
                   catalog={catalog}
                   locked={po.status === "CANCELLED" || po.status === "RECEIVED"}
+                  shipToClient={po.shipToClient}
+                  receivingClientLocationId={po.receivingClientLocation?.id ?? null}
+                  receivingClientLocationName={po.receivingClientLocation?.name ?? null}
+                  companyLocationOptions={companyLocationOptions}
+                  clientLocationOptions={clientLocationOptions}
                   onCreate={createLineItem}
                   onUpdate={updateLineItem}
                   onDelete={deleteLineItem}
                   onDuplicate={duplicateLineItem}
+                  onReceiveMany={handleReceiveMany}
                 />
 
                 <div className="flex justify-end">

@@ -5,11 +5,14 @@ import { Button } from "@/components/ui/button"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { LineItemTable, MoveButtons, RowActionsRead, RowActionsEdit, CopyableCell, money, type ColumnDef } from "@/components/line-items/LineItemTableShell"
 import { AddLineItemModal } from "@/components/line-items/AddLineItemModal"
+import { ReceiveModal, type ReceivePayload, type ReceivableLineItem } from "@/components/purchase-orders/ReceiveModal"
+import type { LocationPathOption } from "@/lib/inventory/locationPaths"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 export interface POLineItemBuilderItem {
   id: string
   catalogItemId: string | null
+  catalogItem: { isSerialized: boolean; type: string } | null
   partNumber: string | null
   sku: string | null
   vendorSku: string | null
@@ -34,6 +37,13 @@ function lineTotal(li: POLineItemBuilderItem) {
   return li.unitCost * li.quantity
 }
 
+// A line item only goes through Inventory receiving if it's linked to a
+// Catalog Item AND that item's type is Physical — Services, Subscriptions,
+// and Bundles have nothing to track a physical unit or stock quantity for.
+function isInventoryTracked(li: POLineItemBuilderItem): boolean {
+  return li.catalogItemId !== null && li.catalogItem?.type === "PHYSICAL"
+}
+
 const COLUMNS: ColumnDef[] = [
   { header: "", widthPct: 4 },
   { header: "Part #", widthPct: 9 },
@@ -51,24 +61,37 @@ interface POLineItemBuilderProps {
   items: POLineItemBuilderItem[]
   catalog: POCatalogOption[]
   locked?: boolean
+  shipToClient: boolean
+  receivingClientLocationId: string | null
+  receivingClientLocationName: string | null
+  companyLocationOptions: LocationPathOption[]
+  clientLocationOptions: LocationPathOption[]
   onCreate: (payload: Partial<POLineItemBuilderItem>) => void | Promise<void>
   onUpdate: (id: string, patch: Partial<POLineItemBuilderItem>) => void | Promise<void>
   onDelete: (id: string) => void | Promise<void>
   onDuplicate: (li: POLineItemBuilderItem) => void | Promise<void>
+  onReceiveMany: (receipts: { lineItemId: string; payload: ReceivePayload }[]) => Promise<{ ok: boolean; error?: string }>
 }
 
 export function POLineItemBuilder({
   items,
   catalog,
   locked = false,
+  shipToClient,
+  receivingClientLocationId,
+  receivingClientLocationName,
+  companyLocationOptions,
+  clientLocationOptions,
   onCreate,
   onUpdate,
   onDelete,
   onDuplicate,
+  onReceiveMany,
 }: POLineItemBuilderProps) {
   const [showAddModal, setShowAddModal] = useState(false)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [adhoc, setAdhoc] = useState({ name: "", partNumber: "", vendorSku: "", quantity: "1", unitCost: "0" })
+  const [receiveQueue, setReceiveQueue] = useState<POLineItemBuilderItem[] | null>(null)
 
   const sorted = [...items].sort((a, b) => a.sortOrder - b.sortOrder)
 
@@ -92,10 +115,45 @@ export function POLineItemBuilder({
     setShowAddModal(true)
   }
 
+  async function handleReceiveAll() {
+    const unreceived = sorted.filter((li) => !li.received)
+    const simple = unreceived.filter((li) => !isInventoryTracked(li))
+    const tracked = unreceived.filter((li) => isInventoryTracked(li))
+
+    // Non-inventory-tracked items (services, ad-hoc rows, etc) just get
+    // marked received directly — there's nothing to collect for them.
+    await Promise.all(simple.map((li) => onUpdate(li.id, { received: true })))
+
+    if (tracked.length > 0) {
+      setReceiveQueue(tracked)
+    }
+  }
+
+  function renderReceivedCell(li: POLineItemBuilderItem) {
+    if (li.received) {
+      return <span className="text-xs font-medium text-success">✓ Received</span>
+    }
+    if (!isInventoryTracked(li)) {
+      return (
+        <input
+          type="checkbox"
+          checked={li.received}
+          onChange={(e) => onUpdate(li.id, { received: e.target.checked })}
+        />
+      )
+    }
+    return (
+      <button onClick={() => setReceiveQueue([li])} className="text-xs font-medium text-primary hover:underline">
+        Receive
+      </button>
+    )
+  }
+
   function renderRow(li: POLineItemBuilderItem) {
     const total = lineTotal(li)
     const isEditing = editingId === li.id
     const partNumberValue = li.partNumber ?? li.sku ?? ""
+    const showSerialColumn = isInventoryTracked(li) && li.catalogItem?.isSerialized
 
     return (
       <tr key={li.id} className="border-b border-border last:border-0">
@@ -123,11 +181,13 @@ export function POLineItemBuilder({
             </td>
             <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
             <td className="py-2 pr-2 align-top">
-              <input type="text" defaultValue={li.serialNumber ?? ""} onBlur={(e) => onUpdate(li.id, { serialNumber: e.target.value })} placeholder="—" className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground" />
+              {showSerialColumn ? (
+                <span className="text-xs text-muted-foreground">Set during receiving</span>
+              ) : (
+                <span className="text-xs text-muted-foreground">—</span>
+              )}
             </td>
-            <td className="py-2 pr-2 align-top text-center">
-              <input type="checkbox" checked={li.received} onChange={(e) => onUpdate(li.id, { received: e.target.checked })} />
-            </td>
+            <td className="py-2 pr-2 align-top text-center">{renderReceivedCell(li)}</td>
             <td className="py-2 pr-4 align-top">
               <RowActionsEdit onDone={() => setEditingId(null)} onDuplicate={() => onDuplicate(li)} onDelete={() => handleDelete(li.id)} />
             </td>
@@ -144,11 +204,13 @@ export function POLineItemBuilder({
             <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{money(li.unitCost)}</td>
             <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
             <td className="py-2 pr-2 align-top">
-              <input type="text" defaultValue={li.serialNumber ?? ""} onBlur={(e) => onUpdate(li.id, { serialNumber: e.target.value })} placeholder="—" className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-foreground" />
+              {showSerialColumn ? (
+                <span className="text-xs text-muted-foreground">{li.received ? "See asset" : "Set during receiving"}</span>
+              ) : (
+                <span className="text-xs text-muted-foreground">—</span>
+              )}
             </td>
-            <td className="py-2 pr-2 align-top text-center">
-              <input type="checkbox" checked={li.received} onChange={(e) => onUpdate(li.id, { received: e.target.checked })} />
-            </td>
+            <td className="py-2 pr-2 align-top text-center">{renderReceivedCell(li)}</td>
             <td className="py-2 pr-4 align-top">
               {!locked && <RowActionsRead onEdit={() => setEditingId(li.id)} onDuplicate={() => onDuplicate(li)} onDelete={() => handleDelete(li.id)} />}
             </td>
@@ -158,9 +220,16 @@ export function POLineItemBuilder({
     )
   }
 
+  const anyUnreceived = sorted.some((li) => !li.received)
+
   return (
     <div className="space-y-3">
-      {!locked && <Button size="sm" variant="outline" onClick={openAdd}>+ Add Line Item</Button>}
+      <div className="flex items-center gap-2">
+        {!locked && <Button size="sm" variant="outline" onClick={openAdd}>+ Add Line Item</Button>}
+        {!locked && anyUnreceived && (
+          <Button size="sm" onClick={handleReceiveAll}>Receive All</Button>
+        )}
+      </div>
 
       <LineItemTable columns={COLUMNS}>
         {sorted.map((li) => renderRow(li))}
@@ -222,6 +291,24 @@ export function POLineItemBuilder({
               </div>
             </div>
           }
+        />
+      )}
+
+      {receiveQueue && (
+        <ReceiveModal
+          lineItems={receiveQueue.map<ReceivableLineItem>((li) => ({
+            id: li.id,
+            name: li.name,
+            quantity: li.quantity,
+            isSerialized: li.catalogItem?.isSerialized ?? false,
+          }))}
+          shipToClient={shipToClient}
+          receivingClientLocationId={receivingClientLocationId}
+          receivingClientLocationName={receivingClientLocationName}
+          companyLocationOptions={companyLocationOptions}
+          clientLocationOptions={clientLocationOptions}
+          onSubmit={onReceiveMany}
+          onClose={() => setReceiveQueue(null)}
         />
       )}
     </div>

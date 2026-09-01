@@ -401,6 +401,11 @@ model Category {
   catalogItems CatalogItem[]
   customFields InventoryCustomField[]
 
+  // Default applied to the "Serialized" checkbox when creating a new
+  // Catalog Item under this category, editing an existing item never
+  // auto-applies this, only the Add Catalog Item form does.
+  defaultIsSerialized Boolean @default(false)
+
   // Name must be unique per company regardless of where it sits in the
   // tree, no two categories anywhere can share a name, even under
   // different parents (e.g. only one "Cables" category ever exists).

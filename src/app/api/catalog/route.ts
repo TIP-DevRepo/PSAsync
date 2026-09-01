@@ -62,6 +62,7 @@ export async function POST(req: NextRequest) {
       name: body.name,
       description: body.description || null,
       categoryId: body.categoryId,
+      isSerialized: Boolean(body.isSerialized),
       type: body.type || "PHYSICAL",
       msrp: Number(body.msrp) || 0,
       cost: Number(body.cost) || 0,

@@ -21,8 +21,12 @@ export async function GET(
     include: {
       vendor: { select: { id: true, name: true, email: true } },
       user: { select: { id: true, name: true } },
-      salesOrder: { select: { id: true, soNumber: true } },
-      lineItems: { orderBy: { sortOrder: "asc" } },
+      salesOrder: { select: { id: true, soNumber: true, clientId: true } },
+      receivingClientLocation: { select: { id: true, name: true } },
+      lineItems: {
+        orderBy: { sortOrder: "asc" },
+        include: { catalogItem: { select: { isSerialized: true, type: true } } },
+      },
       shipments: { orderBy: { createdAt: "asc" } },
       comments: { orderBy: { createdAt: "asc" } },
       attachments: { orderBy: { createdAt: "desc" } },

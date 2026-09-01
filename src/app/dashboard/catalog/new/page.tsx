@@ -31,6 +31,7 @@ export default function NewCatalogItemPage() {
     name: "",
     description: "",
     categoryId: "",
+    isSerialized: false,
     type: "PHYSICAL",
     msrp: "",
     cost: "",
@@ -138,7 +139,20 @@ export default function NewCatalogItemPage() {
           </div>
         </div>
 
-        <CategoryPicker value={form.categoryId} onChange={(categoryId) => update("categoryId", categoryId)} />
+        <CategoryPicker
+          value={form.categoryId}
+          onChange={(categoryId) => update("categoryId", categoryId)}
+          onDefaultsChange={(defaults) => update("isSerialized", defaults.isSerialized)}
+        />
+
+        <label className="flex items-center gap-2 text-sm">
+          <input
+            type="checkbox"
+            checked={form.isSerialized}
+            onChange={(e) => update("isSerialized", e.target.checked)}
+          />
+          Serialized (tracked as individual units in Inventory, e.g. laptops, switches)
+        </label>
 
         <div className="grid grid-cols-2 gap-3">
           <div>
