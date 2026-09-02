@@ -22,6 +22,8 @@ export async function GET(
       vendor: { select: { id: true, name: true, email: true } },
       user: { select: { id: true, name: true } },
       salesOrder: { select: { id: true, soNumber: true, clientId: true } },
+      shipToClientRef: { select: { id: true, name: true } },
+      shipToClientLocation: { select: { id: true, name: true } },
       receivingClientLocation: { select: { id: true, name: true } },
       lineItems: {
         orderBy: { sortOrder: "asc" },

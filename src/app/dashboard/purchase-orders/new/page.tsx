@@ -173,7 +173,11 @@ export default function NewPurchaseOrderPage() {
     const res = await fetch("/api/purchase-orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({
+        ...form,
+        shipClientId: form.salesOrderId ? undefined : shipClientId,
+        shipClientLocationId: form.salesOrderId ? undefined : shipClientLocationId,
+      }),
     })
 
     if (!res.ok) {

@@ -16,6 +16,7 @@ export interface ReceivePayload {
   serialNumbers?: string[]
   locationId?: string
   clientLocationId?: string
+  containerLocationId?: string
 }
 
 export function ReceiveModal({
@@ -25,6 +26,8 @@ export function ReceiveModal({
   receivingClientLocationName,
   companyLocationOptions,
   clientLocationOptions,
+  clientContainerOptions,
+  defaultContainerId,
   onSubmit,
   onClose,
 }: {
@@ -33,7 +36,14 @@ export function ReceiveModal({
   receivingClientLocationId: string | null
   receivingClientLocationName: string | null
   companyLocationOptions: LocationPathOption[]
+  // Used only the very first time something's received on a ship-to-client
+  // PO, to pick which of the client's sites this is going to.
   clientLocationOptions: LocationPathOption[]
+  // Containers under the resolved ship-to site, only populated when the
+  // client is onboarded for Inventory and has built any out. Empty means
+  // fall back to the flat ClientLocation with no Container picker.
+  clientContainerOptions: LocationPathOption[]
+  defaultContainerId: string | null
   onSubmit: (receipts: { lineItemId: string; payload: ReceivePayload }[]) => Promise<{ ok: boolean; error?: string }>
   onClose: () => void
 }) {
@@ -45,10 +55,12 @@ export function ReceiveModal({
     return initial
   })
   const [pickedLocationId, setPickedLocationId] = useState("")
+  const [pickedContainerId, setPickedContainerId] = useState(defaultContainerId ?? "")
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   const needsLocationPick = shipToClient ? !receivingClientLocationId : true
+  const hasContainerOptions = shipToClient && receivingClientLocationId && clientContainerOptions.length > 0
 
   function updateSerial(lineItemId: string, index: number, value: string) {
     setSerialsByLineItem((prev) => {
@@ -80,6 +92,7 @@ export function ReceiveModal({
         if (shipToClient) payload.clientLocationId = pickedLocationId
         else payload.locationId = pickedLocationId
       }
+      if (hasContainerOptions && pickedContainerId) payload.containerLocationId = pickedContainerId
       return { lineItemId: li.id, payload }
     })
 
@@ -126,7 +139,7 @@ export function ReceiveModal({
         ))}
       </div>
 
-      <div className="mt-4">
+      <div className="mt-4 space-y-3">
         {needsLocationPick ? (
           <div>
             <label className="block text-xs text-muted-foreground mb-1">
@@ -147,6 +160,22 @@ export function ReceiveModal({
           <p className="text-xs text-muted-foreground">
             Shipping to: <span className="text-foreground">{receivingClientLocationName}</span>
           </p>
+        )}
+
+        {hasContainerOptions && (
+          <div>
+            <label className="block text-xs text-muted-foreground mb-1">Container (optional)</label>
+            <select
+              value={pickedContainerId}
+              onChange={(e) => setPickedContainerId(e.target.value)}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <option value="">No specific container</option>
+              {clientContainerOptions.map((l) => (
+                <option key={l.id} value={l.id}>{l.label}</option>
+              ))}
+            </select>
+          </div>
         )}
       </div>
 

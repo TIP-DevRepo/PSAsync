@@ -66,6 +66,8 @@ interface POLineItemBuilderProps {
   receivingClientLocationName: string | null
   companyLocationOptions: LocationPathOption[]
   clientLocationOptions: LocationPathOption[]
+  clientContainerOptions: LocationPathOption[]
+  defaultContainerId: string | null
   onCreate: (payload: Partial<POLineItemBuilderItem>) => void | Promise<void>
   onUpdate: (id: string, patch: Partial<POLineItemBuilderItem>) => void | Promise<void>
   onDelete: (id: string) => void | Promise<void>
@@ -82,6 +84,8 @@ export function POLineItemBuilder({
   receivingClientLocationName,
   companyLocationOptions,
   clientLocationOptions,
+  clientContainerOptions,
+  defaultContainerId,
   onCreate,
   onUpdate,
   onDelete,
@@ -307,6 +311,8 @@ export function POLineItemBuilder({
           receivingClientLocationName={receivingClientLocationName}
           companyLocationOptions={companyLocationOptions}
           clientLocationOptions={clientLocationOptions}
+          clientContainerOptions={clientContainerOptions}
+          defaultContainerId={defaultContainerId}
           onSubmit={onReceiveMany}
           onClose={() => setReceiveQueue(null)}
         />

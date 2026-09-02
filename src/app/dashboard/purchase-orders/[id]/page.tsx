@@ -40,6 +40,8 @@ interface PODetail {
   vendor: { id: string; name: string; email: string | null }
   user: { id: string; name: string }
   salesOrder: { id: string; soNumber: string; clientId: string } | null
+  shipToClientRef: { id: string; name: string } | null
+  shipToClientLocation: { id: string; name: string } | null
   receivingClientLocation: { id: string; name: string } | null
   lineItems: (POLineItemBuilderItem & { sku: string | null })[]
   shipments: Shipment[]
@@ -109,6 +111,8 @@ export default function PurchaseOrderDetailPage({
   const [catalog, setCatalog] = useState<POCatalogOption[]>([])
   const [companyLocationOptions, setCompanyLocationOptions] = useState<LocationPathOption[]>([])
   const [clientLocationOptions, setClientLocationOptions] = useState<LocationPathOption[]>([])
+  const [clientContainerOptions, setClientContainerOptions] = useState<LocationPathOption[]>([])
+  const [defaultContainerId, setDefaultContainerId] = useState<string | null>(null)
 
   function loadPO() {
     fetch(`/api/purchase-orders/${id}`)
@@ -151,20 +155,42 @@ export default function PurchaseOrderDetailPage({
   }, [id])
 
   // Client locations are only relevant for ship-to-client POs, and only
-  // once we know which client — pulled from the linked Sales Order.
+  // once we know which client — pulled from shipToClientId, which works
+  // whether the PO came from a linked Sales Order or was a standalone
+  // ship-to-client PO with a client picked directly.
   useEffect(() => {
-    if (!po?.shipToClient || !po.salesOrder?.clientId) {
+    if (!po?.shipToClient || !po.shipToClientRef?.id) {
       setClientLocationOptions([])
       return
     }
-    fetch(`/api/clients/${po.salesOrder.clientId}`)
+    fetch(`/api/clients/${po.shipToClientRef.id}`)
       .then((res) => res.json())
       .then((client) => {
         if (Array.isArray(client.locations)) {
           setClientLocationOptions(buildLocationPathOptions(client.locations))
         }
       })
-  }, [po?.shipToClient, po?.salesOrder?.clientId])
+  }, [po?.shipToClient, po?.shipToClientRef?.id])
+
+  // Once a specific ship-to site is known — whether captured up front
+  // (shipToClientLocation) or locked in from a prior receipt
+  // (receivingClientLocation) — check whether that site has any
+  // Containers built out yet, and whether one is starred as default.
+  const resolvedClientLocation = po?.shipToClientLocation ?? po?.receivingClientLocation ?? null
+
+  useEffect(() => {
+    if (!resolvedClientLocation?.id) {
+      setClientContainerOptions([])
+      setDefaultContainerId(null)
+      return
+    }
+    fetch(`/api/inventory-locations?clientLocationId=${resolvedClientLocation.id}`)
+      .then((res) => res.json())
+      .then((data) => {
+        setClientContainerOptions(buildLocationPathOptions(data.locations ?? []))
+        setDefaultContainerId(data.defaultContainerId ?? null)
+      })
+  }, [resolvedClientLocation?.id])
 
   async function handleChangeStatus(newStatus: string) {
     setChangingStatus(true)
@@ -364,10 +390,12 @@ export default function PurchaseOrderDetailPage({
                   catalog={catalog}
                   locked={po.status === "CANCELLED" || po.status === "RECEIVED"}
                   shipToClient={po.shipToClient}
-                  receivingClientLocationId={po.receivingClientLocation?.id ?? null}
-                  receivingClientLocationName={po.receivingClientLocation?.name ?? null}
+                  receivingClientLocationId={resolvedClientLocation?.id ?? null}
+                  receivingClientLocationName={resolvedClientLocation?.name ?? null}
                   companyLocationOptions={companyLocationOptions}
                   clientLocationOptions={clientLocationOptions}
+                  clientContainerOptions={clientContainerOptions}
+                  defaultContainerId={defaultContainerId}
                   onCreate={createLineItem}
                   onUpdate={updateLineItem}
                   onDelete={deleteLineItem}

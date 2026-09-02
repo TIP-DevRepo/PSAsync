@@ -75,6 +75,7 @@ export async function POST(req: NextRequest) {
   const isGeneratingFromSO = Array.isArray(body.soLineItemIds) && body.soLineItemIds.length > 0
 
   let salesOrderId: string | null = body.salesOrderId || null
+  let shipToClientId: string | null = null
   let lineItemsCreate: {
     sourceSOLineItemId: string
     name: string
@@ -108,6 +109,36 @@ export async function POST(req: NextRequest) {
     }))
   }
 
+  let shipToClientLocationId: string | null = null
+
+  if (body.shipToClient) {
+    if (salesOrderId) {
+      // Linked to a Sales Order — the client comes from there, ignore
+      // any standalone client picker value that might also be present.
+      // Sales Orders don't capture a real ClientLocation link either
+      // (same text-snapshot issue), so shipToClientLocationId stays
+      // null here, receiving will fall back to asking once.
+      const so = await prisma.salesOrder.findUnique({ where: { id: salesOrderId, companyId } })
+      shipToClientId = so?.clientId ?? null
+    } else if (body.shipClientId) {
+      const client = await prisma.client.findUnique({ where: { id: body.shipClientId, companyId } })
+      if (!client) {
+        return NextResponse.json({ error: "Client not found" }, { status: 404 })
+      }
+      shipToClientId = client.id
+
+      if (body.shipClientLocationId) {
+        const location = await prisma.clientLocation.findFirst({
+          where: { id: body.shipClientLocationId, clientId: client.id },
+        })
+        if (!location) {
+          return NextResponse.json({ error: "Shipping location not found for this client" }, { status: 404 })
+        }
+        shipToClientLocationId = location.id
+      }
+    }
+  }
+
   const purchaseOrder = await prisma.purchaseOrder.create({
     data: {
       companyId,
@@ -119,6 +150,8 @@ export async function POST(req: NextRequest) {
       paymentType,
       internalNotes: body.internalNotes || null,
       shipToClient: body.shipToClient ?? false,
+      shipToClientId,
+      shipToClientLocationId,
       shipContactName: body.shipContactName || null,
       shipAddress: body.shipAddress || null,
       shipAddress2: body.shipAddress2 || null,

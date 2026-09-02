@@ -18,9 +18,7 @@ export async function POST(
   const lineItem = await prisma.pOLineItem.findUnique({
     where: { id: lineItemId },
     include: {
-      purchaseOrder: {
-        include: { salesOrder: { select: { clientId: true } } },
-      },
+      purchaseOrder: true,
       catalogItem: true,
     },
   })
@@ -42,10 +40,10 @@ export async function POST(
   const body = await req.json()
 
   // Asset Tag prefix always comes from whoever the item was purchased
-  // for — the linked Sales Order's client — regardless of where the
-  // item is physically shipping to. A standalone PO with no linked SO
-  // falls back to the company's own internal client record.
-  const tagClientId = po.salesOrder?.clientId ?? undefined
+  // for — the PO's linked client, whether that came from a Sales Order
+  // or was picked directly on a standalone PO. Falls back to the
+  // company's own internal client record if neither is set.
+  const tagClientId = po.shipToClientId ?? undefined
 
   try {
     if (lineItem.catalogItem.isSerialized) {
@@ -70,17 +68,17 @@ export async function POST(
       let status: "IN_STOCK" | "SOLD"
 
       if (po.shipToClient) {
-        if (!po.salesOrder?.clientId) {
+        if (!po.shipToClientId) {
           return NextResponse.json(
-            { error: "This Purchase Order ships to a client but has no linked Sales Order to identify which client" },
+            { error: "This Purchase Order ships to a client, but no client is linked to it. Edit the Purchase Order and confirm a client is selected." },
             { status: 400 }
           )
         }
-        // The PO's shipAddress is a frozen text snapshot with no real
-        // ClientLocation link, so the actual location has to be chosen
-        // explicitly the first time a serialized item is received on
-        // this PO, then reused for anything received on it afterward.
-        clientLocationId = po.receivingClientLocationId
+        // Prefer the real location captured at PO creation. Fall back to
+        // whatever was already locked in from a prior receipt on this PO,
+        // and only as a last resort (e.g. a Sales-Order-linked PO, which
+        // has no real location link) ask the user to pick one now.
+        clientLocationId = po.shipToClientLocationId ?? po.receivingClientLocationId
         if (!clientLocationId) {
           if (!body.clientLocationId) {
             return NextResponse.json(
@@ -95,11 +93,26 @@ export async function POST(
           })
         }
         ownerType = "CLIENT"
-        ownerClientId = po.salesOrder.clientId
+        ownerClientId = po.shipToClientId
         // An item shipping directly to a client on receipt has already
         // effectively been sold, the Sales Order is what represents
         // that sale, receiving is just fulfilling it.
         status = "SOLD"
+
+        // If the client is onboarded for Inventory and has built out a
+        // Container tree under that specific site, the asset gets
+        // stocked at whichever Container was picked. Otherwise it just
+        // sits at the flat ClientLocation with no Container, same as
+        // before onboarding existed.
+        if (body.containerLocationId && clientLocationId) {
+          const container = await prisma.inventoryLocation.findUnique({
+            where: { id: body.containerLocationId, companyId, clientLocationId },
+          })
+          if (!container) {
+            return NextResponse.json({ error: "Container not found" }, { status: 404 })
+          }
+          locationId = body.containerLocationId
+        }
       } else {
         if (!body.locationId) {
           return NextResponse.json({ error: "Select which warehouse location these items are being stored at" }, { status: 400 })

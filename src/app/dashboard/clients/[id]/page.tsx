@@ -8,6 +8,7 @@ import { toast } from "@/lib/toast"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { Combobox } from "@/components/ui/combobox"
 import { Modal } from "@/components/Modal"
+import { ContainersModal } from "@/components/inventory/ContainersModal"
 import { Ticket, Target, Package, FileText, KeyRound, FolderOpen, Radar, Settings2, Boxes, Phone, Wrench, CheckCircle2 } from "lucide-react"
 
 interface ContactTag {
@@ -191,6 +192,7 @@ export default function ClientDetailPage() {
     isPrimary: false,
   })
   const [viewingLocation, setViewingLocation] = useState<ClientLocation | null>(null)
+  const [managingContainersFor, setManagingContainersFor] = useState<ClientLocation | null>(null)
 
   const [contactSearch, setContactSearch] = useState("")
   const [showAddContact, setShowAddContact] = useState(false)
@@ -735,13 +737,12 @@ export default function ClientDetailPage() {
 
             <div className="space-y-2">
               {client.locations.map((loc) => (
-                <button
+                <div
                   key={loc.id}
-                  onClick={() => setViewingLocation(loc)}
-                  className="w-full text-left rounded-lg border border-border bg-card shadow-card p-3 text-sm hover:bg-surface-hover transition-colors"
+                  className="rounded-lg border border-border bg-card shadow-card p-3 text-sm hover:bg-surface-hover transition-colors"
                 >
-                  <div className="flex justify-between items-start">
-                    <div>
+                  <div className="flex justify-between items-start gap-3">
+                    <button onClick={() => setViewingLocation(loc)} className="flex-1 text-left min-w-0">
                       <p className="font-medium text-foreground">
                         {loc.name}
                         {loc.isPrimary && (
@@ -749,9 +750,14 @@ export default function ClientDetailPage() {
                         )}
                       </p>
                       <p className="text-muted-foreground">{locationAddress(loc)}</p>
-                    </div>
+                    </button>
+                    {client.inventoryOnboarded && (
+                      <Button size="sm" variant="outline" onClick={() => setManagingContainersFor(loc)}>
+                        Containers
+                      </Button>
+                    )}
                   </div>
-                </button>
+                </div>
               ))}
               {client.locations.length === 0 && (
                 <p className="text-sm text-muted-foreground">No locations yet.</p>
@@ -1086,6 +1092,14 @@ export default function ClientDetailPage() {
           contactTags={contactTags}
           onClose={() => setViewingContact(null)}
           onSave={handleSaveContact}
+        />
+      )}
+
+      {managingContainersFor && (
+        <ContainersModal
+          clientLocationId={managingContainersFor.id}
+          locationName={managingContainersFor.name}
+          onClose={() => setManagingContainersFor(null)}
         />
       )}
 

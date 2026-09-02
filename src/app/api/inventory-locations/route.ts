@@ -22,7 +22,12 @@ export async function GET(req: NextRequest) {
     orderBy: { name: "asc" },
   })
 
-  return NextResponse.json(locations)
+  const clientLocation = await prisma.clientLocation.findUnique({
+    where: { id: clientLocationId },
+    select: { defaultContainerId: true },
+  })
+
+  return NextResponse.json({ locations, defaultContainerId: clientLocation?.defaultContainerId ?? null })
 }
 
 export async function POST(req: NextRequest) {

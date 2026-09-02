@@ -172,6 +172,7 @@ model Client {
   customPricing         ClientCustomPrice[]
   ownedInventoryAssets  InventoryAsset[]    @relation("InventoryAssetOwner")
   loanedInventoryAssets InventoryAsset[]    @relation("InventoryAssetLoanedTo")
+  purchaseOrders        PurchaseOrder[]
 }
 
 model Industry {
@@ -209,16 +210,27 @@ model ClientLocation {
   // Back-relation for Contact.location — contacts who work at this site
   contactsBasedHere Contact[]
 
+  // Every Container built under this site — the reverse side of
+  // InventoryLocation.clientLocationId below.
+  containers InventoryLocation[] @relation("InventoryLocationSite")
+
+  // The Container pre-selected in the receiving popup when stocking
+  // hardware at this site — optional, set from inside the Containers
+  // popup. Must belong to this same ClientLocation's own tree.
+  defaultContainerId String?
+  defaultContainer   InventoryLocation? @relation("ClientLocationDefaultContainer", fields: [defaultContainerId], references: [id])
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   // Back-relations required by Prisma since Client links to ClientLocation
   // through two additional named relations beyond the primary "locations" one
-  mainBillingForClients  Client[]            @relation("ClientMainBilling")
-  mainShippingForClients Client[]            @relation("ClientMainShipping")
-  inventoryAssets        InventoryAsset[]
-  purchaseOrders         PurchaseOrder[]
-  inventoryLocations     InventoryLocation[]
+  mainBillingForClients  Client[] @relation("ClientMainBilling")
+  mainShippingForClients Client[] @relation("ClientMainShipping")
+
+  purchaseOrdersReceivingHere PurchaseOrder[]  @relation("PurchaseOrderReceivingLocation")
+  purchaseOrdersShippingHere  PurchaseOrder[]  @relation("PurchaseOrderShipToLocation")
+  inventoryAssets             InventoryAsset[]
 
   @@index([clientId])
 }
@@ -532,19 +544,20 @@ model InventoryStockEvent {
 // separate global company-wide warehouse tree — your own company's
 // Containers work exactly the same way, just under your own ClientLocation.
 model InventoryLocation {
-  id               String              @id @default(cuid())
-  companyId        String
-  company          Company             @relation(fields: [companyId], references: [id])
-  clientLocationId String
-  clientLocation   ClientLocation      @relation(fields: [clientLocationId], references: [id], onDelete: Cascade)
-  name             String
-  parentId         String?
-  parent           InventoryLocation?  @relation("InventoryLocationChildren", fields: [parentId], references: [id])
-  children         InventoryLocation[] @relation("InventoryLocationChildren")
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
-  inventoryStocks  InventoryStock[]
-  inventoryAssets  InventoryAsset[]
+  id                        String              @id @default(cuid())
+  companyId                 String
+  company                   Company             @relation(fields: [companyId], references: [id])
+  clientLocationId          String
+  clientLocation            ClientLocation      @relation("InventoryLocationSite", fields: [clientLocationId], references: [id], onDelete: Cascade)
+  name                      String
+  parentId                  String?
+  parent                    InventoryLocation?  @relation("InventoryLocationChildren", fields: [parentId], references: [id])
+  children                  InventoryLocation[] @relation("InventoryLocationChildren")
+  createdAt                 DateTime            @default(now())
+  updatedAt                 DateTime            @updatedAt
+  inventoryStocks           InventoryStock[]
+  inventoryAssets           InventoryAsset[]
+  defaultForClientLocations ClientLocation[]    @relation("ClientLocationDefaultContainer")
 }
 
 // ─── CATALOG ITEM ─────────────────────────────────────────────────────────────
@@ -835,6 +848,12 @@ model PurchaseOrder {
   // the linked Sales Order's ship-to snapshot); false means it ships to
   // one of your own company's locations (the Client flagged isInternal)
   shipToClient    Boolean @default(false)
+  // Which client this actually ships to when shipToClient is true — set
+  // from the linked Sales Order's client if one exists, or picked
+  // directly on a standalone PO. This is the real link Inventory uses
+  // to resolve ownership and Asset Tag prefix, not the Sales Order.
+  shipToClientId  String?
+  shipToClientRef Client? @relation(fields: [shipToClientId], references: [id])
   shipContactName String?
   shipAddress     String?
   shipAddress2    String?
@@ -843,12 +862,18 @@ model PurchaseOrder {
   shipZip         String?
   shipCountry     String?
 
-  // Since shipAddress above is a frozen text snapshot with no real link
-  // to a ClientLocation record, this is set explicitly the first time
-  // someone receives a serialized item on this PO, so Inventory knows
-  // which of the client's actual locations the resulting assets sit at.
+  // Fallback only — used when no real location was captured at creation
+  // (e.g. a PO generated from a Sales Order, which has the same
+  // text-snapshot-only shipping problem). Set the first time someone
+  // receives on this PO if shipToClientLocationId is empty.
   receivingClientLocationId String?
-  receivingClientLocation   ClientLocation? @relation(fields: [receivingClientLocationId], references: [id])
+  receivingClientLocation   ClientLocation? @relation("PurchaseOrderReceivingLocation", fields: [receivingClientLocationId], references: [id])
+
+  // The real link, captured at creation time on a standalone ship-to-
+  // client PO from the client + location picker on the New Purchase
+  // Order page. When this is set, receiving never needs to ask again.
+  shipToClientLocationId String?
+  shipToClientLocation   ClientLocation? @relation("PurchaseOrderShipToLocation", fields: [shipToClientLocationId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
