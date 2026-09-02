@@ -8,7 +8,7 @@ import { toast } from "@/lib/toast"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { Combobox } from "@/components/ui/combobox"
 import { Modal } from "@/components/Modal"
-import { Ticket, Target, Package, FileText, KeyRound, FolderOpen, Radar } from "lucide-react"
+import { Ticket, Target, Package, FileText, KeyRound, FolderOpen, Radar, Settings2, Boxes, Phone, Wrench, CheckCircle2 } from "lucide-react"
 
 interface ContactTag {
   id: string
@@ -62,6 +62,7 @@ interface ClientDetail {
   paymentTerms: string | null
   notes: string | null
   isInternal: boolean
+  inventoryOnboarded: boolean
   contacts: Contact[]
   locations: ClientLocation[]
   mainBillingLocationId: string | null
@@ -81,6 +82,7 @@ type ClientTabKey =
   | "licenses"
   | "documents"
   | "engagement"
+  | "clientSettings"
 
 const CLIENT_TABS: { key: ClientTabKey; label: string }[] = [
   { key: "details", label: "Details" },
@@ -93,6 +95,7 @@ const CLIENT_TABS: { key: ClientTabKey; label: string }[] = [
   { key: "licenses", label: "Licenses & Subscriptions" },
   { key: "documents", label: "Documents" },
   { key: "engagement", label: "Engagement Hub" },
+  { key: "clientSettings", label: "Client Settings" },
 ]
 
 type StatusFilter = "OPEN" | "CLOSED" | "ALL"
@@ -208,6 +211,10 @@ export default function ClientDetailPage() {
 
   const [industries, setIndustries] = useState<{ id: string; name: string }[]>([])
   const [contactTags, setContactTags] = useState<ContactTag[]>([])
+
+  const [onboardingInventory, setOnboardingInventory] = useState(false)
+  const [showPrefixPrompt, setShowPrefixPrompt] = useState(false)
+  const [prefixPromptValue, setPrefixPromptValue] = useState("")
 
   function loadIndustries() {
     fetch("/api/industries")
@@ -344,6 +351,35 @@ export default function ClientDetailPage() {
       loadClient()
     } else {
       toast.error("Couldn't save contact")
+    }
+  }
+
+  // ─── Client Settings tab: Inventory onboarding ─────────────────────
+  function handleOnboardInventoryClick() {
+    if (!client) return
+    if (!client.prefix) {
+      setPrefixPromptValue("")
+      setShowPrefixPrompt(true)
+      return
+    }
+    submitOnboardInventory()
+  }
+
+  async function submitOnboardInventory(prefix?: string) {
+    setOnboardingInventory(true)
+    const res = await fetch(`/api/clients/${id}/onboard-inventory`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(prefix ? { prefix } : {}),
+    })
+    setOnboardingInventory(false)
+    if (res.ok) {
+      toast.success("Client onboarded for Inventory Management")
+      setShowPrefixPrompt(false)
+      loadClient()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error(data.error ?? "Couldn't onboard this client")
     }
   }
 
@@ -976,6 +1012,62 @@ export default function ClientDetailPage() {
             description="Client engagement and outreach tracking — this one still needs its own design pass before it's built."
           />
         )}
+
+        {activeTab === "clientSettings" && (
+          <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">
+              Turn on capabilities for this client. Each onboarding sets up whatever that feature needs to work.
+            </p>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {/* Inventory onboarding — functional */}
+              <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
+                <div className="flex items-center gap-2">
+                  <Boxes className="h-5 w-5 text-primary" />
+                  <h3 className="font-semibold text-foreground">Inventory</h3>
+                </div>
+                {client.inventoryOnboarded ? (
+                  <p className="flex items-center gap-1.5 text-sm text-success">
+                    <CheckCircle2 className="h-4 w-4" /> Onboarded
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-sm text-muted-foreground">
+                      Lets you build a Container tree (shelves, racks, slots) under this client&apos;s locations, so hardware shipped or stocked there can be tracked precisely.
+                    </p>
+                    <Button size="sm" onClick={handleOnboardInventoryClick} disabled={onboardingInventory}>
+                      {onboardingInventory ? "Onboarding..." : "Onboard Inventory Client"}
+                    </Button>
+                  </>
+                )}
+              </div>
+
+              {/* MSP onboarding — stub */}
+              <div className="rounded-lg border border-dashed border-border bg-card/50 p-4 space-y-3 opacity-70">
+                <div className="flex items-center gap-2">
+                  <Wrench className="h-5 w-5 text-muted-foreground" />
+                  <h3 className="font-semibold text-foreground">MSP</h3>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Onboard this client for managed services (agreements, SLAs, recurring billing). Coming soon.
+                </p>
+                <Button size="sm" variant="outline" disabled>Coming Soon</Button>
+              </div>
+
+              {/* VoIP onboarding — stub */}
+              <div className="rounded-lg border border-dashed border-border bg-card/50 p-4 space-y-3 opacity-70">
+                <div className="flex items-center gap-2">
+                  <Phone className="h-5 w-5 text-muted-foreground" />
+                  <h3 className="font-semibold text-foreground">VoIP</h3>
+                </div>
+                <p className="text-sm text-muted-foreground">
+                  Onboard this client for phone system/VoIP management. Coming soon.
+                </p>
+                <Button size="sm" variant="outline" disabled>Coming Soon</Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {viewingLocation && (
@@ -995,6 +1087,37 @@ export default function ClientDetailPage() {
           onClose={() => setViewingContact(null)}
           onSave={handleSaveContact}
         />
+      )}
+
+      {showPrefixPrompt && (
+        <Modal maxWidth="sm" onClose={() => setShowPrefixPrompt(false)}>
+          <h2 className="text-lg font-bold text-foreground">Company Prefix Required</h2>
+          <p className="mt-2 text-sm text-muted-foreground">
+            {client.name} doesn&apos;t have a Company Prefix set yet. It&apos;s needed to generate Asset Tags for any hardware tracked for this client, set one now to continue onboarding.
+          </p>
+          <div className="mt-4">
+            <label className="block text-xs text-muted-foreground mb-1">Company Prefix</label>
+            <input
+              type="text"
+              value={prefixPromptValue}
+              onChange={(e) => setPrefixPromptValue(e.target.value.toUpperCase())}
+              placeholder="e.g. ACM"
+              maxLength={10}
+              className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground uppercase focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </div>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button variant="outline" onClick={() => setShowPrefixPrompt(false)} disabled={onboardingInventory}>
+              Cancel
+            </Button>
+            <Button
+              onClick={() => submitOnboardInventory(prefixPromptValue)}
+              disabled={onboardingInventory || !prefixPromptValue.trim()}
+            >
+              {onboardingInventory ? "Saving..." : "Save and Onboard"}
+            </Button>
+          </div>
+        </Modal>
       )}
     </div>
   )

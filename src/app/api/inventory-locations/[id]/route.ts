@@ -32,7 +32,7 @@ export async function PATCH(
 
   const existing = await prisma.inventoryLocation.findUnique({ where: { id, companyId } })
   if (!existing) {
-    return NextResponse.json({ error: "Location not found" }, { status: 404 })
+    return NextResponse.json({ error: "Container not found" }, { status: 404 })
   }
 
   const body = await req.json()
@@ -41,7 +41,7 @@ export async function PATCH(
   if (body.name !== undefined) {
     const name = body.name.trim()
     if (!name) {
-      return NextResponse.json({ error: "Location name can't be blank" }, { status: 400 })
+      return NextResponse.json({ error: "Container name can't be blank" }, { status: 400 })
     }
     data.name = name
   }
@@ -49,15 +49,18 @@ export async function PATCH(
   if (body.parentId !== undefined) {
     const parentId = body.parentId || null
     if (parentId === id) {
-      return NextResponse.json({ error: "A location can't be its own parent" }, { status: 400 })
+      return NextResponse.json({ error: "A container can't be its own parent" }, { status: 400 })
     }
     if (parentId) {
-      const parent = await prisma.inventoryLocation.findUnique({ where: { id: parentId, companyId } })
+      // Must stay within the same site as the container being moved.
+      const parent = await prisma.inventoryLocation.findUnique({
+        where: { id: parentId, companyId, clientLocationId: existing.clientLocationId },
+      })
       if (!parent) {
-        return NextResponse.json({ error: "Parent location not found" }, { status: 404 })
+        return NextResponse.json({ error: "Parent container not found" }, { status: 404 })
       }
       if (await wouldCreateCycle(companyId, id, parentId)) {
-        return NextResponse.json({ error: "Can't move a location under one of its own sub-locations" }, { status: 400 })
+        return NextResponse.json({ error: "Can't move a container under one of its own sub-containers" }, { status: 400 })
       }
     }
     data.parentId = parentId
@@ -85,11 +88,11 @@ export async function DELETE(
     include: { children: { select: { id: true } } },
   })
   if (!existing) {
-    return NextResponse.json({ error: "Location not found" }, { status: 404 })
+    return NextResponse.json({ error: "Container not found" }, { status: 404 })
   }
   if (existing.children.length > 0) {
     return NextResponse.json(
-      { error: "This location has sub-locations under it. Delete or move those first." },
+      { error: "This container has sub-containers under it. Delete or move those first." },
       { status: 409 }
     )
   }

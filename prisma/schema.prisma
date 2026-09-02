@@ -134,24 +134,25 @@ model Session {
 
 // ─── CLIENT ──────────────────────────────────────────────────────────────────
 model Client {
-  id                String       @id @default(cuid())
-  companyId         String
-  company           Company      @relation(fields: [companyId], references: [id])
-  name              String
-  prefix            String?
-  nextAssetSequence Int          @default(1)
-  email             String?
-  phone             String?
-  website           String?
-  industryId        String?
-  industryRef       Industry?    @relation(fields: [industryId], references: [id])
-  status            ClientStatus @default(PROSPECT)
-  source            String?
-  tags              String[]
-  creditLimit       Float?
-  paymentTerms      String?
-  notes             String?      @db.Text
-  isInternal        Boolean      @default(false)
+  id                 String       @id @default(cuid())
+  companyId          String
+  company            Company      @relation(fields: [companyId], references: [id])
+  name               String
+  prefix             String?
+  nextAssetSequence  Int          @default(1)
+  email              String?
+  phone              String?
+  website            String?
+  industryId         String?
+  industryRef        Industry?    @relation(fields: [industryId], references: [id])
+  status             ClientStatus @default(PROSPECT)
+  source             String?
+  tags               String[]
+  creditLimit        Float?
+  paymentTerms       String?
+  notes              String?      @db.Text
+  isInternal         Boolean      @default(false)
+  inventoryOnboarded Boolean      @default(false)
 
   // Main billing/shipping now point at one of this client's Locations
   // rather than storing free-text address fields directly — the actual
@@ -213,10 +214,11 @@ model ClientLocation {
 
   // Back-relations required by Prisma since Client links to ClientLocation
   // through two additional named relations beyond the primary "locations" one
-  mainBillingForClients  Client[]         @relation("ClientMainBilling")
-  mainShippingForClients Client[]         @relation("ClientMainShipping")
+  mainBillingForClients  Client[]            @relation("ClientMainBilling")
+  mainShippingForClients Client[]            @relation("ClientMainShipping")
   inventoryAssets        InventoryAsset[]
   purchaseOrders         PurchaseOrder[]
+  inventoryLocations     InventoryLocation[]
 
   @@index([clientId])
 }
@@ -524,18 +526,25 @@ model InventoryStockEvent {
 }
 
 // ─── INVENTORY LOCATION ─────────────────────────────────────────────────────
+// A "Container" tree — shelves, racks, slots — built underneath a specific
+// physical ClientLocation. Every client (including your own internal one)
+// has its Containers scoped to one of their own sites, there's no more
+// separate global company-wide warehouse tree — your own company's
+// Containers work exactly the same way, just under your own ClientLocation.
 model InventoryLocation {
-  id              String              @id @default(cuid())
-  companyId       String
-  company         Company             @relation(fields: [companyId], references: [id])
-  name            String
-  parentId        String?
-  parent          InventoryLocation?  @relation("InventoryLocationChildren", fields: [parentId], references: [id])
-  children        InventoryLocation[] @relation("InventoryLocationChildren")
-  createdAt       DateTime            @default(now())
-  updatedAt       DateTime            @updatedAt
-  inventoryAssets InventoryAsset[]
-  inventoryStocks InventoryStock[]
+  id               String              @id @default(cuid())
+  companyId        String
+  company          Company             @relation(fields: [companyId], references: [id])
+  clientLocationId String
+  clientLocation   ClientLocation      @relation(fields: [clientLocationId], references: [id], onDelete: Cascade)
+  name             String
+  parentId         String?
+  parent           InventoryLocation?  @relation("InventoryLocationChildren", fields: [parentId], references: [id])
+  children         InventoryLocation[] @relation("InventoryLocationChildren")
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  inventoryStocks  InventoryStock[]
+  inventoryAssets  InventoryAsset[]
 }
 
 // ─── CATALOG ITEM ─────────────────────────────────────────────────────────────
@@ -1240,9 +1249,10 @@ model InventoryAsset {
   ownerClientId String?
   ownerClient   Client? @relation("InventoryAssetOwner", fields: [ownerClientId], references: [id])
 
-  // Company-owned warehouse position. Only meaningful while ownerType is
-  // COMPANY, kept around even while checked out so its last known shelf
-  // spot isn't lost.
+  // Which Container this sits in, if it's stocked at an onboarded site
+  // (either our own or a client's, since both now work the same way).
+  // Kept around even while checked out so its last known shelf spot
+  // isn't lost.
   locationId String?
   location   InventoryLocation? @relation(fields: [locationId], references: [id])
 
