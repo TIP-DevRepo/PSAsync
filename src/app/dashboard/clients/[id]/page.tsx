@@ -10,6 +10,7 @@ import { Combobox } from "@/components/ui/combobox"
 import { Modal } from "@/components/Modal"
 import { ContainersModal } from "@/components/inventory/ContainersModal"
 import { Ticket, Target, Package, FileText, KeyRound, FolderOpen, Radar, Settings2, Boxes, Phone, Wrench, CheckCircle2 } from "lucide-react"
+import { ClientAssetsPanel } from "@/components/clients/ClientAssetsPanel"
 
 interface ContactTag {
   id: string
@@ -979,13 +980,7 @@ export default function ClientDetailPage() {
           </div>
         )}
 
-        {activeTab === "assets" && (
-          <PlaceholderPanel
-            icon={Package}
-            title="Assets coming soon"
-            description="Tracked and linked assets for this client will show here once the inventory system is built."
-          />
-        )}
+        {activeTab === "assets" && <ClientAssetsPanel clientId={id} />}
 
         {activeTab === "contracts" && (
           <PlaceholderPanel
