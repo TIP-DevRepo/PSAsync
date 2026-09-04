@@ -39,6 +39,9 @@ export async function GET(
       clientLocation: { select: { name: true } },
       location: { select: { id: true, name: true } },
       customFieldValues: { include: { customField: { select: { name: true } } } },
+      deployedToContact: { select: { firstName: true, lastName: true } },
+      loanedToContact: { select: { firstName: true, lastName: true } },
+      assignedUser: { select: { name: true } },
     },
   })
 

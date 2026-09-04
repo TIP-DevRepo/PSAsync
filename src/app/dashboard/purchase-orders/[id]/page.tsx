@@ -148,9 +148,9 @@ export default function PurchaseOrderDetailPage({
     fetch("/api/catalog")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setCatalog(data.filter((i: { active: boolean }) => i.active)))
-    fetch("/api/inventory-locations")
+    fetch("/api/inventory-locations/own-company")
       .then((res) => res.json())
-      .then((data) => Array.isArray(data) && setCompanyLocationOptions(buildLocationPathOptions(data)))
+      .then((data) => Array.isArray(data) && setCompanyLocationOptions(data))
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 

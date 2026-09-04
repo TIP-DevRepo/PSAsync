@@ -43,8 +43,17 @@ export async function GET(
     return NextResponse.json({ error: "Client not found" }, { status: 404 })
   }
 
+  // Covers both ownership paths: assets this client actually owns
+  // (Sold), and assets that are still company-owned but currently out
+  // on loan to this client (Loaned never transfers ownership).
   const assets = await prisma.inventoryAsset.findMany({
-    where: { companyId, ownerType: "CLIENT", ownerClientId: clientId },
+    where: {
+      companyId,
+      OR: [
+        { ownerType: "CLIENT", ownerClientId: clientId },
+        { loanedToClientId: clientId },
+      ],
+    },
     select: {
       id: true,
       assetTag: true,
@@ -52,6 +61,8 @@ export async function GET(
       status: true,
       clientLocationId: true,
       locationId: true,
+      deployedToContactId: true,
+      loanedToContactId: true,
       catalogItem: { select: { name: true } },
     },
     orderBy: { assetTag: "asc" },
@@ -67,10 +78,11 @@ export async function GET(
   const result = client.locations.map((loc) => {
     const locationAssets = assets.filter((a) => a.clientLocationId === loc.id)
 
-    // "Deployed" is reserved for assets checked out via a future
-    // checkout action (Phase 10), not built yet. Anything received with
-    // no specific Container falls into "Unknown" instead.
-    const unknown = locationAssets.filter((a) => !a.locationId)
+    // Deployed: someone specific has it (a Contact, whether Sold or
+    // Loaned). Unknown: received/returned but not yet assigned anywhere.
+    // Container: has a specific stocked location.
+    const deployed = locationAssets.filter((a) => a.deployedToContactId || a.loanedToContactId)
+    const unknown = locationAssets.filter((a) => !a.locationId && !a.deployedToContactId && !a.loanedToContactId)
 
     // Group by the top two levels of the container path only, e.g. both
     // "Rack 1 > Shelf A > Slot 1" and "Rack 1 > Shelf A > Slot 2" collapse
@@ -78,7 +90,7 @@ export async function GET(
     // visible in the asset's own detail panel.
     const containerGroups = new Map<string, typeof locationAssets>()
     locationAssets
-      .filter((a) => a.locationId)
+      .filter((a) => a.locationId && !a.deployedToContactId && !a.loanedToContactId)
       .forEach((a) => {
         const key = groupLabel(a.locationId as string, containerById)
         const list = containerGroups.get(key) ?? []
@@ -101,7 +113,11 @@ export async function GET(
     return {
       id: loc.id,
       name: loc.name,
-      deployed: [] as { id: string; assetTag: string; catalogItemName: string }[],
+      deployed: deployed.map((a) => ({
+        id: a.id,
+        assetTag: a.assetTag,
+        catalogItemName: a.catalogItem.name,
+      })),
       unknown: unknown.map((a) => ({
         id: a.id,
         assetTag: a.assetTag,

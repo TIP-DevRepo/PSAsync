@@ -262,11 +262,12 @@ model Contact {
   createdAt    DateTime            @default(now())
   updatedAt    DateTime            @updatedAt
 
-  quotes               Quote[]
-  billingForLocations  ClientLocation[]       @relation("LocationBillingContact")
-  shippingForLocations ClientLocation[]       @relation("LocationShippingContact")
-  tags                 ContactTagAssignment[]
-  inventoryAssets      InventoryAsset[]
+  quotes                    Quote[]
+  billingForLocations       ClientLocation[]       @relation("LocationBillingContact")
+  shippingForLocations      ClientLocation[]       @relation("LocationShippingContact")
+  tags                      ContactTagAssignment[]
+  inventoryAssetsLoanedTo   InventoryAsset[]       @relation("InventoryAssetLoanedToContact")
+  inventoryAssetsDeployedTo InventoryAsset[]       @relation("InventoryAssetDeployedToContact")
 }
 
 // ─── CONTACT TAG ─────────────────────────────────────────────────────────────
@@ -1233,8 +1234,15 @@ enum InventoryAssetStatus {
   INTERNAL
   LOANED
   SOLD
+  PENDING_OFFBOARD
   IN_REPAIR
   REMOVED
+}
+
+enum InventorySoldReturnReason {
+  REFUND
+  DISPOSAL
+  HOLDING_STOCK
 }
 
 enum InventoryOwnerType {
@@ -1293,8 +1301,19 @@ model InventoryAsset {
   loanedToClientId       String?
   loanedToClient         Client?   @relation("InventoryAssetLoanedTo", fields: [loanedToClientId], references: [id])
   loanedToContactId      String?
-  loanedToContact        Contact?  @relation(fields: [loanedToContactId], references: [id])
+  loanedToContact        Contact?  @relation("InventoryAssetLoanedToContact", fields: [loanedToContactId], references: [id])
   loanExpectedReturnDate DateTime?
+
+  // Who at the client currently holds this asset once Sold and Deployed —
+  // Loaned already tracks this via loanedToContactId above, this is the
+  // Sold-path equivalent.
+  deployedToContactId String?
+  deployedToContact   Contact? @relation("InventoryAssetDeployedToContact", fields: [deployedToContactId], references: [id])
+
+  // Set only when a Sold return's reason was Disposal. Persists through
+  // the Pending Offboard -> Offboarded flow untouched — only a future
+  // "Mark as E-Wasted" action (Phase 11) clears it.
+  pendingDisposal Boolean @default(false)
 
   removedReason InventoryRemovedReason?
 

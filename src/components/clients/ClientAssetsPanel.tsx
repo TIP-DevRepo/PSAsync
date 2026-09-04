@@ -2,6 +2,11 @@
 
 import { useState, useEffect } from "react"
 import { Package } from "lucide-react"
+import { Button } from "@/components/ui/button"
+import { CheckoutModal } from "@/components/inventory/CheckoutModal"
+import { ReturnModal } from "@/components/inventory/ReturnModal"
+import { OffboardModal } from "@/components/inventory/OffboardModal"
+import { RemoveAssetModal } from "@/components/inventory/RemoveAssetModal"
 
 interface AssetSummary {
   id: string
@@ -24,6 +29,8 @@ interface AssetDetail {
   status: string
   ownerClientId: string | null
   loanedToClientId: string | null
+  deployedToContactId: string | null
+  loanedToContactId: string | null
   locationId: string | null
   catalogItem: { name: string; categoryRef: { name: string; parent: { name: string } | null } }
   ownerClient: { name: string } | null
@@ -33,6 +40,16 @@ interface AssetDetail {
   warrantyExpiration: string | null
   notes: string | null
   customFieldValues: { value: string | null; customField: { name: string } }[]
+  deployedToContact: { firstName: string; lastName: string } | null
+  loanedToContact: { firstName: string; lastName: string } | null
+  assignedUser: { name: string } | null
+}
+
+function currentUserLabel(asset: AssetDetail): string {
+  if (asset.deployedToContact) return `${asset.deployedToContact.firstName} ${asset.deployedToContact.lastName}`
+  if (asset.loanedToContact) return `${asset.loanedToContact.firstName} ${asset.loanedToContact.lastName}`
+  if (asset.assignedUser) return asset.assignedUser.name
+  return "None"
 }
 
 function plainStatusLabel(status: string) {
@@ -43,25 +60,27 @@ function plainStatusLabel(status: string) {
 }
 
 // Sold and Loaned each get a compound label showing where the asset
-// stands: InStock covers both a specific Container and Unknown (received
-// but not yet sorted), since neither means it's actually out with
-// someone. Deployed only applies once a real checkout action exists
-// (Phase 10) — nothing produces that state yet. Decom applies once
-// Removed. Everything else (In Stock at the company, Internal, In
-// Repair) just shows its plain status.
+// stands: Deployed once it's assigned to a specific Contact, InStock
+// otherwise (covers both a Container and Unknown, neither means it's
+// actually out with someone). Decom applies once Removed.
 function computeStatusLabel(asset: AssetDetail): string {
   if (asset.status === "REMOVED") {
     const prefix = asset.ownerClientId ? "Sold" : asset.loanedToClientId ? "Loaned" : "Removed"
     return prefix === "Removed" ? "Removed" : `${prefix} (Decom)`
   }
   if (asset.status === "SOLD") {
-    return "Sold (InStock)"
+    return asset.deployedToContactId ? "Sold (Deployed)" : "Sold (InStock)"
   }
   if (asset.status === "LOANED") {
-    return "Loaned (InStock)"
+    return "Loaned (Deployed)"
+  }
+  if (asset.status === "INTERNAL") {
+    return "Internal (Deployed)"
   }
   return plainStatusLabel(asset.status)
 }
+
+type ModalKind = "checkout" | "return" | "offboard" | "remove" | null
 
 export function ClientAssetsPanel({ clientId }: { clientId: string }) {
   const [groups, setGroups] = useState<LocationGroup[]>([])
@@ -69,21 +88,19 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [detail, setDetail] = useState<AssetDetail | null>(null)
   const [loadingDetail, setLoadingDetail] = useState(false)
+  const [openModal, setOpenModal] = useState<ModalKind>(null)
 
-  useEffect(() => {
+  function loadGroups() {
     fetch(`/api/clients/${clientId}/assets`)
       .then((res) => res.json())
       .then((data) => {
         setGroups(data)
         setLoading(false)
       })
-  }, [clientId])
+  }
 
-  useEffect(() => {
-    if (!selectedId) {
-      setDetail(null)
-      return
-    }
+  function loadDetail() {
+    if (!selectedId) return
     setLoadingDetail(true)
     fetch(`/api/inventory-assets/${selectedId}`)
       .then((res) => res.json())
@@ -91,7 +108,29 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
         setDetail(data)
         setLoadingDetail(false)
       })
+  }
+
+  useEffect(() => {
+    loadGroups()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [clientId])
+
+  useEffect(() => {
+    if (!selectedId) {
+      setDetail(null)
+      return
+    }
+    loadDetail()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId])
+
+  // Any checkout/return/offboard/remove action can move an asset between
+  // groups (Unknown, a Container, or eventually Deployed) — refresh both
+  // the left tree and whichever asset is currently selected.
+  function handleActionDone() {
+    loadGroups()
+    loadDetail()
+  }
 
   const totalAssets = groups.reduce(
     (sum, g) => sum + g.deployed.length + g.unknown.length + g.containers.reduce((s, c) => s + c.assets.length, 0),
@@ -187,6 +226,30 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
               <h3 className="text-heading font-semibold text-foreground">{detail.assetTag}</h3>
               <p className="text-muted-foreground">{detail.catalogItem.name}</p>
             </div>
+
+            <div className="flex flex-wrap gap-2 pb-1">
+              {(detail.status === "IN_STOCK" ||
+                (detail.status === "SOLD" && detail.ownerClientId && !detail.deployedToContactId)) && (
+                <Button size="sm" onClick={() => setOpenModal("checkout")}>Check Out</Button>
+              )}
+              {["SOLD", "LOANED", "INTERNAL"].includes(detail.status) && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="bg-brand-secondary-500/10 text-brand-secondary-500 hover:bg-brand-secondary-500/20"
+                  onClick={() => setOpenModal("return")}
+                >
+                  Return to Stock
+                </Button>
+              )}
+              {detail.status === "PENDING_OFFBOARD" && (
+                <Button size="sm" onClick={() => setOpenModal("offboard")}>Finish Offboarding</Button>
+              )}
+              {detail.status !== "REMOVED" && (
+                <Button size="sm" variant="destructive" onClick={() => setOpenModal("remove")}>Remove</Button>
+              )}
+            </div>
+
             <div className="space-y-1.5 pt-2 border-t border-border">
               <p><span className="font-medium text-foreground">Status:</span> <span className="text-muted-foreground">{computeStatusLabel(detail)}</span></p>
               <p><span className="font-medium text-foreground">Serial #:</span> <span className="text-muted-foreground">{detail.serialNumber ?? "—"}</span></p>
@@ -199,6 +262,7 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
                 </span>
               </p>
               <p><span className="font-medium text-foreground">Owner:</span> <span className="text-muted-foreground">{detail.ownerClient?.name ?? "—"}</span></p>
+              <p><span className="font-medium text-foreground">Current User:</span> <span className="text-muted-foreground">{currentUserLabel(detail)}</span></p>
               <p><span className="font-medium text-foreground">Site:</span> <span className="text-muted-foreground">{detail.clientLocation?.name ?? "—"}</span></p>
               <p><span className="font-medium text-foreground">Container:</span> <span className="text-muted-foreground">{detail.containerPath ?? "Unknown (no container)"}</span></p>
               <p><span className="font-medium text-foreground">Warranty:</span> <span className="text-muted-foreground">{detail.warrantyType ?? "—"}</span></p>
@@ -222,6 +286,24 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
           </div>
         )}
       </div>
+
+      {openModal === "checkout" && detail && (
+        <CheckoutModal
+          assetId={detail.id}
+          deployFromClientId={detail.status === "SOLD" && detail.ownerClientId ? detail.ownerClientId : undefined}
+          onClose={() => setOpenModal(null)}
+          onDone={handleActionDone}
+        />
+      )}
+      {openModal === "return" && detail && (
+        <ReturnModal assetId={detail.id} assetStatus={detail.status} onClose={() => setOpenModal(null)} onDone={handleActionDone} />
+      )}
+      {openModal === "offboard" && detail && (
+        <OffboardModal assetId={detail.id} onClose={() => setOpenModal(null)} onDone={handleActionDone} />
+      )}
+      {openModal === "remove" && detail && (
+        <RemoveAssetModal assetId={detail.id} onClose={() => setOpenModal(null)} onDone={handleActionDone} />
+      )}
     </div>
   )
 }
