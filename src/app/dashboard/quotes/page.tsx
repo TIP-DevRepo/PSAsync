@@ -548,7 +548,7 @@ function QuotesTab() {
         <table className="w-full text-sm border-collapse">
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-left text-caption text-muted-foreground">
-              <th className="py-2 pr-2 w-8">
+              <th className="py-2 pl-4 pr-2 w-8">
                 <input
                   ref={selectAllRef}
                   type="checkbox"
@@ -581,7 +581,7 @@ function QuotesTab() {
                     isSelected ? "bg-primary/5 border-l-2 border-l-primary" : "hover:bg-surface-hover"
                   }`}
                 >
-                  <td className={`${ROW_PADDING[density]} pr-2`} onClick={(e) => e.stopPropagation()}>
+                  <td className={`${ROW_PADDING[density]} pl-4 pr-2`} onClick={(e) => e.stopPropagation()}>
                     <input
                       type="checkbox"
                       checked={isSelected}

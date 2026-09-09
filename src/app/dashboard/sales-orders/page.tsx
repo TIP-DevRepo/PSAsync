@@ -76,6 +76,7 @@ function SortableHeader({
   sortDirection,
   onSort,
   align,
+  first,
 }: {
   label: string
   column: SortColumn
@@ -83,10 +84,11 @@ function SortableHeader({
   sortDirection: SortDirection
   onSort: (column: SortColumn) => void
   align?: "right"
+  first?: boolean
 }) {
   const active = sortColumn === column
   return (
-    <th className={`py-2 pr-3 select-none uppercase tracking-wide ${align === "right" ? "text-right" : ""}`}>
+    <th className={`py-2 ${first ? "pl-4 " : ""}pr-3 select-none uppercase tracking-wide ${align === "right" ? "text-right" : ""}`}>
       <button
         onClick={() => onSort(column)}
         className={`flex items-center gap-1 hover:text-foreground ${align === "right" ? "ml-auto" : ""}`}
@@ -207,7 +209,7 @@ export default function SalesOrdersPage() {
         <table className="w-full text-sm border-collapse">
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-left text-caption text-muted-foreground">
-              <SortableHeader label="SO Number" column="soNumber" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="SO Number" column="soNumber" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} first />
               <SortableHeader label="Customer" column="clientName" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="Owner" column="owner" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="Status" column="status" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
@@ -223,7 +225,7 @@ export default function SalesOrdersPage() {
                 onClick={() => router.push(`/dashboard/sales-orders/${so.id}`)}
                 className="border-b border-border cursor-pointer transition-colors hover:bg-surface-hover"
               >
-                <td className={`${ROW_PADDING[density]} pr-3 font-medium text-foreground`}>{so.soNumber}</td>
+                <td className={`${ROW_PADDING[density]} pl-4 pr-3 font-medium text-foreground`}>{so.soNumber}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-foreground`}>{so.clientName}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{so.owner?.name ?? "—"}</td>
                 <td className={`${ROW_PADDING[density]} pr-3`}>

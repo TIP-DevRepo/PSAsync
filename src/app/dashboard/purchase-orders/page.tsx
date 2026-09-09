@@ -70,6 +70,7 @@ function SortableHeader({
   sortDirection,
   onSort,
   align,
+  first,
 }: {
   label: string
   column: SortColumn
@@ -77,10 +78,11 @@ function SortableHeader({
   sortDirection: SortDirection
   onSort: (column: SortColumn) => void
   align?: "right"
+  first?: boolean
 }) {
   const active = sortColumn === column
   return (
-    <th className={`py-2 pr-3 select-none uppercase tracking-wide ${align === "right" ? "text-right" : ""}`}>
+    <th className={`py-2 ${first ? "pl-4 " : ""}pr-3 select-none uppercase tracking-wide ${align === "right" ? "text-right" : ""}`}>
       <button
         onClick={() => onSort(column)}
         className={`flex items-center gap-1 hover:text-foreground ${align === "right" ? "ml-auto" : ""}`}
@@ -200,7 +202,7 @@ export default function PurchaseOrdersPage() {
         <table className="w-full text-sm border-collapse">
           <thead className="sticky top-0 z-10 bg-card">
             <tr className="border-b border-border text-left text-caption text-muted-foreground">
-              <SortableHeader label="PO Number" column="poNumber" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              <SortableHeader label="PO Number" column="poNumber" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} first />
               <SortableHeader label="Vendor" column="vendorName" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="Owner" column="ownerName" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="From SO" column="soNumber" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
@@ -216,7 +218,7 @@ export default function PurchaseOrdersPage() {
                 onClick={() => router.push(`/dashboard/purchase-orders/${po.id}`)}
                 className="border-b border-border cursor-pointer transition-colors hover:bg-surface-hover"
               >
-                <td className={`${ROW_PADDING[density]} pr-3 font-medium text-foreground`}>{po.poNumber}</td>
+                <td className={`${ROW_PADDING[density]} pl-4 pr-3 font-medium text-foreground`}>{po.poNumber}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-foreground`}>{po.vendorName}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{po.ownerName}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{po.soNumber ?? "—"}</td>
