@@ -1,46 +1,35 @@
-import { NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { buildLocationPathOptions } from "@/lib/inventory/locationPaths"
 
-export async function GET(
-  req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
-) {
+// Flat, company-wide list of every InventoryAsset for the Inventory list
+// page's Assets tab. Filtering/sorting all happens client-side against
+// this array, matching every other list page in the app.
+export async function GET() {
   const session = await auth()
   if (!session?.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
   }
 
-  const { id: clientId } = await params
   const companyId = session.user.companyId
 
-  const client = await prisma.client.findUnique({ where: { id: clientId, companyId }, select: { id: true } })
-  if (!client) {
-    return NextResponse.json({ error: "Client not found" }, { status: 404 })
-  }
-
-  // Covers both ownership paths: assets this client actually owns
-  // (Sold), and assets that are still company-owned but currently out
-  // on loan to this client (Loaned never transfers ownership).
   const assets = await prisma.inventoryAsset.findMany({
-    where: {
-      companyId,
-      OR: [
-        { ownerType: "CLIENT", ownerClientId: clientId },
-        { loanedToClientId: clientId },
-      ],
-    },
+    where: { companyId },
     select: {
       id: true,
       assetTag: true,
       status: true,
+      ownerType: true,
       ownerClientId: true,
+      ownerClient: { select: { name: true } },
       loanedToClientId: true,
       deployedToContactId: true,
       locationId: true,
       clientLocation: { select: { name: true } },
-      catalogItem: { select: { name: true } },
+      catalogItem: {
+        select: { name: true, categoryRef: { select: { name: true, parent: { select: { name: true } } } } },
+      },
       deployedToContact: { select: { firstName: true, lastName: true } },
       loanedToContact: { select: { firstName: true, lastName: true } },
       assignedUser: { select: { name: true } },

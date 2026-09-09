@@ -6,7 +6,7 @@ import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 
 interface RolePermissions {
-  pages: { clients: boolean; catalog: boolean; vendors: boolean; quotes: boolean; settings: boolean }
+  pages: { clients: boolean; catalog: boolean; vendors: boolean; inventory: boolean; quotes: boolean; settings: boolean }
   quotes: {
     create: boolean
     edit: boolean
@@ -41,6 +41,7 @@ const PAGE_LABELS: [keyof RolePermissions["pages"], string][] = [
   ["clients", "Clients"],
   ["catalog", "Catalog"],
   ["vendors", "Vendors"],
+  ["inventory", "Inventory"],
   ["quotes", "Quotes"],
   ["settings", "Settings (whole section)"],
 ]
@@ -314,7 +315,7 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.permissions.pages[key]}
+                      checked={draft.permissions.pages[key] ?? false}
                       onChange={(e) => updatePagePerm(key, e.target.checked)}
                     />
                     {label}

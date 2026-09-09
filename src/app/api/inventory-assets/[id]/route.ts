@@ -35,13 +35,20 @@ export async function GET(
     where: { id, companyId },
     include: {
       catalogItem: { select: { name: true, categoryRef: { select: { name: true, parent: { select: { name: true } } } } } },
-      ownerClient: { select: { name: true } },
+      ownerClient: { select: { id: true, name: true, inventoryOnboarded: true } },
       clientLocation: { select: { name: true } },
       location: { select: { id: true, name: true } },
       customFieldValues: { include: { customField: { select: { name: true } } } },
       deployedToContact: { select: { firstName: true, lastName: true } },
       loanedToContact: { select: { firstName: true, lastName: true } },
       assignedUser: { select: { name: true } },
+      loanedToClient: { select: { id: true, name: true, inventoryOnboarded: true } },
+      overrideVendor: { select: { name: true } },
+      overrideManufacturer: { select: { name: true } },
+      inventoryAssetEvents: {
+        orderBy: { createdAt: "desc" },
+        include: { performedByUser: { select: { name: true } } },
+      },
     },
   })
 

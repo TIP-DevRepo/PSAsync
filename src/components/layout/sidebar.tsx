@@ -13,6 +13,7 @@ import {
   Truck,
   ClipboardList,
   ShoppingCart,
+  Boxes,
 } from "lucide-react"
 
 export interface PagePermissions {
@@ -23,6 +24,7 @@ export interface PagePermissions {
   settings?: boolean
   salesOrders?: boolean
   purchaseOrders?: boolean
+  inventory?: boolean
 }
 
 const navItems: { label: string; href: string; icon: typeof LayoutDashboard; permissionKey: keyof PagePermissions | null }[] = [
@@ -30,6 +32,7 @@ const navItems: { label: string; href: string; icon: typeof LayoutDashboard; per
   { label: "Clients", href: "/dashboard/clients", icon: Users, permissionKey: "clients" },
   { label: "Vendors", href: "/dashboard/vendors", icon: Truck, permissionKey: "vendors" },
   { label: "Catalog", href: "/dashboard/catalog", icon: Package, permissionKey: "catalog" },
+  { label: "Inventory", href: "/dashboard/inventory", icon: Boxes, permissionKey: "inventory" },
   { label: "Quotes", href: "/dashboard/quotes", icon: FileText, permissionKey: "quotes" },
   { label: "Sales Orders", href: "/dashboard/sales-orders", icon: ClipboardList, permissionKey: "salesOrders" },
   { label: "Purchase Orders", href: "/dashboard/purchase-orders", icon: ShoppingCart, permissionKey: "purchaseOrders" },
