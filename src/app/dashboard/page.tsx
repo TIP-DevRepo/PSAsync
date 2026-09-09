@@ -1,8 +1,16 @@
-export default function DashboardPage() {
+import { auth } from "@/auth"
+import { DashboardView } from "@/components/dashboard/DashboardView"
+import { allowedWidgetTypes } from "@/lib/dashboards/widgetTypes"
+
+export default async function DashboardPage() {
+  const session = await auth()
+  const pagePermissions =
+    (session?.user.role?.permissions as { pages?: Record<string, boolean> } | undefined)?.pages ?? {}
+
   return (
-    <div className="p-8">
-      <h1 className="text-2xl font-semibold">Welcome to PSAsync</h1>
-      <p className="text-gray-500 mt-2">Dashboard coming soon.</p>
+    <div className="w-full space-y-6">
+      <h1 className="text-display font-semibold tracking-tight text-foreground">Dashboard</h1>
+      <DashboardView allowedWidgetTypes={allowedWidgetTypes(pagePermissions)} />
     </div>
   )
 }
