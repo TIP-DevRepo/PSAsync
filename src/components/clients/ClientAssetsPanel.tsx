@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Package } from "lucide-react"
-import { computeStatusLabel, currentUserLabel } from "@/lib/inventory/statusLabel"
+import { computeStatusLabel, currentUserLabel, statusBadgeClass } from "@/lib/inventory/statusLabel"
 
 interface AssetRow {
   id: string
@@ -91,7 +91,11 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
                     {asset.assetTag}
                   </Link>
                 </td>
-                <td className="py-2 pr-3 text-foreground">{computeStatusLabel(asset)}</td>
+                <td className="py-2 pr-3">
+                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${statusBadgeClass(asset)}`}>
+                    {computeStatusLabel(asset)}
+                  </span>
+                </td>
                 <td className="py-2 pr-3 text-foreground">{locationLabel(asset)}</td>
                 <td className="py-2 pr-3 text-foreground">{currentUserLabel(asset)}</td>
                 <td className="py-2 pr-4 text-muted-foreground">{asset.catalogItem.name}</td>

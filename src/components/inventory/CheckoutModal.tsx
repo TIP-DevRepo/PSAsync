@@ -3,9 +3,11 @@
 import { useState, useEffect } from "react"
 import { Modal } from "@/components/Modal"
 import { Button } from "@/components/ui/button"
-import type { LocationPathOption } from "@/lib/inventory/locationPaths"
+import { buildLocationPathOptions, type LocationPathOption } from "@/lib/inventory/locationPaths"
 
 interface ClientOption { id: string; name: string }
+interface ClientListRow extends ClientOption { isInternal: boolean }
+interface ClientLocationOption { id: string; name: string }
 interface ContactOption { id: string; firstName: string; lastName: string; locationId: string | null }
 interface UserOption { id: string; name: string }
 
@@ -32,11 +34,17 @@ export function CheckoutModal({
 
   const [clients, setClients] = useState<ClientOption[]>([])
   const [users, setUsers] = useState<UserOption[]>([])
-  const [companyContainers, setCompanyContainers] = useState<LocationPathOption[]>([])
+
+  // "Stock it" always means our own warehouse — sourced the same way as
+  // any other client (the one flagged isInternal), then its Location ->
+  // Container tree, rather than a separate flattened endpoint.
+  const [ownCompanyId, setOwnCompanyId] = useState<string | null>(null)
+  const [stockLocations, setStockLocations] = useState<ClientLocationOption[]>([])
+  const [stockLocationId, setStockLocationId] = useState("")
+  const [stockContainers, setStockContainers] = useState<LocationPathOption[]>([])
 
   const [clientId, setClientId] = useState("")
   const [contacts, setContacts] = useState<ContactOption[]>([])
-  const [clientContainers, setClientContainers] = useState<LocationPathOption[]>([])
 
   const [soldMode, setSoldMode] = useState<"container" | "contact">("container")
   const [containerId, setContainerId] = useState("")
@@ -51,9 +59,13 @@ export function CheckoutModal({
         .then((client) => setContacts(client.contacts ?? []))
       return
     }
-    fetch("/api/clients").then((res) => res.json()).then((data) => Array.isArray(data) && setClients(data))
+    fetch("/api/clients").then((res) => res.json()).then((data: ClientListRow[]) => {
+      if (!Array.isArray(data)) return
+      setClients(data)
+      const own = data.find((c) => c.isInternal)
+      if (own) setOwnCompanyId(own.id)
+    })
     fetch("/api/users").then((res) => res.json()).then((data) => Array.isArray(data) && setUsers(data))
-    fetch("/api/inventory-locations/own-company").then((res) => res.json()).then((data) => Array.isArray(data) && setCompanyContainers(data))
   }, [deployFromClientId])
 
   useEffect(() => {
@@ -61,7 +73,6 @@ export function CheckoutModal({
     setContactId("")
     setContainerId("")
     setContacts([])
-    setClientContainers([])
     if (!clientId) return
     fetch(`/api/clients/${clientId}`)
       .then((res) => res.json())
@@ -70,15 +81,23 @@ export function CheckoutModal({
       })
   }, [clientId, deployFromClientId])
 
-  // For deploying to a Contact, we still need Containers at whichever
-  // site that contact is based, purely to resolve the site if the
-  // contact has no location set — not shown as a picker in that case.
   useEffect(() => {
-    if (type !== "SOLD" || soldMode !== "container" || !clientId) return
-    // Sold-as-stocked keeps it in OUR warehouse, not the client's — this
-    // branch is intentionally left using companyContainers, no client
-    // container fetch needed here.
-  }, [type, soldMode, clientId])
+    setStockLocationId("")
+    setStockLocations([])
+    if (!ownCompanyId) return
+    fetch(`/api/clients/${ownCompanyId}`)
+      .then((res) => res.json())
+      .then((c) => setStockLocations(c.locations ?? []))
+  }, [ownCompanyId])
+
+  useEffect(() => {
+    setContainerId("")
+    setStockContainers([])
+    if (!stockLocationId) return
+    fetch(`/api/inventory-locations?clientLocationId=${stockLocationId}`)
+      .then((res) => res.json())
+      .then((data) => setStockContainers(buildLocationPathOptions(data.locations ?? [])))
+  }, [stockLocationId])
 
   async function handleSubmit() {
     setError(null)
@@ -207,13 +226,27 @@ export function CheckoutModal({
                 </div>
 
                 {soldMode === "container" ? (
-                  <div>
-                    <label className="block text-xs text-muted-foreground mb-1">Container</label>
-                    <select value={containerId} onChange={(e) => setContainerId(e.target.value)} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                      <option value="">Select a container</option>
-                      {companyContainers.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
-                    </select>
-                  </div>
+                  <>
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Location</label>
+                      <select value={stockLocationId} onChange={(e) => setStockLocationId(e.target.value)} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                        <option value="">Select a location</option>
+                        {stockLocations.map((l) => <option key={l.id} value={l.id}>{l.name}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-muted-foreground mb-1">Container</label>
+                      <select
+                        value={containerId}
+                        onChange={(e) => setContainerId(e.target.value)}
+                        disabled={!stockLocationId}
+                        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                      >
+                        <option value="">Select a container</option>
+                        {stockContainers.map((c) => <option key={c.id} value={c.id}>{c.label}</option>)}
+                      </select>
+                    </div>
+                  </>
                 ) : (
                   <div>
                     <label className="block text-xs text-muted-foreground mb-1">Contact</label>

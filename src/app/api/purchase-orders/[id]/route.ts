@@ -27,7 +27,10 @@ export async function GET(
       receivingClientLocation: { select: { id: true, name: true } },
       lineItems: {
         orderBy: { sortOrder: "asc" },
-        include: { catalogItem: { select: { isSerialized: true, type: true } } },
+        include: {
+          catalogItem: { select: { isSerialized: true, type: true } },
+          polineItemSerials: { select: { id: true, serialNumber: true, assetId: true } },
+        },
       },
       shipments: { orderBy: { createdAt: "asc" } },
       comments: { orderBy: { createdAt: "asc" } },

@@ -31,6 +31,34 @@ export function computeStatusLabel(asset: {
   return plainStatusLabel(asset.status)
 }
 
+// Color for the status badge, mirroring computeStatusLabel's own
+// branching so the two never drift apart: green for anything sitting
+// in stock, blue for anything deployed/out with someone, amber for a
+// state that needs attention, gray for decommissioned.
+export function statusBadgeClass(asset: {
+  status: string
+  ownerClientId: string | null
+  loanedToClientId: string | null
+  deployedToContactId: string | null
+}): string {
+  if (asset.status === "REMOVED") {
+    return "bg-muted text-muted-foreground"
+  }
+  if (asset.status === "SOLD") {
+    return asset.deployedToContactId ? "bg-info-bg text-info" : "bg-success-bg text-success"
+  }
+  if (asset.status === "LOANED" || asset.status === "INTERNAL") {
+    return "bg-info-bg text-info"
+  }
+  if (asset.status === "PENDING_OFFBOARD" || asset.status === "IN_REPAIR") {
+    return "bg-warning-bg text-warning"
+  }
+  if (asset.status === "IN_STOCK") {
+    return "bg-success-bg text-success"
+  }
+  return "bg-muted text-muted-foreground"
+}
+
 export function currentUserLabel(asset: {
   deployedToContact: { firstName: string; lastName: string } | null
   loanedToContact: { firstName: string; lastName: string } | null

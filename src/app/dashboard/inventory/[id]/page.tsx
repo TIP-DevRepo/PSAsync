@@ -12,7 +12,7 @@ import { ReturnModal } from "@/components/inventory/ReturnModal"
 import { OffboardModal } from "@/components/inventory/OffboardModal"
 import { RemoveAssetModal } from "@/components/inventory/RemoveAssetModal"
 import { RedeployModal } from "@/components/inventory/RedeployModal"
-import { plainStatusLabel, computeStatusLabel } from "@/lib/inventory/statusLabel"
+import { plainStatusLabel, computeStatusLabel, statusBadgeClass } from "@/lib/inventory/statusLabel"
 
 interface AssetEvent {
   id: string
@@ -147,7 +147,7 @@ export default function InventoryAssetDetailPage() {
         </Link>
         <div className="flex items-center gap-3">
           <h1 className="text-display font-semibold tracking-tight text-foreground">{asset.assetTag}</h1>
-          <span className="rounded-full bg-info-bg px-2 py-0.5 text-xs font-medium text-info">
+          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadgeClass(asset)}`}>
             {computeStatusLabel(asset)}
           </span>
         </div>
@@ -165,7 +165,14 @@ export default function InventoryAssetDetailPage() {
                 <Button size="sm" onClick={() => setOpenModal("checkout")}>Check Out</Button>
               )}
               {isDeployed(asset) && (
-                <Button size="sm" variant="outline" onClick={() => setOpenModal("redeploy")}>Re-deploy</Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="bg-info-bg text-info hover:bg-info/20"
+                  onClick={() => setOpenModal("redeploy")}
+                >
+                  Re-deploy
+                </Button>
               )}
               {["SOLD", "LOANED", "INTERNAL"].includes(asset.status) && (
                 <Button

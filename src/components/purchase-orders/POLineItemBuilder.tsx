@@ -1,6 +1,7 @@
 "use client"
 
 import { useState } from "react"
+import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { LineItemTable, MoveButtons, RowActionsRead, RowActionsEdit, CopyableCell, money, type ColumnDef } from "@/components/line-items/LineItemTableShell"
@@ -23,6 +24,7 @@ export interface POLineItemBuilderItem {
   serialNumber: string | null
   received: boolean
   sortOrder: number
+  polineItemSerials: { id: string; serialNumber: string; assetId: string | null }[]
 }
 
 export interface POCatalogOption {
@@ -133,6 +135,31 @@ export function POLineItemBuilder({
     }
   }
 
+  function renderSerialCell(li: POLineItemBuilderItem) {
+    if (!isInventoryTracked(li) || !li.catalogItem?.isSerialized) {
+      return <span className="text-xs text-muted-foreground">—</span>
+    }
+    if (!li.received) {
+      return <span className="text-xs text-muted-foreground">Set during receiving</span>
+    }
+    if (li.polineItemSerials.length === 0) {
+      return <span className="text-xs text-muted-foreground">See asset</span>
+    }
+    return (
+      <div className="flex flex-col gap-0.5">
+        {li.polineItemSerials.map((s) =>
+          s.assetId ? (
+            <Link key={s.id} href={`/dashboard/inventory/${s.assetId}`} className="text-xs text-primary hover:underline">
+              {s.serialNumber}
+            </Link>
+          ) : (
+            <span key={s.id} className="text-xs text-muted-foreground">{s.serialNumber}</span>
+          )
+        )}
+      </div>
+    )
+  }
+
   function renderReceivedCell(li: POLineItemBuilderItem) {
     if (li.received) {
       return <span className="text-xs font-medium text-success">✓ Received</span>
@@ -157,7 +184,6 @@ export function POLineItemBuilder({
     const total = lineTotal(li)
     const isEditing = editingId === li.id
     const partNumberValue = li.partNumber ?? li.sku ?? ""
-    const showSerialColumn = isInventoryTracked(li) && li.catalogItem?.isSerialized
 
     return (
       <tr key={li.id} className="border-b border-border last:border-0">
@@ -184,13 +210,7 @@ export function POLineItemBuilder({
               <input type="number" step="0.01" defaultValue={li.unitCost} onBlur={(e) => onUpdate(li.id, { unitCost: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
             </td>
             <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
-            <td className="py-2 pr-2 align-top">
-              {showSerialColumn ? (
-                <span className="text-xs text-muted-foreground">Set during receiving</span>
-              ) : (
-                <span className="text-xs text-muted-foreground">—</span>
-              )}
-            </td>
+            <td className="py-2 pr-2 align-top">{renderSerialCell(li)}</td>
             <td className="py-2 pr-2 align-top text-center">{renderReceivedCell(li)}</td>
             <td className="py-2 pr-4 align-top">
               <RowActionsEdit onDone={() => setEditingId(null)} onDuplicate={() => onDuplicate(li)} onDelete={() => handleDelete(li.id)} />
@@ -207,13 +227,7 @@ export function POLineItemBuilder({
             <td className="py-2 pr-2 align-top text-right text-foreground tabular-nums">{li.quantity}</td>
             <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{money(li.unitCost)}</td>
             <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
-            <td className="py-2 pr-2 align-top">
-              {showSerialColumn ? (
-                <span className="text-xs text-muted-foreground">{li.received ? "See asset" : "Set during receiving"}</span>
-              ) : (
-                <span className="text-xs text-muted-foreground">—</span>
-              )}
-            </td>
+            <td className="py-2 pr-2 align-top">{renderSerialCell(li)}</td>
             <td className="py-2 pr-2 align-top text-center">{renderReceivedCell(li)}</td>
             <td className="py-2 pr-4 align-top">
               {!locked && <RowActionsRead onEdit={() => setEditingId(li.id)} onDuplicate={() => onDuplicate(li)} onDelete={() => handleDelete(li.id)} />}

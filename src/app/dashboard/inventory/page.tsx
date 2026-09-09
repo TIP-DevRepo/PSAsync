@@ -6,7 +6,7 @@ import Link from "next/link"
 import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { TabsBar } from "@/components/ui/tabs-bar"
-import { computeStatusLabel, currentUserLabel } from "@/lib/inventory/statusLabel"
+import { computeStatusLabel, currentUserLabel, statusBadgeClass } from "@/lib/inventory/statusLabel"
 
 interface AssetRow {
   id: string
@@ -300,7 +300,11 @@ export default function InventoryListPage() {
                             {a.assetTag}
                           </Link>
                         </td>
-                        <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{computeStatusLabel(a)}</td>
+                        <td className={`${ROW_PADDING[density]} px-3`}>
+                          <span className={`rounded-full px-2 py-1 text-xs font-medium ${statusBadgeClass(a)}`}>
+                            {computeStatusLabel(a)}
+                          </span>
+                        </td>
                         <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{ownerLabel(a)}</td>
                         <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{locationLabel(a)}</td>
                         <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{currentUserLabel(a)}</td>
