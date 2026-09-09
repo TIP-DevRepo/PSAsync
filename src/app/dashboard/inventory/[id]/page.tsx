@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
-import { Wrench } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
@@ -61,13 +60,12 @@ interface AttachmentType {
   createdAt: string
 }
 
-type AssetTabKey = "details" | "attachments" | "auditTrail" | "repairHistory"
+type AssetTabKey = "details" | "attachments" | "auditTrail"
 
 const ASSET_TABS: { key: AssetTabKey; label: string }[] = [
   { key: "details", label: "Details" },
   { key: "attachments", label: "Attachments" },
   { key: "auditTrail", label: "Audit Trail" },
-  { key: "repairHistory", label: "Repair History" },
 ]
 
 function currentUserLabel(asset: AssetDetail): string {
@@ -294,16 +292,6 @@ export default function InventoryAssetDetailPage() {
                 )}
               </tbody>
             </table>
-          </div>
-        )}
-
-        {activeTab === "repairHistory" && (
-          <div className="rounded-lg border border-dashed border-border bg-card/50 p-10 text-center">
-            <Wrench className="mx-auto h-8 w-8 text-muted-foreground" />
-            <p className="mt-3 font-medium text-foreground">Repair history coming soon</p>
-            <p className="mt-1 text-sm text-muted-foreground max-w-sm mx-auto">
-              Tracking repairs sent out or done in-house will show up here once the Repair module (Phase 11) is built.
-            </p>
           </div>
         )}
       </div>

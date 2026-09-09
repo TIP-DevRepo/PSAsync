@@ -493,8 +493,6 @@ enum InventoryEventType {
   CHECKED_OUT
   RETURNED
   MOVED
-  REPAIR_STARTED
-  REPAIR_COMPLETED
   FIELD_UPDATED
 }
 
@@ -1235,7 +1233,6 @@ enum InventoryAssetStatus {
   LOANED
   SOLD
   PENDING_OFFBOARD
-  IN_REPAIR
   REMOVED
 }
 
@@ -1256,11 +1253,6 @@ enum InventoryRemovedReason {
   DONATED
   RETURNED_TO_VENDOR
   OTHER
-}
-
-enum InventoryRepairType {
-  SELF
-  VENDOR
 }
 
 model InventoryAsset {
@@ -1316,12 +1308,6 @@ model InventoryAsset {
   pendingDisposal Boolean @default(false)
 
   removedReason InventoryRemovedReason?
-
-  repairType                InventoryRepairType?
-  repairEstimatedReturnDate DateTime?
-  // Remembers the status this asset was in right before it went IN_REPAIR,
-  // so "Back to Origin" after repair can restore it automatically.
-  statusBeforeRepair        InventoryAssetStatus?
 
   warrantyType       String?
   warrantyExpiration DateTime?

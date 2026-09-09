@@ -50,7 +50,7 @@ export function statusBadgeClass(asset: {
   if (asset.status === "LOANED" || asset.status === "INTERNAL") {
     return "bg-info-bg text-info"
   }
-  if (asset.status === "PENDING_OFFBOARD" || asset.status === "IN_REPAIR") {
+  if (asset.status === "PENDING_OFFBOARD") {
     return "bg-warning-bg text-warning"
   }
   if (asset.status === "IN_STOCK") {
