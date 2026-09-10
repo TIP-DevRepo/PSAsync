@@ -16,6 +16,7 @@ export interface RolePermissions {
     "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders",
     boolean
   >>
+  dashboards?: Partial<Record<"manage", boolean>>
 }
 
 // Dot-path permission check, e.g. hasPermission(userId, "quotes.delete") or

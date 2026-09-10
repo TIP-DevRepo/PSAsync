@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useRouter } from "next/navigation"
+import { useState, useEffect, Suspense } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -106,15 +106,32 @@ const FILTER_SELECT_CLASS =
   "rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 
 export default function InventoryListPage() {
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
+      <InventoryListPageInner />
+    </Suspense>
+  )
+}
+
+function InventoryListPageInner() {
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const initialStatus = searchParams.get("status")
+  const initialOwner = searchParams.get("owner")
+
   const [activeSubTab, setActiveSubTab] = useState<SubTab>("assets")
 
   const [assets, setAssets] = useState<AssetRow[]>([])
   const [loadingAssets, setLoadingAssets] = useState(true)
   const [search, setSearch] = useState("")
-  const [activeFilter, setActiveFilter] = useState<"active" | "all">("active")
-  const [statusFilter, setStatusFilter] = useState("ALL")
-  const [ownerFilter, setOwnerFilter] = useState("ALL")
+  // A widget linking to a decommissioned status group (e.g. "Removed")
+  // needs Active & Inactive selected too, or the Active-only default
+  // would hide the very rows it's linking to.
+  const [activeFilter, setActiveFilter] = useState<"active" | "all">(
+    initialStatus && (initialStatus === "Removed" || initialStatus.includes("(Decom)")) ? "all" : "active"
+  )
+  const [statusFilter, setStatusFilter] = useState(initialStatus ?? "ALL")
+  const [ownerFilter, setOwnerFilter] = useState(initialOwner ?? "ALL")
   const [categoryFilter, setCategoryFilter] = useState("ALL")
   const [locationFilter, setLocationFilter] = useState("ALL")
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)

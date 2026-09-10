@@ -1,0 +1,65 @@
+/* Adapted from React Bits' Magic Bento (https://reactbits.dev/components/magic-bento),
+   re-themed off this app's own design tokens (bg-card/border-border, and
+   --brand-primary-base via CSS relative color syntax) instead of the
+   demo's fixed dark palette, so it works in both light and dark mode. */
+
+.magic-bento-card {
+  --glow-x: 50%;
+  --glow-y: 50%;
+  --glow-intensity: 0;
+  --glow-radius: 300px;
+  position: relative;
+}
+
+.magic-bento-card--border-glow::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  padding: 1.5px;
+  background: radial-gradient(
+    var(--glow-radius) circle at var(--glow-x) var(--glow-y),
+    rgb(from var(--brand-primary-base) r g b / calc(var(--glow-intensity) * 0.9)) 0%,
+    rgb(from var(--brand-primary-base) r g b / calc(var(--glow-intensity) * 0.4)) 30%,
+    transparent 60%
+  );
+  border-radius: inherit;
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.particle-container {
+  position: relative;
+  overflow: hidden;
+}
+
+.magic-bento-particle {
+  position: absolute;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgb(from var(--brand-primary-base) r g b);
+  box-shadow: 0 0 6px rgb(from var(--brand-primary-base) r g b / 0.6);
+  pointer-events: none;
+  z-index: 5;
+}
+
+/* Deliberately no mix-blend-mode here (unlike the original demo, which is
+   dark-theme-only) — "screen" all but disappears on a light background,
+   so this relies on low alpha alone to stay a soft glow in either theme. */
+.global-spotlight {
+  will-change: transform, opacity;
+  z-index: 200;
+  pointer-events: none;
+}
+
+.bento-section {
+  position: relative;
+}

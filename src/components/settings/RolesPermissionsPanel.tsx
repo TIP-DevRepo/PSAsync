@@ -27,6 +27,7 @@ interface RolePermissions {
     notifications: boolean
     integrations: boolean
   }
+  dashboards: { manage: boolean }
 }
 
 interface Role {
@@ -88,6 +89,10 @@ const SETTINGS_LABELS: [keyof RolePermissions["settingsSections"], string][] = [
   ["approvalWorkflows", "Approval Workflows"],
   ["notifications", "Notifications"],
   ["integrations", "Integrations"],
+]
+
+const DASHBOARD_LABELS: [keyof RolePermissions["dashboards"], string][] = [
+  ["manage", "Edit the company's Default dashboard"],
 ]
 
 export function RolesPermissionsPanel() {
@@ -208,6 +213,10 @@ export function RolesPermissionsPanel() {
       ...draft,
       permissions: { ...draft.permissions, settingsSections: { ...draft.permissions.settingsSections, [key]: value } },
     })
+  }
+  function updateDashboardsPerm(key: keyof RolePermissions["dashboards"], value: boolean) {
+    if (!draft) return
+    setDraft({ ...draft, permissions: { ...draft.permissions, dashboards: { ...draft.permissions.dashboards, [key]: value } } })
   }
 
   if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
@@ -397,6 +406,22 @@ export function RolesPermissionsPanel() {
                       type="checkbox"
                       checked={draft.permissions.settingsSections[key]}
                       onChange={(e) => updateSettingsPerm(key, e.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold text-sm mb-2">Dashboard Actions</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {DASHBOARD_LABELS.map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.permissions.dashboards?.[key] ?? false}
+                      onChange={(e) => updateDashboardsPerm(key, e.target.checked)}
                     />
                     {label}
                   </label>
