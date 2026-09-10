@@ -311,9 +311,11 @@ export function DashboardView({ allowedWidgetTypes }: { allowedWidgetTypes: Widg
                 {editMode ? <Check size={14} /> : <Pencil size={14} />}
                 {editMode ? "Done" : "Edit"}
               </Button>
-              <Button size="sm" onClick={() => setShowAddWidget(true)}>
-                <Plus size={14} /> Add Widget
-              </Button>
+              {editMode && (
+                <Button size="sm" onClick={() => setShowAddWidget(true)}>
+                  <Plus size={14} /> Add Widget
+                </Button>
+              )}
             </>
           )}
         </div>

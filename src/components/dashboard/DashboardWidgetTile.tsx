@@ -74,9 +74,24 @@ export function DashboardWidgetTile({
       ref={setNodeRef}
       style={style}
       className={`group relative ${canDrag ? "cursor-grab active:cursor-grabbing" : ""}`}
+      // Block navigation while editing without ever changing BentoTile's
+      // href prop — swapping it in and out of a <Link> wrapper would
+      // change the element type at that spot in the tree, which forces
+      // React to unmount and remount the card (and re-fetch its widget
+      // data) on every Edit toggle. Capturing and stopping the click
+      // before it reaches the nested Link keeps the tree, and the
+      // mounted widgets, untouched. Excludes the Remove button itself,
+      // since stopping propagation here would also swallow its own
+      // click before it ever fires.
+      onClickCapture={(e) => {
+        if (editMode && !(e.target as HTMLElement).closest("button")) {
+          e.preventDefault()
+          e.stopPropagation()
+        }
+      }}
       {...(canDrag ? { ...attributes, ...listeners } : {})}
     >
-      <BentoTile href={!editMode ? href : undefined}>{content}</BentoTile>
+      <BentoTile href={href}>{content}</BentoTile>
 
       {canDrag && (
         <div className="pointer-events-none absolute left-2 top-2 z-10 rounded-md bg-background/80 p-1 text-muted-foreground opacity-0 transition-opacity duration-200 ease-out group-hover:opacity-100">
