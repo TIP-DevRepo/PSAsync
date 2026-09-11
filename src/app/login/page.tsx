@@ -2,7 +2,7 @@
 
 import { useState, Suspense } from "react"
 import { signIn } from "next-auth/react"
-import { useRouter, useSearchParams } from "next/navigation"
+import { useSearchParams } from "next/navigation"
 import dynamic from "next/dynamic"
 
 const Lightfall = dynamic(() => import("@/components/effects/Lightfall"), { ssr: false })
@@ -23,7 +23,6 @@ export default function LoginPageWrapper() {
 }
 
 function LoginPage() {
-  const router = useRouter()
   const searchParams = useSearchParams()
   const [step, setStep] = useState<"email" | "password">("email")
   const [email, setEmail] = useState("")
@@ -77,7 +76,11 @@ function LoginPage() {
       setError("Invalid email or password")
       setLoading(false)
     } else {
-      router.push("/dashboard")
+      // Full navigation, not router.push: the root layout (and
+      // CompanyThemeProvider within it) is shared with the dashboard route,
+      // so a client-side transition would reuse the pre-login Router Cache
+      // entry and serve the default theme until a manual refresh.
+      window.location.href = "/dashboard"
     }
   }
 
