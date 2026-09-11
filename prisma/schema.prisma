@@ -44,6 +44,7 @@ model Company {
   contactTags             ContactTag[]
   inventoryAssets         InventoryAsset[]
   inventoryStocks         InventoryStock[]
+  dashboards              Dashboard[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -102,6 +103,13 @@ model User {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
+  // Which dashboard loads for this user at /dashboard — their own, or
+  // the shared company Default. Null means "use the company Default,"
+  // same as if they'd never picked one. Cleared automatically if that
+  // dashboard is later deleted.
+  defaultDashboardId String?
+  defaultDashboard   Dashboard? @relation("UserDefaultDashboard", fields: [defaultDashboardId], references: [id], onDelete: SetNull)
+
   quotes                      Quote[]
   salesOrders                 SalesOrder[]
   purchaseOrders              PurchaseOrder[]
@@ -121,6 +129,7 @@ model User {
   inventoryAssetEvents        InventoryAssetEvent[]
   inventoryStockEvents        InventoryStockEvent[]
   inventoryAssetAttachments   InventoryAssetAttachment[]
+  dashboards                  Dashboard[]                @relation("DashboardOwner")
 }
 
 // ─── SESSION (Auth.js) ───────────────────────────────────────────────────────
@@ -1347,4 +1356,65 @@ model InventoryCustomFieldValue {
   updatedAt     DateTime             @updatedAt
 
   @@unique([assetId, customFieldId])
+}
+
+// ─── DASHBOARD ───────────────────────────────────────────────────────────────
+enum WidgetType {
+  INVENTORY_BY_STATUS
+  INVENTORY_BY_CLIENT
+  OPEN_QUOTES
+  OPEN_POS
+  TOTAL_CLIENTS
+}
+
+enum WidgetSize {
+  SMALL
+  MEDIUM
+  LARGE
+}
+
+model Dashboard {
+  id        String  @id @default(cuid())
+  companyId String
+  company   Company @relation(fields: [companyId], references: [id])
+
+  // Null only for the one shared, company wide Default dashboard. Every
+  // personal dashboard belongs to exactly one user and is deleted along
+  // with them.
+  userId String?
+  user   User?   @relation("DashboardOwner", fields: [userId], references: [id], onDelete: Cascade)
+
+  name      String
+  isDefault Boolean @default(false)
+
+  // Users who've picked this specific dashboard as the one that loads
+  // for them at /dashboard — separate from isDefault above, which is
+  // the one shared company wide fallback everyone sees until they pick
+  // their own.
+  usersDefaultingHere User[] @relation("UserDefaultDashboard")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  widgets DashboardWidget[]
+}
+
+model DashboardWidget {
+  id          String    @id @default(cuid())
+  dashboardId String
+  dashboard   Dashboard @relation(fields: [dashboardId], references: [id], onDelete: Cascade)
+
+  widgetType WidgetType
+  size       WidgetSize @default(MEDIUM)
+
+  // Top-left grid cell this widget occupies, 0-indexed against the fixed
+  // 4x4 grid. A widget's footprint (from its size) extends right/down
+  // from here — see src/lib/dashboards/gridPlacement.ts, the single
+  // source of truth for size-to-footprint and overlap checking, used by
+  // both the client (drag preview) and the API (authoritative check).
+  row Int @default(0)
+  col Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
