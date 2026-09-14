@@ -45,7 +45,7 @@ async function main() {
     data: {
       companyId: company.id,
       name: "Admin",
-      email: "admin@tipinc.com",
+      email: "admin@tipinc.ai",
       password: hashedPassword,
       roleId: adminRole.id,
     },
