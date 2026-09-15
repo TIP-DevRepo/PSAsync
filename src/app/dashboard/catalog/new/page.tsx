@@ -51,7 +51,7 @@ export default function NewCatalogItemPage() {
   }, [])
 
   function update(field: string, value: string | boolean) {
-    setForm({ ...form, [field]: value })
+    setForm((prev) => ({ ...prev, [field]: value }))
   }
 
   async function handleSave() {
