@@ -6,7 +6,16 @@ import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 
 interface RolePermissions {
-  pages: { clients: boolean; catalog: boolean; vendors: boolean; inventory: boolean; quotes: boolean; settings: boolean }
+  pages: {
+    clients: boolean
+    catalog: boolean
+    vendors: boolean
+    inventory: boolean
+    quotes: boolean
+    settings: boolean
+    salesOrders: boolean
+    purchaseOrders: boolean
+  }
   quotes: {
     create: boolean
     edit: boolean
@@ -44,6 +53,8 @@ const PAGE_LABELS: [keyof RolePermissions["pages"], string][] = [
   ["vendors", "Vendors"],
   ["inventory", "Inventory"],
   ["quotes", "Quotes"],
+  ["salesOrders", "Sales Orders"],
+  ["purchaseOrders", "Purchase Orders"],
   ["settings", "Settings (whole section)"],
 ]
 
