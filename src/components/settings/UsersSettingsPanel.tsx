@@ -21,6 +21,7 @@ interface User {
 export function UsersSettingsPanel() {
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<RoleOption[]>([])
+  const [myRank, setMyRank] = useState(0)
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
   const [newUser, setNewUser] = useState({ name: "", email: "", roleId: "", tempPassword: "" })
@@ -44,7 +45,17 @@ export function UsersSettingsPanel() {
           setNewUser((prev) => ({ ...prev, roleId: prev.roleId || data[0].id }))
         }
       })
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setMyRank(role?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : role?.rank ?? 0)
+      })
   }, [])
+
+  // Roles you're allowed to hand out: anything ranked below you. Keeps
+  // the dropdown from offering choices the API would reject anyway.
+  const assignableRoles = roles.filter((r) => r.rank < myRank)
 
   async function handleInvite() {
     const res = await fetch("/api/users", {
@@ -78,7 +89,8 @@ export function UsersSettingsPanel() {
         toast.success("Role updated")
       }
     } else {
-      toast.error("Couldn't update user")
+      const err = await res.json().catch(() => ({}))
+      toast.error("Couldn't update user", err.error)
     }
     loadUsers()
   }
@@ -158,18 +170,23 @@ export function UsersSettingsPanel() {
           </tr>
         </thead>
         <tbody>
-          {users.map((user) => (
+          {users.map((user) => {
+            const isLocked = (user.role?.rank ?? 0) >= myRank
+            return (
             <tr key={user.id} className="border-b">
               <td className="py-2">{user.name}</td>
               <td className="py-2">{user.email}</td>
               <td className="py-2">
                 <select
                   value={user.role?.id ?? ""}
+                  disabled={isLocked}
+                  title={isLocked ? "This user's role is at or above your own in the hierarchy" : undefined}
                   onChange={(e) => updateUser(user.id, { roleId: e.target.value })}
-                  className="rounded-md border px-2 py-1 text-sm"
+                  className="rounded-md border px-2 py-1 text-sm disabled:opacity-60"
                 >
                   {!user.role && <option value="">Unassigned</option>}
-                  {roles.map((r) => (
+                  {user.role && isLocked && <option value={user.role.id}>{user.role.name}</option>}
+                  {assignableRoles.map((r) => (
                     <option key={r.id} value={r.id}>{r.name}</option>
                   ))}
                 </select>
@@ -187,7 +204,8 @@ export function UsersSettingsPanel() {
                 </button>
               </td>
             </tr>
-          ))}
+            )
+          })}
         </tbody>
       </table>
     </div>

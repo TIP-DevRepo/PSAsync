@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission } from "@/lib/permissions"
+import { GLOBAL_ADMIN_RANK } from "@/lib/global-admin-role"
 
 const DEFAULT_PERMISSIONS = {
   pages: { clients: false, catalog: false, vendors: false, inventory: false, quotes: false, settings: false, salesOrders: false, purchaseOrders: false },
@@ -49,11 +50,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A role with that name already exists" }, { status: 400 })
   }
 
+  const rank = Number(body.rank) || 0
+  if (rank >= GLOBAL_ADMIN_RANK) {
+    return NextResponse.json(
+      { error: "A role's rank can't reach or exceed the Global Admin role's rank" },
+      { status: 400 }
+    )
+  }
+
   const role = await prisma.role.create({
     data: {
       companyId: session.user.companyId,
       name: body.name.trim(),
-      rank: Number(body.rank) || 0,
+      rank,
       permissions: DEFAULT_PERMISSIONS,
       isSystem: false,
     },

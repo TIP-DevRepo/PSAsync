@@ -22,12 +22,13 @@ const prisma = new PrismaClient({ adapter })
 
 // Shapes a DB user + its Role relation into the flat object stored in the
 // session/JWT, so every part of the app reads role info the same way
-function toSessionRole(role: { id: string; name: string; rank: number; permissions: unknown } | null): SessionRole | null {
+function toSessionRole(role: { id: string; name: string; rank: number; isGlobalAdmin: boolean; permissions: unknown } | null): SessionRole | null {
   if (!role) return null
   return {
     id: role.id,
     name: role.name,
     rank: role.rank,
+    isGlobalAdmin: role.isGlobalAdmin,
     permissions: role.permissions as Record<string, unknown>,
   }
 }

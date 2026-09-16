@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission, type RolePermissions } from "@/lib/permissions"
+import { hasPermission, getUserRank, type RolePermissions } from "@/lib/permissions"
+import { GLOBAL_ADMIN_RANK } from "@/lib/global-admin-role"
 
 export async function PATCH(
   req: NextRequest,
@@ -21,7 +22,37 @@ export async function PATCH(
     return NextResponse.json({ error: "Role not found" }, { status: 404 })
   }
 
+  if (existing.isGlobalAdmin) {
+    return NextResponse.json({ error: "The Global Admin role cannot be modified" }, { status: 403 })
+  }
+
+  // Hierarchy: you can only edit roles ranked below your own, and can't
+  // raise a role's rank to your own level or above.
+  const actorRank = await getUserRank(session.user.id)
+  if (existing.rank >= actorRank) {
+    return NextResponse.json(
+      { error: "You can only edit roles below your own in the hierarchy" },
+      { status: 403 }
+    )
+  }
+
   const body = await req.json()
+
+  if (body.rank !== undefined) {
+    const newRank = Number(body.rank)
+    if (newRank >= GLOBAL_ADMIN_RANK) {
+      return NextResponse.json(
+        { error: "A role's rank can't reach or exceed the Global Admin role's rank" },
+        { status: 400 }
+      )
+    }
+    if (newRank >= actorRank) {
+      return NextResponse.json(
+        { error: "You can't set a role's rank at or above your own" },
+        { status: 403 }
+      )
+    }
+  }
 
   // If this edit would remove Settings > Users access from this role, make
   // sure at least one OTHER role in the company still has it — otherwise
@@ -74,6 +105,18 @@ export async function DELETE(
   })
   if (!existing || existing.companyId !== session.user.companyId) {
     return NextResponse.json({ error: "Role not found" }, { status: 404 })
+  }
+
+  if (existing.isGlobalAdmin) {
+    return NextResponse.json({ error: "The Global Admin role cannot be deleted" }, { status: 403 })
+  }
+
+  const actorRank = await getUserRank(session.user.id)
+  if (existing.rank >= actorRank) {
+    return NextResponse.json(
+      { error: "You can only delete roles below your own in the hierarchy" },
+      { status: 403 }
+    )
   }
 
   if (existing.users.length > 0) {

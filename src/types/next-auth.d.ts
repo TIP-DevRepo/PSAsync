@@ -4,6 +4,7 @@ export interface SessionRole {
   id: string
   name: string
   rank: number
+  isGlobalAdmin: boolean
   permissions: Record<string, unknown>
 }
 

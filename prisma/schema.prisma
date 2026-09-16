@@ -1202,13 +1202,13 @@ enum NotificationType {
 
 // ─── ROLE ────────────────────────────────────────────────────────────────
 model Role {
-  id          String   @id @default(cuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  name        String
+  id            String   @id @default(cuid())
+  companyId     String
+  company       Company  @relation(fields: [companyId], references: [id])
+  name          String
   // Higher rank = more senior, used for "X or higher" comparisons (e.g.
   // approval workflows, who can decide a pending approval)
-  rank        Int      @default(0)
+  rank          Int      @default(0)
   // Every permission toggle lives here as one flexible object instead of a
   // dedicated column per permission, so adding new permissions later never
   // needs a migration. Shape (all booleans unless noted):
@@ -1221,13 +1221,19 @@ model Role {
   //   settingsSections: { company, users, quotes, approvalWorkflows, notifications, integrations },
   //   maxDiscount: number
   // }
-  permissions Json
+  permissions   Json
   // System roles are the 5 starter roles created during migration — kept
   // distinguishable so we can decide later whether to protect them from
   // deletion (e.g. don't let the last Admin-equivalent role be deleted)
-  isSystem    Boolean  @default(false)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isSystem      Boolean  @default(false)
+  // The one locked, permission-immune role every company has. Checked by
+  // id/flag rather than by matching the "Global Admin" name so renaming
+  // the role can never break the bypass in hasPermission/getUserRank.
+  // Cannot be edited or deleted (see src/app/api/roles/[id]/route.ts) and
+  // enforced unique per company by a partial index (see migration SQL).
+  isGlobalAdmin Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
   users             User[]
   approvalWorkflows ApprovalWorkflow[]

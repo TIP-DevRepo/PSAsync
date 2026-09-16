@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { GLOBAL_ADMIN_RANK } from "@/lib/global-admin-role"
 
 interface RolePermissions {
   pages: {
@@ -44,6 +45,7 @@ interface Role {
   name: string
   rank: number
   isSystem: boolean
+  isGlobalAdmin: boolean
   permissions: RolePermissions
 }
 
@@ -108,6 +110,7 @@ const DASHBOARD_LABELS: [keyof RolePermissions["dashboards"], string][] = [
 
 export function RolesPermissionsPanel() {
   const [roles, setRoles] = useState<Role[]>([])
+  const [myRank, setMyRank] = useState(0)
   const [loading, setLoading] = useState(true)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [showNew, setShowNew] = useState(false)
@@ -129,7 +132,17 @@ export function RolesPermissionsPanel() {
 
   useEffect(() => {
     loadRoles()
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setMyRank(role?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : role?.rank ?? 0)
+      })
   }, [])
+
+  // Ranked at or above your own. The API rejects edits/deletes to these
+  // regardless, this just keeps the UI from suggesting you can.
+  const isRankLocked = (role: Role) => role.rank >= myRank
 
   useEffect(() => {
     const role = roles.find((r) => r.id === selectedId) ?? null
@@ -250,7 +263,7 @@ export function RolesPermissionsPanel() {
               }`}
             >
               <span>{r.name}</span>
-              <span className="text-xs opacity-60">rank {r.rank}</span>
+              <span className="text-xs opacity-60">{r.isGlobalAdmin ? "locked" : `rank ${r.rank}`}</span>
             </button>
           ))}
 
@@ -268,6 +281,7 @@ export function RolesPermissionsPanel() {
               <input
                 type="number"
                 value={newRoleRank}
+                max={GLOBAL_ADMIN_RANK - 1}
                 onChange={(e) => setNewRoleRank(e.target.value)}
                 className="w-full rounded-md border px-2 py-1.5 text-sm"
               />
@@ -294,11 +308,26 @@ export function RolesPermissionsPanel() {
           <p className="text-sm text-zinc-500">Select a role on the left, or create a new one.</p>
         )}
 
-        {draft && (
+        {draft && (() => {
+          const rankLocked = !draft.isGlobalAdmin && isRankLocked(draft)
+          const isLocked = draft.isGlobalAdmin || rankLocked
+          return (
           <div className="space-y-6">
             {error && (
               <div className="rounded-md border border-red-300 bg-red-50 dark:bg-red-950 p-3 text-sm text-red-700 dark:text-red-300">
                 {error}
+              </div>
+            )}
+
+            {draft.isGlobalAdmin && (
+              <div className="rounded-md border border-zinc-300 bg-zinc-50 dark:bg-zinc-900 p-3 text-sm text-zinc-600 dark:text-zinc-400">
+                The Global Admin role always has access to everything and cannot be edited or deleted.
+              </div>
+            )}
+
+            {rankLocked && (
+              <div className="rounded-md border border-zinc-300 bg-zinc-50 dark:bg-zinc-900 p-3 text-sm text-zinc-600 dark:text-zinc-400">
+                This role is ranked at or above your own. You can only edit roles below you in the hierarchy.
               </div>
             )}
 
@@ -309,8 +338,9 @@ export function RolesPermissionsPanel() {
                   <input
                     type="text"
                     value={draft.name}
+                    disabled={isLocked}
                     onChange={(e) => setDraft({ ...draft, name: e.target.value })}
-                    className="w-full rounded-md border px-3 py-2 text-sm"
+                    className="w-full rounded-md border px-3 py-2 text-sm disabled:opacity-60"
                   />
                 </div>
                 <div className="w-32">
@@ -318,14 +348,18 @@ export function RolesPermissionsPanel() {
                   <input
                     type="number"
                     value={draft.rank}
+                    max={GLOBAL_ADMIN_RANK - 1}
+                    disabled={isLocked}
                     onChange={(e) => setDraft({ ...draft, rank: Number(e.target.value) })}
-                    className="w-full rounded-md border px-3 py-2 text-sm"
+                    className="w-full rounded-md border px-3 py-2 text-sm disabled:opacity-60"
                   />
                 </div>
               </div>
-              <Button variant="outline" onClick={() => handleDelete(draft)} className="text-red-600 hover:text-red-700">
-                Delete Role
-              </Button>
+              {!isLocked && (
+                <Button variant="outline" onClick={() => handleDelete(draft)} className="text-red-600 hover:text-red-700">
+                  Delete Role
+                </Button>
+              )}
             </div>
 
             <div>
@@ -335,7 +369,8 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.permissions.pages[key] ?? false}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.pages[key] ?? false}
+                      disabled={isLocked}
                       onChange={(e) => updatePagePerm(key, e.target.checked)}
                     />
                     {label}
@@ -351,7 +386,8 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.permissions.quotes[key]}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.quotes[key]}
+                      disabled={isLocked}
                       onChange={(e) => updateQuotePerm(key, e.target.checked)}
                     />
                     {label}
@@ -367,7 +403,8 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.permissions.clients[key]}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.clients[key]}
+                      disabled={isLocked}
                       onChange={(e) => updateClientPerm(key, e.target.checked)}
                     />
                     {label}
@@ -383,7 +420,8 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.permissions.salesOrders?.[key] ?? false}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.salesOrders?.[key] ?? false}
+                      disabled={isLocked}
                       onChange={(e) => updateSalesOrderPerm(key, e.target.checked)}
                     />
                     {label}
@@ -399,7 +437,8 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.permissions.purchaseOrders?.[key] ?? false}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.purchaseOrders?.[key] ?? false}
+                      disabled={isLocked}
                       onChange={(e) => updatePurchaseOrderPerm(key, e.target.checked)}
                     />
                     {label}
@@ -415,7 +454,8 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.permissions.settingsSections[key]}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.settingsSections[key]}
+                      disabled={isLocked}
                       onChange={(e) => updateSettingsPerm(key, e.target.checked)}
                     />
                     {label}
@@ -431,7 +471,8 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.permissions.dashboards?.[key] ?? false}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.dashboards?.[key] ?? false}
+                      disabled={isLocked}
                       onChange={(e) => updateDashboardsPerm(key, e.target.checked)}
                     />
                     {label}
@@ -440,11 +481,14 @@ export function RolesPermissionsPanel() {
               </div>
             </div>
 
-            <Button onClick={handleSaveDraft} disabled={saving}>
-              {saving ? "Saving..." : "Save Changes"}
-            </Button>
+            {!isLocked && (
+              <Button onClick={handleSaveDraft} disabled={saving}>
+                {saving ? "Saving..." : "Save Changes"}
+              </Button>
+            )}
           </div>
-        )}
+          )
+        })()}
       </div>
     </div>
   )
