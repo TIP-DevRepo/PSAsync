@@ -11,6 +11,7 @@ import { ReturnModal } from "@/components/inventory/ReturnModal"
 import { OffboardModal } from "@/components/inventory/OffboardModal"
 import { RemoveAssetModal } from "@/components/inventory/RemoveAssetModal"
 import { RedeployModal } from "@/components/inventory/RedeployModal"
+import { AssetAdditionalDetailsFields, additionalDetailsToBody, type AdditionalDetailsValue } from "@/components/inventory/AssetAdditionalDetailsFields"
 import { plainStatusLabel, computeStatusLabel, statusBadgeClass } from "@/lib/inventory/statusLabel"
 
 interface AssetEvent {
@@ -35,15 +36,17 @@ interface AssetDetail {
   removedReason: string | null
   warrantyType: string | null
   warrantyExpiration: string | null
+  overrideVendorId: string | null
   overrideVendorSku: string | null
+  overrideManufacturerId: string | null
   overrideManufacturerSku: string | null
   notes: string | null
-  catalogItem: { name: string; categoryRef: { name: string; parent: { name: string } | null } }
+  catalogItem: { name: string; categoryId: string; categoryRef: { name: string; parent: { name: string } | null } }
   ownerClient: { id: string; name: string; inventoryOnboarded: boolean } | null
   loanedToClient: { id: string; name: string; inventoryOnboarded: boolean } | null
   clientLocation: { name: string } | null
   containerPath: string | null
-  customFieldValues: { value: string | null; customField: { name: string } }[]
+  customFieldValues: { customFieldId: string; value: string | null; customField: { name: string } }[]
   deployedToContact: { firstName: string; lastName: string } | null
   loanedToContact: { firstName: string; lastName: string } | null
   assignedUser: { name: string } | null
@@ -84,6 +87,23 @@ function fileSizeLabel(bytes: number | null) {
 
 type ModalKind = "checkout" | "return" | "offboard" | "remove" | "redeploy" | null
 
+function toDateInputValue(iso: string | null): string {
+  return iso ? iso.slice(0, 10) : ""
+}
+
+function toAdditionalDetails(asset: AssetDetail): AdditionalDetailsValue {
+  return {
+    warrantyType: asset.warrantyType ?? "",
+    warrantyExpiration: toDateInputValue(asset.warrantyExpiration),
+    overrideVendorId: asset.overrideVendorId ?? "",
+    overrideVendorSku: asset.overrideVendorSku ?? "",
+    overrideManufacturerId: asset.overrideManufacturerId ?? "",
+    overrideManufacturerSku: asset.overrideManufacturerSku ?? "",
+    notes: asset.notes ?? "",
+    customFieldValues: Object.fromEntries(asset.customFieldValues.map((v) => [v.customFieldId, v.value ?? ""])),
+  }
+}
+
 function isDeployed(asset: AssetDetail): boolean {
   if (asset.status === "INTERNAL") return true
   if (asset.status === "LOANED") return true
@@ -108,6 +128,12 @@ export default function InventoryAssetDetailPage() {
   const [attachments, setAttachments] = useState<AttachmentType[]>([])
   const [openModal, setOpenModal] = useState<ModalKind>(null)
 
+  const [editing, setEditing] = useState(false)
+  const [editSaving, setEditSaving] = useState(false)
+  const [editError, setEditError] = useState<string | null>(null)
+  const [draftSerialNumber, setDraftSerialNumber] = useState("")
+  const [draftDetails, setDraftDetails] = useState<AdditionalDetailsValue | null>(null)
+
   function loadAsset() {
     fetch(`/api/inventory-assets/${id}`)
       .then((res) => res.json())
@@ -129,9 +155,58 @@ export default function InventoryAssetDetailPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
+  // Keeps the always-visible Serial Number / Additional Details fields in
+  // sync with whatever's actually saved, whenever the asset (re)loads —
+  // but only while not mid-edit, so a background refresh never clobbers an
+  // in-progress draft.
+  useEffect(() => {
+    if (!asset || editing) return
+    setDraftSerialNumber(asset.serialNumber ?? "")
+    setDraftDetails(toAdditionalDetails(asset))
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [asset])
+
   async function handleDeleteAttachment(attachmentId: string) {
     await fetch(`/api/inventory-assets/${id}/attachments/${attachmentId}`, { method: "DELETE" })
     loadAttachments()
+  }
+
+  function startEditing() {
+    setEditError(null)
+    setEditing(true)
+  }
+
+  function cancelEditing() {
+    if (asset) {
+      setDraftSerialNumber(asset.serialNumber ?? "")
+      setDraftDetails(toAdditionalDetails(asset))
+    }
+    setEditError(null)
+    setEditing(false)
+  }
+
+  async function handleSaveEdit() {
+    if (!draftDetails) return
+    if (!draftSerialNumber.trim()) {
+      setEditError("Serial number is required")
+      return
+    }
+
+    setEditSaving(true)
+    const res = await fetch(`/api/inventory-assets/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serialNumber: draftSerialNumber.trim(), ...additionalDetailsToBody(draftDetails) }),
+    })
+    setEditSaving(false)
+
+    if (res.ok) {
+      setEditing(false)
+      loadAsset()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setEditError(data.error ?? "Couldn't save changes")
+    }
   }
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
@@ -157,6 +232,17 @@ export default function InventoryAssetDetailPage() {
       <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
         {activeTab === "details" && (
           <div className="max-w-2xl space-y-4">
+            <div className="flex justify-end gap-2">
+              {editing ? (
+                <>
+                  <Button variant="outline" onClick={cancelEditing} disabled={editSaving}>Cancel</Button>
+                  <Button onClick={handleSaveEdit} disabled={editSaving}>{editSaving ? "Saving..." : "Save"}</Button>
+                </>
+              ) : (
+                <Button variant="outline" onClick={startEditing}>Edit</Button>
+              )}
+            </div>
+
             <div className="flex flex-wrap gap-2">
               {(asset.status === "IN_STOCK" ||
                 (asset.status === "SOLD" && asset.ownerClientId && !asset.deployedToContactId)) && (
@@ -192,7 +278,6 @@ export default function InventoryAssetDetailPage() {
 
             <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1.5 text-sm">
               <p><span className="font-medium text-foreground">Status:</span> <span className="text-muted-foreground">{computeStatusLabel(asset)}</span></p>
-              <p><span className="font-medium text-foreground">Serial #:</span> <span className="text-muted-foreground">{asset.serialNumber ?? "—"}</span></p>
               <p>
                 <span className="font-medium text-foreground">Category:</span>{" "}
                 <span className="text-muted-foreground">
@@ -205,36 +290,33 @@ export default function InventoryAssetDetailPage() {
               <p><span className="font-medium text-foreground">Current User:</span> <span className="text-muted-foreground">{currentUserLabel(asset)}</span></p>
               <p><span className="font-medium text-foreground">Site:</span> <span className="text-muted-foreground">{asset.clientLocation?.name ?? "—"}</span></p>
               <p><span className="font-medium text-foreground">Container:</span> <span className="text-muted-foreground">{asset.containerPath ?? "Unknown (no container)"}</span></p>
-              <p><span className="font-medium text-foreground">Warranty:</span> <span className="text-muted-foreground">{asset.warrantyType ?? "—"}</span></p>
-              {asset.warrantyExpiration && (
-                <p><span className="font-medium text-foreground">Warranty Expires:</span> <span className="text-muted-foreground">{new Date(asset.warrantyExpiration).toLocaleDateString()}</span></p>
-              )}
               {asset.loanedToClient && (
                 <p><span className="font-medium text-foreground">Loaned To:</span> <span className="text-muted-foreground">{asset.loanedToClient.name}{asset.loanExpectedReturnDate ? ` (expected back ${new Date(asset.loanExpectedReturnDate).toLocaleDateString()})` : ""}</span></p>
               )}
               {asset.status === "REMOVED" && asset.removedReason && (
                 <p><span className="font-medium text-foreground">Removed Reason:</span> <span className="text-muted-foreground">{plainStatusLabel(asset.removedReason)}</span></p>
               )}
-              {asset.overrideVendor && (
-                <p><span className="font-medium text-foreground">Vendor Override:</span> <span className="text-muted-foreground">{asset.overrideVendor.name}{asset.overrideVendorSku ? ` (${asset.overrideVendorSku})` : ""}</span></p>
-              )}
-              {asset.overrideManufacturer && (
-                <p><span className="font-medium text-foreground">Manufacturer Override:</span> <span className="text-muted-foreground">{asset.overrideManufacturer.name}{asset.overrideManufacturerSku ? ` (${asset.overrideManufacturerSku})` : ""}</span></p>
-              )}
             </div>
 
-            {asset.customFieldValues.length > 0 && (
-              <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1.5 text-sm">
-                {asset.customFieldValues.map((v, i) => (
-                  <p key={i}><span className="font-medium text-foreground">{v.customField.name}:</span> <span className="text-muted-foreground">{v.value ?? "—"}</span></p>
-                ))}
-              </div>
-            )}
-
-            {asset.notes && (
-              <div className="rounded-lg border border-border bg-card shadow-card p-4 text-sm">
-                <p className="font-medium text-foreground mb-1">Notes</p>
-                <p className="text-muted-foreground whitespace-pre-wrap">{asset.notes}</p>
+            {draftDetails && (
+              <div className="space-y-4">
+                <div className="rounded-lg border border-border bg-card shadow-card p-4">
+                  <label className="block text-xs text-muted-foreground mb-1">Serial Number *</label>
+                  <input
+                    type="text"
+                    value={draftSerialNumber}
+                    onChange={(e) => setDraftSerialNumber(e.target.value)}
+                    disabled={!editing}
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                  />
+                </div>
+                <AssetAdditionalDetailsFields
+                  value={draftDetails}
+                  onChange={setDraftDetails}
+                  categoryId={asset.catalogItem.categoryId}
+                  disabled={!editing}
+                />
+                {editError && <p className="text-sm text-danger">{editError}</p>}
               </div>
             )}
           </div>
