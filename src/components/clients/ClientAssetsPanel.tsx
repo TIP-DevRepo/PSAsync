@@ -3,7 +3,9 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Package } from "lucide-react"
+import { Button } from "@/components/ui/button"
 import { computeStatusLabel, currentUserLabel, statusBadgeClass } from "@/lib/inventory/statusLabel"
+import { AddInventoryItemModal } from "@/components/inventory/AddInventoryItemModal"
 
 interface AssetRow {
   id: string
@@ -31,15 +33,28 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
   const [assets, setAssets] = useState<AssetRow[]>([])
   const [loading, setLoading] = useState(true)
   const [showInactive, setShowInactive] = useState(false)
+  const [showAddModal, setShowAddModal] = useState(false)
 
-  useEffect(() => {
+  function loadAssets() {
     fetch(`/api/clients/${clientId}/assets`)
       .then((res) => res.json())
       .then((data) => {
         setAssets(data)
         setLoading(false)
       })
+  }
+
+  useEffect(() => {
+    loadAssets()
   }, [clientId])
+
+  const addModal = showAddModal && (
+    <AddInventoryItemModal
+      initialClientId={clientId}
+      onClose={() => setShowAddModal(false)}
+      onDone={loadAssets}
+    />
+  )
 
   if (loading) {
     return <p className="text-sm text-muted-foreground">Loading...</p>
@@ -47,12 +62,18 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
 
   if (assets.length === 0) {
     return (
-      <div className="rounded-lg border border-dashed border-border bg-card/50 p-10 text-center">
-        <Package className="mx-auto h-8 w-8 text-muted-foreground" />
-        <p className="mt-3 font-medium text-foreground">No assets yet</p>
-        <p className="mt-1 text-sm text-muted-foreground max-w-sm mx-auto">
-          Hardware sold or shipped to this client will show up here once it's received.
-        </p>
+      <div className="space-y-3">
+        <div className="flex justify-end">
+          <Button onClick={() => setShowAddModal(true)}>Add Inventory Item</Button>
+        </div>
+        {addModal}
+        <div className="rounded-lg border border-dashed border-border bg-card/50 p-10 text-center">
+          <Package className="mx-auto h-8 w-8 text-muted-foreground" />
+          <p className="mt-3 font-medium text-foreground">No assets yet</p>
+          <p className="mt-1 text-sm text-muted-foreground max-w-sm mx-auto">
+            Hardware sold or shipped to this client will show up here once it&apos;s received.
+          </p>
+        </div>
       </div>
     )
   }
@@ -61,7 +82,7 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
 
   return (
     <div className="space-y-3">
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-2">
         <select
           value={showInactive ? "all" : "active"}
           onChange={(e) => { setShowInactive(e.target.value === "all"); e.target.blur() }}
@@ -70,7 +91,10 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
           <option value="active">Active Only</option>
           <option value="all">Active & Inactive</option>
         </select>
+        <Button onClick={() => setShowAddModal(true)}>Add Inventory Item</Button>
       </div>
+
+      {addModal}
 
       <div className="rounded-lg border border-border bg-card shadow-card overflow-x-auto">
         <table className="w-full text-sm border-collapse">
@@ -104,7 +128,7 @@ export function ClientAssetsPanel({ clientId }: { clientId: string }) {
             {visible.length === 0 && (
               <tr>
                 <td colSpan={5} className="py-6 text-center text-muted-foreground">
-                  No active assets. Switch to "Active & Inactive" to see decommissioned ones.
+                  No active assets. Switch to &quot;Active & Inactive&quot; to see decommissioned ones.
                 </td>
               </tr>
             )}

@@ -13,8 +13,10 @@ export async function GET() {
     select: {
       id: true,
       name: true,
+      description: true,
       categoryId: true,
       categoryRef: { select: { name: true, parent: { select: { name: true } } } },
+      isSerialized: true,
       type: true,
       msrp: true,
       cost: true,
@@ -69,6 +71,9 @@ export async function POST(req: NextRequest) {
       unit: body.unit || "each",
       taxable: body.taxable ?? true,
       active: body.active ?? true,
+    },
+    include: {
+      categoryRef: { select: { name: true, parent: { select: { name: true } } } },
     },
   })
 
