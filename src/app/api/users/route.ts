@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { hasPermission, getUserRank } from "@/lib/permissions"
 
 export async function GET() {
   const session = await auth()
@@ -48,6 +48,17 @@ export async function POST(req: NextRequest) {
     const role = await prisma.role.findUnique({ where: { id: roleId } })
     if (!role || role.companyId !== session.user.companyId) {
       return NextResponse.json({ error: "Invalid role" }, { status: 400 })
+    }
+
+    // You can invite someone into a role at or below your own rank, but
+    // not above it, otherwise inviting a fresh user would sidestep the
+    // same hierarchy rule that already governs editing an existing one.
+    const actorRank = await getUserRank(session.user.id)
+    if (role.rank > actorRank) {
+      return NextResponse.json(
+        { error: "You can't invite a user into a role above your own rank" },
+        { status: 403 }
+      )
     }
   }
 

@@ -10,6 +10,16 @@ interface RoleOption {
   rank: number
 }
 
+// Excludes }{[]|\/><;:'"~`+=,.^ since those tend to cause trouble when a
+// temp password gets copy-pasted into a URL, CSV, or shell command.
+const TEMP_PASSWORD_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*()-_?"
+
+function generateTempPassword(length = 12): string {
+  const values = new Uint32Array(length)
+  crypto.getRandomValues(values)
+  return Array.from(values, (v) => TEMP_PASSWORD_CHARS[v % TEMP_PASSWORD_CHARS.length]).join("")
+}
+
 interface User {
   id: string
   name: string
@@ -39,12 +49,7 @@ export function UsersSettingsPanel() {
     loadUsers()
     fetch("/api/roles")
       .then((res) => res.json())
-      .then((data: RoleOption[]) => {
-        setRoles(data)
-        if (data.length > 0) {
-          setNewUser((prev) => ({ ...prev, roleId: prev.roleId || data[0].id }))
-        }
-      })
+      .then((data: RoleOption[]) => setRoles(data))
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((session) => {
@@ -53,15 +58,25 @@ export function UsersSettingsPanel() {
       })
   }, [])
 
-  // Roles you're allowed to hand out: anything ranked below you. Keeps
-  // the dropdown from offering choices the API would reject anyway.
+  // Roles you're allowed to hand out to an EXISTING user: anything ranked
+  // strictly below you. Keeps the dropdown from offering choices the API
+  // would reject anyway.
   const assignableRoles = roles.filter((r) => r.rank < myRank)
+  // Roles you're allowed to invite a brand-new user into: at or below your
+  // own rank (equal is fine here, unlike reassigning an existing user).
+  const invitableRoles = roles.filter((r) => r.rank <= myRank)
+  // Falls back to the first invitable role whenever newUser.roleId hasn't
+  // been set yet or points at something you're no longer allowed to pick
+  // (e.g. roles/myRank arrived after the form's initial empty state).
+  const selectedInviteRoleId = invitableRoles.some((r) => r.id === newUser.roleId)
+    ? newUser.roleId
+    : invitableRoles[0]?.id ?? ""
 
   async function handleInvite() {
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(newUser),
+      body: JSON.stringify({ ...newUser, roleId: selectedInviteRoleId }),
     })
 
     if (!res.ok) {
@@ -71,7 +86,7 @@ export function UsersSettingsPanel() {
     }
 
     toast.success(`Invited ${newUser.name || newUser.email}`)
-    setNewUser({ name: "", email: "", roleId: roles[0]?.id ?? "", tempPassword: "" })
+    setNewUser({ name: "", email: "", roleId: invitableRoles[0]?.id ?? "", tempPassword: "" })
     setShowInvite(false)
     loadUsers()
   }
@@ -103,7 +118,7 @@ export function UsersSettingsPanel() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <p className="text-sm text-zinc-500">Manage who has access and what role they hold.</p>
-        <Button onClick={() => setShowInvite(!showInvite)} disabled={roles.length === 0}>
+        <Button onClick={() => setShowInvite(!showInvite)} disabled={invitableRoles.length === 0}>
           {showInvite ? "Cancel" : "Invite User"}
         </Button>
       </div>
@@ -137,24 +152,33 @@ export function UsersSettingsPanel() {
           <div>
             <label className="block text-sm font-medium mb-1">Role</label>
             <select
-              value={newUser.roleId}
+              value={selectedInviteRoleId}
               onChange={(e) => setNewUser({ ...newUser, roleId: e.target.value })}
               className="w-full rounded-md border px-3 py-2 text-sm"
             >
-              {roles.map((r) => (
+              {invitableRoles.map((r) => (
                 <option key={r.id} value={r.id}>{r.name}</option>
               ))}
             </select>
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Temporary Password</label>
-            <input
-              type="text"
-              value={newUser.tempPassword}
-              onChange={(e) => setNewUser({ ...newUser, tempPassword: e.target.value })}
-              className="w-full rounded-md border px-3 py-2 text-sm"
-              placeholder="Tell this to the new user directly"
-            />
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={newUser.tempPassword}
+                onChange={(e) => setNewUser({ ...newUser, tempPassword: e.target.value })}
+                className="flex-1 rounded-md border px-3 py-2 text-sm"
+                placeholder="Tell this to the new user directly"
+              />
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setNewUser({ ...newUser, tempPassword: generateTempPassword() })}
+              >
+                Generate
+              </Button>
+            </div>
           </div>
           <Button onClick={handleInvite}>Create User</Button>
         </div>
