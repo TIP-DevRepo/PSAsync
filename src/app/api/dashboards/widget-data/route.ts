@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma"
 import type { QuoteStatus, POStatus } from "@/generated/prisma"
 import { computeStatusLabel } from "@/lib/inventory/statusLabel"
 import { canViewWidgetType, type WidgetType } from "@/lib/dashboards/widgetTypes"
+import { resolvePagePermissions } from "@/lib/permissions"
 
 function monthBounds(offsetMonths: number) {
   const now = new Date()
@@ -41,7 +42,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "type is required" }, { status: 400 })
   }
 
-  const pagePermissions = (session.user.role?.permissions as { pages?: Record<string, boolean> } | undefined)?.pages ?? {}
+  const pagePermissions = resolvePagePermissions(session.user.role)
   if (!canViewWidgetType(pagePermissions, type)) {
     return NextResponse.json({ error: "You don't have permission to view this widget's data" }, { status: 403 })
   }

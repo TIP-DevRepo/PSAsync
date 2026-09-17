@@ -77,6 +77,7 @@ interface MyRole {
   id: string
   name: string
   rank: number
+  isGlobalAdmin?: boolean
   permissions: {
     quotes?: { changeStatus?: boolean; delete?: boolean; edit?: boolean }
   }
@@ -498,9 +499,9 @@ export default function QuoteDetailPage({
   const marginPct = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0
 
   const isLocked = quote.status !== "DRAFT"
-  const canChangeStatus = !!myRole?.permissions?.quotes?.changeStatus
-  const canDeleteQuote = !!myRole?.permissions?.quotes?.delete
-  const canEditQuote = !!myRole?.permissions?.quotes?.edit
+  const canChangeStatus = myRole?.isGlobalAdmin || !!myRole?.permissions?.quotes?.changeStatus
+  const canDeleteQuote = myRole?.isGlobalAdmin || !!myRole?.permissions?.quotes?.delete
+  const canEditQuote = myRole?.isGlobalAdmin || !!myRole?.permissions?.quotes?.edit
   const showEditableHeader = !isLocked && canEditQuote
 
   return (

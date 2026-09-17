@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { hasPermission, resolvePagePermissions } from "@/lib/permissions"
 import { canViewWidgetType, type WidgetType, type WidgetSize } from "@/lib/dashboards/widgetTypes"
 import { findFirstAvailableCell } from "@/lib/dashboards/gridPlacement"
 
@@ -35,7 +35,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid widget type" }, { status: 400 })
   }
 
-  const pagePermissions = (session.user.role?.permissions as { pages?: Record<string, boolean> } | undefined)?.pages ?? {}
+  const pagePermissions = resolvePagePermissions(session.user.role)
   if (!canViewWidgetType(pagePermissions, widgetType)) {
     return NextResponse.json({ error: "You don't have permission to view that widget's data" }, { status: 403 })
   }

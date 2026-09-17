@@ -38,7 +38,7 @@ export async function POST(
     include: { role: true },
   })
 
-  const userRank = currentUser?.role?.rank ?? 0
+  const userRank = currentUser?.role?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : currentUser?.role?.rank ?? 0
   const requiredRank = approval.workflow.requiredRole?.rank ?? 999
   if (userRank < requiredRank) {
     return NextResponse.json(
