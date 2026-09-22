@@ -16,6 +16,22 @@ export interface ProductUpdate {
 // update appears on /updates the moment the release goes live.
 export const PRODUCT_UPDATES: ProductUpdate[] = [
   {
+    version: "v0.9.02",
+    date: "2026-09-22",
+    title: "Manual Inventory Entry and a Global Admin Role",
+    category: "New Feature",
+    description:
+      "You can now add inventory items by hand, either a serialized asset or pooled stock, without needing to receive them through a Purchase Order first. Pick an existing catalog item or create a new one on the spot, right from the same form. Also added a locked Global Admin role that always has full access to everything in the app and can't be edited or deleted, along with role rank restrictions so admins can only manage roles and users at or below their own level. Sales Orders and Purchase Orders can now also be individually controlled per role in Roles & Permissions, the same way other pages already are. This release also fixes the Category dropdown on the Add and Edit Catalog Item forms not visually updating after a selection was made.",
+  },
+  {
+    version: "v0.9.01",
+    date: "2026-09-11",
+    title: "Customizable Dashboard",
+    category: "New Feature",
+    description:
+      "A new customizable Dashboard at the heart of PSAsync. Build your own dashboard or use the shared company Default, and arrange widgets on a real grid with drag and drop. Widgets include Assets by Status, Assets by Client, Open Quotes, Open Purchase Orders, and Total Clients, each linking straight into the underlying data. Styled with a live tile effect that adapts to your company's brand colors. This release also fixes company brand colors not applying immediately after login, they previously showed default fallback colors until a manual refresh.",
+  },
+  {
     version: "v0.8.37",
     date: "2026-09-09",
     title: "List View Polish",

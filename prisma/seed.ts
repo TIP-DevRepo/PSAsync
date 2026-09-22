@@ -3,6 +3,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import bcrypt from "bcryptjs"
 import { loadEnvFile } from "process"
+import { globalAdminRoleData } from "../src/lib/global-admin-role"
 
 loadEnvFile(".env")
 
@@ -45,13 +46,17 @@ async function main() {
     data: {
       companyId: company.id,
       name: "Admin",
-      email: "admin@tipinc.com",
+      email: "admin@tipinc.ai",
       password: hashedPassword,
       roleId: adminRole.id,
     },
   })
 
-  console.log("Seed complete — admin user created")
+  await prisma.role.create({
+    data: globalAdminRoleData(company.id),
+  })
+
+  console.log("Seed complete: admin user and Global Admin role created")
   await prisma.$disconnect()
   await pool.end()
 }

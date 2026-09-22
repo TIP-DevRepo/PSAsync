@@ -2,6 +2,7 @@ import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { Sidebar, type PagePermissions } from "@/components/layout/sidebar"
 import { Topbar } from "@/components/layout/topbar"
+import { resolvePagePermissions } from "@/lib/permissions"
 
 export default async function DashboardLayout({
   children,
@@ -14,8 +15,7 @@ export default async function DashboardLayout({
     redirect("/login")
   }
 
-  const rolePermissions = session.user.role?.permissions as { pages?: PagePermissions } | undefined
-  const pagePermissions: PagePermissions = rolePermissions?.pages ?? {}
+  const pagePermissions: PagePermissions = resolvePagePermissions(session.user.role)
 
   return (
     <div className="flex h-screen">

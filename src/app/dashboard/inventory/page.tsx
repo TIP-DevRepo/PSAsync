@@ -7,6 +7,7 @@ import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { computeStatusLabel, currentUserLabel, statusBadgeClass } from "@/lib/inventory/statusLabel"
+import { AddInventoryItemModal } from "@/components/inventory/AddInventoryItemModal"
 
 interface AssetRow {
   id: string
@@ -142,14 +143,19 @@ function InventoryListPageInner() {
   const [loadingStock, setLoadingStock] = useState(true)
   const [adjustingId, setAdjustingId] = useState<string | null>(null)
   const [adjustDelta, setAdjustDelta] = useState("")
+  const [showAddModal, setShowAddModal] = useState(false)
 
-  useEffect(() => {
+  function loadAssets() {
     fetch("/api/inventory-assets")
       .then((res) => res.json())
       .then((json) => {
         setAssets(json)
         setLoadingAssets(false)
       })
+  }
+
+  useEffect(() => {
+    loadAssets()
   }, [])
 
   function loadStock() {
@@ -227,7 +233,18 @@ function InventoryListPageInner() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-display font-semibold tracking-tight text-foreground">Inventory</h1>
+        <Button onClick={() => setShowAddModal(true)}>Add Inventory Item</Button>
       </div>
+
+      {showAddModal && (
+        <AddInventoryItemModal
+          onClose={() => setShowAddModal(false)}
+          onDone={() => {
+            loadAssets()
+            loadStock()
+          }}
+        />
+      )}
 
       <TabsBar
         tabs={[
