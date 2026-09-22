@@ -21,7 +21,7 @@ export const PRODUCT_UPDATES: ProductUpdate[] = [
     title: "Manual Inventory Entry and a Global Admin Role",
     category: "New Feature",
     description:
-      "You can now add inventory items by hand, either a serialized asset or pooled stock, without needing to receive them through a Purchase Order first. Pick an existing catalog item or create a new one on the spot, right from the same form. Also added a locked Global Admin role that always has full access to everything in the app and can't be edited or deleted, along with role rank restrictions so admins can only manage roles and users at or below their own level. This release also fixes the Category dropdown on the Add and Edit Catalog Item forms not visually updating after a selection was made.",
+      "You can now add inventory items by hand, either a serialized asset or pooled stock, without needing to receive them through a Purchase Order first. Pick an existing catalog item or create a new one on the spot, right from the same form. Also added a locked Global Admin role that always has full access to everything in the app and can't be edited or deleted, along with role rank restrictions so admins can only manage roles and users at or below their own level. Sales Orders and Purchase Orders can now also be individually controlled per role in Roles & Permissions, the same way other pages already are. This release also fixes the Category dropdown on the Add and Edit Catalog Item forms not visually updating after a selection was made.",
   },
   {
     version: "v0.9.01",
