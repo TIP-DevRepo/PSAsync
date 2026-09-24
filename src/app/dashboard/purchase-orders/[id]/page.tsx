@@ -233,6 +233,15 @@ export default function PurchaseOrderDetailPage({
     loadPO()
   }
 
+  async function handleUpdateField(field: string, value: string | null) {
+    await fetch(`/api/purchase-orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    })
+    loadPO()
+  }
+
   async function handlePostComment() {
     if (!newComment.trim()) return
     setPostingComment(true)
@@ -396,6 +405,16 @@ export default function PurchaseOrderDetailPage({
                 <p><span className="text-muted-foreground">Owner:</span> <span className="text-foreground">{po.user.name}</span></p>
                 <p><span className="text-muted-foreground">Payment Terms:</span> <span className="text-foreground">{po.paymentType}</span></p>
                 <p><span className="text-muted-foreground">Created:</span> <span className="text-foreground">{new Date(po.createdAt).toLocaleDateString()}</span></p>
+                <div className="flex items-center gap-2 pt-1">
+                  <span className="text-muted-foreground">Expected:</span>
+                  <input
+                    key={`expected-${po.expectedAt}`}
+                    type="date"
+                    defaultValue={po.expectedAt ? po.expectedAt.slice(0, 10) : ""}
+                    onBlur={(e) => handleUpdateField("expectedAt", e.target.value || null)}
+                    className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                </div>
               </div>
 
               <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1 text-sm">

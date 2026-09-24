@@ -76,6 +76,7 @@ export async function POST(req: NextRequest) {
       clientPoNumber: body.clientPoNumber || null,
       paymentTerms: body.paymentTerms || null,
       internalNotes: body.internalNotes || null,
+      clientNotes: body.clientNotes || null,
       billContactName: body.billContactName || null,
       billAddress: body.billAddress || null,
       billAddress2: body.billAddress2 || null,

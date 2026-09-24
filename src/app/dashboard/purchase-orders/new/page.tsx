@@ -58,7 +58,7 @@ export default function NewPurchaseOrderPage() {
     vendorId: "",
     salesOrderId: "",
     paymentType: "",
-    internalNotes: "",
+    expectedAt: "",
     shipToClient: true,
     shipContactName: "",
     shipAddress: "",
@@ -246,6 +246,16 @@ export default function NewPurchaseOrderPage() {
             </select>
           </div>
         </div>
+
+        <div>
+          <label className="block text-xs text-muted-foreground mb-1">Expected Delivery Date (optional)</label>
+          <input
+            type="date"
+            value={form.expectedAt}
+            onChange={(e) => update("expectedAt", e.target.value)}
+            className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          />
+        </div>
       </div>
 
       <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
@@ -385,15 +395,9 @@ export default function NewPurchaseOrderPage() {
         </div>
       </div>
 
-      <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
-        <h2 className="font-semibold text-sm text-foreground">Internal Notes</h2>
-        <textarea
-          value={form.internalNotes}
-          onChange={(e) => update("internalNotes", e.target.value)}
-          rows={3}
-          className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        />
-      </div>
+      <p className="text-xs text-muted-foreground">
+        Internal notes are added from the Internal Notes tab after the purchase order is created.
+      </p>
 
       <div className="flex justify-end gap-3">
         <Button variant="outline" onClick={() => router.push("/dashboard/purchase-orders")}>

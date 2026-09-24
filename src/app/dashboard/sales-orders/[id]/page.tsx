@@ -255,6 +255,15 @@ export default function SalesOrderDetailPage({
     loadSO()
   }
 
+  async function handleUpdateField(field: string, value: string | null) {
+    await fetch(`/api/sales-orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ [field]: value }),
+    })
+    loadSO()
+  }
+
   async function handlePostComment() {
     if (!newComment.trim()) return
     setPostingComment(true)
@@ -438,6 +447,19 @@ export default function SalesOrderDetailPage({
                   {so.shipAddress2 && <p className="text-muted-foreground">{so.shipAddress2}</p>}
                   <p className="text-muted-foreground">{[so.shipCity, so.shipState, so.shipZip].filter(Boolean).join(", ")}</p>
                 </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-2 text-sm">
+                <h2 className="font-semibold text-sm text-foreground">Client Notes</h2>
+                <p className="text-xs text-muted-foreground">Notes about this order from or for the client, separate from your team&apos;s internal notes.</p>
+                <textarea
+                  key={`client-notes-${so.clientNotes}`}
+                  defaultValue={so.clientNotes ?? ""}
+                  onBlur={(e) => handleUpdateField("clientNotes", e.target.value || null)}
+                  rows={3}
+                  placeholder="No client notes yet."
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
               </div>
 
               <div className="space-y-3">

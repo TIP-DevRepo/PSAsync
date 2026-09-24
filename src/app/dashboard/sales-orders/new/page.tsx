@@ -38,7 +38,7 @@ export default function NewSalesOrderPage() {
     clientId: "",
     clientPoNumber: "",
     paymentTerms: "",
-    internalNotes: "",
+    clientNotes: "",
     billContactName: "",
     billAddress: "",
     billAddress2: "",
@@ -300,15 +300,19 @@ export default function NewSalesOrderPage() {
       </div>
 
       <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
-        <h2 className="font-semibold text-sm text-foreground">Internal Notes</h2>
+        <h2 className="font-semibold text-sm text-foreground">Client Notes</h2>
         <textarea
-          value={form.internalNotes}
-          onChange={(e) => update("internalNotes", e.target.value)}
+          value={form.clientNotes}
+          onChange={(e) => update("clientNotes", e.target.value)}
           rows={3}
-          placeholder="Not visible to the client"
+          placeholder="Notes about this order from or for the client"
           className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        Internal notes are added from the Internal Notes tab after the sales order is created.
+      </p>
 
       <div className="flex justify-end gap-3">
         <Button variant="outline" onClick={() => router.push("/dashboard/sales-orders")}>
