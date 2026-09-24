@@ -34,6 +34,7 @@ export async function GET(
     select: {
       id: true,
       assetTag: true,
+      serialNumber: true,
       status: true,
       ownerClientId: true,
       loanedToClientId: true,

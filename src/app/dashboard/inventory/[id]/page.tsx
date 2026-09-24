@@ -1,9 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
 import { CheckoutModal } from "@/components/inventory/CheckoutModal"
@@ -121,12 +123,14 @@ function returnClientFor(asset: AssetDetail) {
 export default function InventoryAssetDetailPage() {
   const params = useParams()
   const id = params.id as string
+  const router = useRouter()
 
   const [asset, setAsset] = useState<AssetDetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<AssetTabKey>("details")
   const [attachments, setAttachments] = useState<AttachmentType[]>([])
   const [openModal, setOpenModal] = useState<ModalKind>(null)
+  const [canDelete, setCanDelete] = useState(false)
 
   const [editing, setEditing] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
@@ -152,8 +156,33 @@ export default function InventoryAssetDetailPage() {
   useEffect(() => {
     loadAsset()
     loadAttachments()
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.inventory?.delete)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  async function handleDeleteAsset() {
+    if (!asset) return
+    const confirmed = await confirmDialog({
+      title: `Delete asset ${asset.assetTag}?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/inventory-assets/${id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Asset deleted")
+      router.push("/dashboard/inventory")
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't delete this asset", data.error)
+    }
+  }
 
   // Keeps the always-visible Serial Number / Additional Details fields in
   // sync with whatever's actually saved, whenever the asset (re)loads —
@@ -273,6 +302,9 @@ export default function InventoryAssetDetailPage() {
               )}
               {asset.status !== "REMOVED" && (
                 <Button size="sm" variant="destructive" onClick={() => setOpenModal("remove")}>Remove</Button>
+              )}
+              {canDelete && ["IN_STOCK", "REMOVED"].includes(asset.status) && (
+                <Button size="sm" variant="destructive" onClick={handleDeleteAsset}>Delete</Button>
               )}
             </div>
 

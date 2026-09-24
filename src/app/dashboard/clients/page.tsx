@@ -9,6 +9,7 @@ import { ImportModal, type ImportResult } from "@/components/import-export/Impor
 import { ExportButton } from "@/components/import-export/ExportButton"
 import { DownloadTemplateButton } from "@/components/import-export/DownloadTemplateButton"
 import { CLIENT_IMPORT_FIELDS, CLIENT_EXPORT_HEADERS, clientToExportRow } from "@/lib/import-export/clientsConfig"
+import { formatPhoneDisplay } from "@/lib/phone"
 
 interface Client {
   id: string
@@ -242,7 +243,7 @@ export default function ClientsListPage() {
                 </td>
                 <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{client.industryRef?.name ?? "—"}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{client.email ?? "—"}</td>
-                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{client.phone ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{formatPhoneDisplay(client.phone)}</td>
                 <td className={`${ROW_PADDING[density]} px-3`}>
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_COLORS[client.status]}`}>
                     {client.status}

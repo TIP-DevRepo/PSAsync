@@ -11,6 +11,7 @@ import { Modal } from "@/components/Modal"
 import { ContainersModal } from "@/components/inventory/ContainersModal"
 import { Ticket, Target, Package, FileText, KeyRound, FolderOpen, Radar, Settings2, Boxes, Phone, Wrench, CheckCircle2 } from "lucide-react"
 import { ClientAssetsPanel } from "@/components/clients/ClientAssetsPanel"
+import { formatPhoneInput, formatPhoneDisplay } from "@/lib/phone"
 
 interface ContactTag {
   id: string
@@ -426,7 +427,7 @@ export default function ClientDetailPage() {
                   <p><span className="font-medium text-foreground">Company Prefix:</span> <span className="text-muted-foreground">{client.prefix ?? "—"}</span></p>
                   <p><span className="font-medium text-foreground">Status:</span> <span className="text-muted-foreground">{client.status}</span></p>
                   <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{client.email ?? "—"}</span></p>
-                  <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{client.phone ?? "—"}</span></p>
+                  <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(client.phone)}</span></p>
                   <p>
                     <span className="font-medium text-foreground">Website:</span>{" "}
                     {client.website ? (
@@ -526,7 +527,7 @@ export default function ClientDetailPage() {
                     <input
                       type="text"
                       value={detailsDraft.phone}
-                      onChange={(e) => setDetailsDraft({ ...detailsDraft, phone: e.target.value })}
+                      onChange={(e) => setDetailsDraft({ ...detailsDraft, phone: formatPhoneInput(e.target.value) })}
                       className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     />
                   </div>
@@ -710,7 +711,7 @@ export default function ClientDetailPage() {
                   type="text"
                   placeholder="Phone"
                   value={newLocation.phone}
-                  onChange={(e) => setNewLocation({ ...newLocation, phone: e.target.value })}
+                  onChange={(e) => setNewLocation({ ...newLocation, phone: formatPhoneInput(e.target.value) })}
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 />
                 <textarea
@@ -819,14 +820,14 @@ export default function ClientDetailPage() {
                     type="text"
                     placeholder="Work Phone"
                     value={newContact.phone}
-                    onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })}
+                    onChange={(e) => setNewContact({ ...newContact, phone: formatPhoneInput(e.target.value) })}
                     className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                   <input
                     type="text"
                     placeholder="Cell Phone"
                     value={newContact.mobile}
-                    onChange={(e) => setNewContact({ ...newContact, mobile: e.target.value })}
+                    onChange={(e) => setNewContact({ ...newContact, mobile: formatPhoneInput(e.target.value) })}
                     className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   />
                 </div>
@@ -936,7 +937,7 @@ export default function ClientDetailPage() {
                       ))}
                     </p>
                     <p className="text-muted-foreground">{contact.title}</p>
-                    <p className="text-muted-foreground">{contact.email} {contact.phone && `· ${contact.phone}`}</p>
+                    <p className="text-muted-foreground">{contact.email} {contact.phone && `· ${formatPhoneInput(contact.phone)}`}</p>
                   </button>
                 ))}
               {client.contacts.length === 0 && (
@@ -1170,7 +1171,7 @@ function LocationDetailModal({
       {!editing ? (
         <div className="space-y-3 text-sm">
           <p><span className="font-medium text-foreground">Address:</span> <span className="text-muted-foreground">{locationAddress(location)}</span></p>
-          <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{location.phone ?? "—"}</span></p>
+          <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(location.phone)}</span></p>
           <p><span className="font-medium text-foreground">Billing Contact:</span> <span className="text-muted-foreground">{contactName(location.billingContact)}</span></p>
           <p><span className="font-medium text-foreground">Shipping Contact:</span> <span className="text-muted-foreground">{contactName(location.shippingContact)}</span></p>
           {location.notes && <p><span className="font-medium text-foreground">Notes:</span> <span className="text-muted-foreground">{location.notes}</span></p>}
@@ -1232,7 +1233,7 @@ function LocationDetailModal({
             type="text"
             placeholder="Phone"
             value={draft.phone}
-            onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
+            onChange={(e) => setDraft({ ...draft, phone: formatPhoneInput(e.target.value) })}
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
           <div>
@@ -1336,8 +1337,8 @@ function ContactDetailModal({
         <div className="space-y-3 text-sm">
           <p><span className="font-medium text-foreground">Title:</span> <span className="text-muted-foreground">{contact.title ?? "—"}</span></p>
           <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{contact.email ?? "—"}</span></p>
-          <p><span className="font-medium text-foreground">Work Phone:</span> <span className="text-muted-foreground">{contact.phone ?? "—"}</span></p>
-          <p><span className="font-medium text-foreground">Cell Phone:</span> <span className="text-muted-foreground">{contact.mobile ?? "—"}</span></p>
+          <p><span className="font-medium text-foreground">Work Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(contact.phone)}</span></p>
+          <p><span className="font-medium text-foreground">Cell Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(contact.mobile)}</span></p>
           <p><span className="font-medium text-foreground">Type:</span> <span className="text-muted-foreground">{contact.locationType === "REMOTE" ? "Remote" : "In-Office"}</span></p>
           <p><span className="font-medium text-foreground">Location:</span> <span className="text-muted-foreground">{currentLocation?.name ?? "—"}</span></p>
           {contact.notes && <p><span className="font-medium text-foreground">Notes:</span> <span className="text-muted-foreground">{contact.notes}</span></p>}
@@ -1391,14 +1392,14 @@ function ContactDetailModal({
               type="text"
               placeholder="Work Phone"
               value={draft.phone}
-              onChange={(e) => setDraft({ ...draft, phone: e.target.value })}
+              onChange={(e) => setDraft({ ...draft, phone: formatPhoneInput(e.target.value) })}
               className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
             <input
               type="text"
               placeholder="Cell Phone"
               value={draft.mobile}
-              onChange={(e) => setDraft({ ...draft, mobile: e.target.value })}
+              onChange={(e) => setDraft({ ...draft, mobile: formatPhoneInput(e.target.value) })}
               className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             />
           </div>

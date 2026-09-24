@@ -6,6 +6,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { SOLineItemBuilder, type SOCatalogOption, type SOVendorOption, type SOLineItemBuilderItem } from "@/components/sales-orders/SOLineItemBuilder"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
@@ -166,6 +167,7 @@ export default function SalesOrderDetailPage({
   const [changingStatus, setChangingStatus] = useState(false)
   const [showGeneratePO, setShowGeneratePO] = useState(false)
   const [activeTab, setActiveTab] = useState<SOTabKey>("details")
+  const [canDelete, setCanDelete] = useState(false)
 
   const [comments, setComments] = useState<SOCommentType[]>([])
   const [newComment, setNewComment] = useState("")
@@ -213,8 +215,33 @@ export default function SalesOrderDetailPage({
     fetch("/api/vendors")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setVendors(data))
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.salesOrders?.delete)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  async function handleDelete() {
+    if (!so) return
+    const confirmed = await confirmDialog({
+      title: `Delete sales order ${so.soNumber}?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/sales-orders/${id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Sales order deleted")
+      router.push("/dashboard/sales-orders")
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't delete this sales order", data.error)
+    }
+  }
 
   async function handleChangeStatus(newStatus: string) {
     setChangingStatus(true)
@@ -361,16 +388,23 @@ export default function SalesOrderDetailPage({
               )}
             </p>
           </div>
-          <select
-            value={so.status}
-            onChange={(e) => handleChangeStatus(e.target.value)}
-            disabled={changingStatus}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{statusLabel(s)}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={so.status}
+              onChange={(e) => handleChangeStatus(e.target.value)}
+              disabled={changingStatus}
+              className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{statusLabel(s)}</option>
+              ))}
+            </select>
+            {canDelete && (
+              <Button variant="outline" onClick={handleDelete} className="text-danger hover:text-danger">
+                Delete
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

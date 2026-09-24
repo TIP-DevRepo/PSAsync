@@ -142,3 +142,42 @@ export async function PATCH(
 
   return NextResponse.json(updated)
 }
+
+// Deployed/loaned/sold/pending-offboard assets tie to real business state
+// (a client's hands, a contact, a sale) — those go through Remove instead,
+// which keeps the record and its history. Only assets that were never
+// deployed (IN_STOCK) or already retired (REMOVED) are safe to hard-delete.
+const NON_DELETABLE_STATUSES = ["INTERNAL", "LOANED", "SOLD", "PENDING_OFFBOARD"]
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+
+  if (!(await hasPermission(session.user.id, "inventory.delete"))) {
+    return NextResponse.json({ error: "You don't have permission to delete inventory assets" }, { status: 403 })
+  }
+
+  const { id } = await params
+  const companyId = session.user.companyId
+
+  const asset = await prisma.inventoryAsset.findUnique({ where: { id, companyId } })
+  if (!asset) {
+    return NextResponse.json({ error: "Asset not found" }, { status: 404 })
+  }
+
+  if (NON_DELETABLE_STATUSES.includes(asset.status)) {
+    return NextResponse.json(
+      { error: "This asset is currently deployed, loaned, or sold. Use Remove instead to retire it, or return/offboard it first." },
+      { status: 409 }
+    )
+  }
+
+  await prisma.inventoryAsset.delete({ where: { id } })
+
+  return NextResponse.json({ deleted: true })
+}

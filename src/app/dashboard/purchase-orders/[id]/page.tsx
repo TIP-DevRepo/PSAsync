@@ -1,9 +1,11 @@
 "use client"
 
 import { useState, useEffect, use } from "react"
+import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { POLineItemBuilder, type POLineItemBuilderItem, type POCatalogOption } from "@/components/purchase-orders/POLineItemBuilder"
 import type { ReceivePayload } from "@/components/purchase-orders/ReceiveModal"
@@ -96,11 +98,13 @@ export default function PurchaseOrderDetailPage({
   params: Promise<{ id: string }>
 }) {
   const { id } = use(params)
+  const router = useRouter()
   const [po, setPo] = useState<PODetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [changingStatus, setChangingStatus] = useState(false)
   const [activeTab, setActiveTab] = useState<POTabKey>("details")
+  const [canDelete, setCanDelete] = useState(false)
 
   const [comments, setComments] = useState<POCommentType[]>([])
   const [newComment, setNewComment] = useState("")
@@ -151,8 +155,33 @@ export default function PurchaseOrderDetailPage({
     fetch("/api/inventory-locations/own-company")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setCompanyLocationOptions(data))
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.purchaseOrders?.delete)
+      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
+
+  async function handleDelete() {
+    if (!po) return
+    const confirmed = await confirmDialog({
+      title: `Delete purchase order ${po.poNumber}?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/purchase-orders/${id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Purchase order deleted")
+      router.push("/dashboard/purchase-orders")
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't delete this purchase order", data.error)
+    }
+  }
 
   // Client locations are only relevant for ship-to-client POs, and only
   // once we know which client — pulled from shipToClientId, which works
@@ -335,16 +364,23 @@ export default function PurchaseOrderDetailPage({
               </p>
             )}
           </div>
-          <select
-            value={po.status}
-            onChange={(e) => handleChangeStatus(e.target.value)}
-            disabled={changingStatus}
-            className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>{statusLabel(s)}</option>
-            ))}
-          </select>
+          <div className="flex items-center gap-2">
+            <select
+              value={po.status}
+              onChange={(e) => handleChangeStatus(e.target.value)}
+              disabled={changingStatus}
+              className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {STATUS_OPTIONS.map((s) => (
+                <option key={s} value={s}>{statusLabel(s)}</option>
+              ))}
+            </select>
+            {canDelete && (
+              <Button variant="outline" onClick={handleDelete} className="text-danger hover:text-danger">
+                Delete
+              </Button>
+            )}
+          </div>
         </div>
       </div>
 

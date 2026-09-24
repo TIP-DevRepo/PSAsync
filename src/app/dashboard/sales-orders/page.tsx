@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { ArrowUp, ArrowDown, ArrowUpDown, Trash2 } from "lucide-react"
 import Link from "next/link"
+import { confirmDialog } from "@/lib/confirm-dialog"
+import { toast } from "@/lib/toast"
 
 interface SalesOrder {
   id: string
@@ -111,6 +113,7 @@ export default function SalesOrdersPage() {
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
   const [density, setDensity] = useState<Density>("default")
+  const [canDelete, setCanDelete] = useState(false)
 
   useEffect(() => {
     fetch("/api/sales-orders")
@@ -119,7 +122,32 @@ export default function SalesOrdersPage() {
         setOrders(json)
         setLoading(false)
       })
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.salesOrders?.delete)
+      })
   }, [])
+
+  async function handleDelete(e: React.MouseEvent, so: SalesOrder) {
+    e.stopPropagation()
+    const confirmed = await confirmDialog({
+      title: `Delete sales order ${so.soNumber}?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/sales-orders/${so.id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Sales order deleted")
+      setOrders((prev) => prev.filter((o) => o.id !== so.id))
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't delete this sales order", data.error)
+    }
+  }
 
   const filtered = orders.filter((o) => {
     const matchesSearch =
@@ -216,6 +244,7 @@ export default function SalesOrdersPage() {
               <SortableHeader label="Total" column="total" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" />
               <SortableHeader label="POs" column="poCount" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" />
               <SortableHeader label="Created" column="createdAt" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              {canDelete && <th className="py-2 pr-4" />}
             </tr>
           </thead>
           <tbody>
@@ -236,11 +265,22 @@ export default function SalesOrdersPage() {
                 <td className={`${ROW_PADDING[density]} pr-3 text-right tabular-nums font-medium text-foreground`}>${so.total.toFixed(2)}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-right tabular-nums text-muted-foreground`}>{so.poCount}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{new Date(so.createdAt).toLocaleDateString()}</td>
+                {canDelete && (
+                  <td className={`${ROW_PADDING[density]} pr-4 text-right`}>
+                    <button
+                      onClick={(e) => handleDelete(e, so)}
+                      className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-bg hover:text-danger"
+                      title="Delete sales order"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                <td colSpan={canDelete ? 8 : 7} className="py-6 text-center text-muted-foreground">
                   No Sales Orders found. Create one manually or accept a Quote to generate one automatically.
                 </td>
               </tr>

@@ -2,8 +2,10 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { ArrowUp, ArrowDown, ArrowUpDown, Trash2 } from "lucide-react"
 import Link from "next/link"
+import { confirmDialog } from "@/lib/confirm-dialog"
+import { toast } from "@/lib/toast"
 
 interface PurchaseOrder {
   id: string
@@ -105,6 +107,7 @@ export default function PurchaseOrdersPage() {
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
   const [density, setDensity] = useState<Density>("default")
+  const [canDelete, setCanDelete] = useState(false)
 
   useEffect(() => {
     fetch("/api/purchase-orders")
@@ -113,7 +116,32 @@ export default function PurchaseOrdersPage() {
         setOrders(json)
         setLoading(false)
       })
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.purchaseOrders?.delete)
+      })
   }, [])
+
+  async function handleDelete(e: React.MouseEvent, po: PurchaseOrder) {
+    e.stopPropagation()
+    const confirmed = await confirmDialog({
+      title: `Delete purchase order ${po.poNumber}?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/purchase-orders/${po.id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Purchase order deleted")
+      setOrders((prev) => prev.filter((o) => o.id !== po.id))
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't delete this purchase order", data.error)
+    }
+  }
 
   const filtered = orders.filter((o) => {
     const matchesSearch =
@@ -209,6 +237,7 @@ export default function PurchaseOrdersPage() {
               <SortableHeader label="Status" column="status" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
               <SortableHeader label="Total" column="total" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" />
               <SortableHeader label="Created" column="createdAt" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              {canDelete && <th className="py-2 pr-4" />}
             </tr>
           </thead>
           <tbody>
@@ -229,11 +258,22 @@ export default function PurchaseOrdersPage() {
                 </td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-right tabular-nums font-medium text-foreground`}>${po.total.toFixed(2)}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{new Date(po.createdAt).toLocaleDateString()}</td>
+                {canDelete && (
+                  <td className={`${ROW_PADDING[density]} pr-4 text-right`}>
+                    <button
+                      onClick={(e) => handleDelete(e, po)}
+                      className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-bg hover:text-danger"
+                      title="Delete purchase order"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                <td colSpan={canDelete ? 8 : 7} className="py-6 text-center text-muted-foreground">
                   No Purchase Orders found. Create one manually or generate one from a Sales Order.
                 </td>
               </tr>

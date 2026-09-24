@@ -4,6 +4,7 @@ import { useState, useEffect, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { ContactSearchInput, type ContactSearchResult } from "@/components/ContactSearchInput"
+import { formatPhoneInput } from "@/lib/phone"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface UserOption {
@@ -171,7 +172,7 @@ function NewQuoteForm() {
                 </p>
                 <p className="text-zinc-500">{selectedContact.client.name}</p>
                 {selectedContact.email && <p className="text-zinc-500">{selectedContact.email}</p>}
-                {selectedContact.phone && <p className="text-zinc-500">{selectedContact.phone}</p>}
+                {selectedContact.phone && <p className="text-zinc-500">{formatPhoneInput(selectedContact.phone)}</p>}
               </div>
             )}
           </div>

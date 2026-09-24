@@ -1,10 +1,11 @@
 "use client"
 
 import { useState, useEffect } from "react"
-import { useParams } from "next/navigation"
+import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { Package, FileClock } from "lucide-react"
 import { CategoryPicker } from "@/components/categories/CategoryPicker"
@@ -107,6 +108,7 @@ function money(n: number) {
 export default function CatalogItemDetailPage() {
   const params = useParams()
   const id = params.id as string
+  const router = useRouter()
 
   const [item, setItem] = useState<CatalogItemDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -114,6 +116,7 @@ export default function CatalogItemDetailPage() {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState<CatalogItemDetail | null>(null)
   const [activeTab, setActiveTab] = useState<ItemTabKey>("details")
+  const [canDelete, setCanDelete] = useState(false)
 
   const [vendors, setVendors] = useState<VendorOption[]>([])
   const [orderHistory, setOrderHistory] = useState<OrderHistoryRow[]>([])
@@ -143,7 +146,32 @@ export default function CatalogItemDetailPage() {
     fetch("/api/vendors")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setVendors(data))
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.catalog?.delete)
+      })
   }, [id])
+
+  async function handleDelete() {
+    if (!item) return
+    const confirmed = await confirmDialog({
+      title: `Delete "${item.name}"?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/catalog/${id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Catalog item deleted")
+      router.push("/dashboard/catalog")
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't delete this catalog item", data.error)
+    }
+  }
 
   function startEditing() {
     if (!item) return
@@ -214,7 +242,14 @@ export default function CatalogItemDetailPage() {
                   <Button onClick={handleSave} disabled={saving}>{saving ? "Saving..." : "Save"}</Button>
                 </>
               ) : (
-                <Button variant="outline" onClick={startEditing}>Edit</Button>
+                <>
+                  <Button variant="outline" onClick={startEditing}>Edit</Button>
+                  {canDelete && (
+                    <Button variant="outline" onClick={handleDelete} className="text-danger hover:text-danger">
+                      Delete
+                    </Button>
+                  )}
+                </>
               )}
             </div>
 

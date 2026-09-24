@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { formatPhoneInput } from "@/lib/phone"
 
 export default function NewVendorPage() {
   const router = useRouter()
@@ -112,7 +113,7 @@ export default function NewVendorPage() {
             <input
               type="text"
               value={form.phone}
-              onChange={(e) => update("phone", e.target.value)}
+              onChange={(e) => update("phone", formatPhoneInput(e.target.value))}
               className="w-full rounded-md border px-3 py-2 text-sm"
             />
           </div>

@@ -120,3 +120,41 @@ export async function PATCH(
 
   return NextResponse.json(updated)
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+
+  if (!(await hasPermission(session.user.id, "salesOrders.delete"))) {
+    return NextResponse.json({ error: "You don't have permission to delete sales orders" }, { status: 403 })
+  }
+
+  const { id } = await params
+
+  const salesOrder = await prisma.salesOrder.findUnique({
+    where: { id, companyId: session.user.companyId },
+    include: { purchaseOrders: { select: { id: true } } },
+  })
+
+  if (!salesOrder) {
+    return NextResponse.json({ error: "Sales Order not found" }, { status: 404 })
+  }
+
+  if (salesOrder.purchaseOrders.length > 0) {
+    return NextResponse.json(
+      {
+        error: `This sales order has ${salesOrder.purchaseOrders.length} purchase order(s) linked to it and can't be deleted. Delete those first.`,
+      },
+      { status: 409 }
+    )
+  }
+
+  await prisma.salesOrder.delete({ where: { id } })
+
+  return NextResponse.json({ deleted: true })
+}

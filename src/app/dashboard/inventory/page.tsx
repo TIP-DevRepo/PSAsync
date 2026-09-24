@@ -3,11 +3,13 @@
 import { useState, useEffect, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
-import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { ArrowUp, ArrowDown, ArrowUpDown, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { computeStatusLabel, currentUserLabel, statusBadgeClass } from "@/lib/inventory/statusLabel"
 import { AddInventoryItemModal } from "@/components/inventory/AddInventoryItemModal"
+import { confirmDialog } from "@/lib/confirm-dialog"
+import { toast } from "@/lib/toast"
 
 interface AssetRow {
   id: string
@@ -144,6 +146,53 @@ function InventoryListPageInner() {
   const [adjustingId, setAdjustingId] = useState<string | null>(null)
   const [adjustDelta, setAdjustDelta] = useState("")
   const [showAddModal, setShowAddModal] = useState(false)
+  const [canDelete, setCanDelete] = useState(false)
+
+  useEffect(() => {
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.inventory?.delete)
+      })
+  }, [])
+
+  async function handleDeleteAsset(e: React.MouseEvent, asset: AssetRow) {
+    e.stopPropagation()
+    const confirmed = await confirmDialog({
+      title: `Delete asset ${asset.assetTag}?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/inventory-assets/${asset.id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Asset deleted")
+      setAssets((prev) => prev.filter((a) => a.id !== asset.id))
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't delete this asset", data.error)
+    }
+  }
+
+  async function handleDeleteStock(stockRow: StockRow) {
+    const confirmed = await confirmDialog({
+      title: `Delete this stock record?`,
+      description: `${stockRow.catalogItem.name} in ${stockRow.containerPath ?? "Unassigned"}. This can't be undone.`,
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/inventory-stock/${stockRow.id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Stock record deleted")
+      setStock((prev) => prev.filter((s) => s.id !== stockRow.id))
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't delete this stock record", data.error)
+    }
+  }
 
   function loadAssets() {
     fetch("/api/inventory-assets")
@@ -316,6 +365,7 @@ function InventoryListPageInner() {
                       <SortableHeader label="Owner" column="owner" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
                       <SortableHeader label="Location/Container" column="location" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
                       <SortableHeader label="Current User" column="currentUser" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+                      {canDelete && <th className="py-2 px-3" />}
                     </tr>
                   </thead>
                   <tbody>
@@ -342,11 +392,22 @@ function InventoryListPageInner() {
                         <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{ownerLabel(a)}</td>
                         <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{locationLabel(a)}</td>
                         <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{currentUserLabel(a)}</td>
+                        {canDelete && (
+                          <td className={`${ROW_PADDING[density]} px-3 text-right`}>
+                            <button
+                              onClick={(e) => handleDeleteAsset(e, a)}
+                              className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-bg hover:text-danger"
+                              title="Delete asset"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     ))}
                     {sorted.length === 0 && (
                       <tr>
-                        <td colSpan={5} className="py-6 text-center text-muted-foreground">
+                        <td colSpan={canDelete ? 6 : 5} className="py-6 text-center text-muted-foreground">
                           No assets found.
                         </td>
                       </tr>
@@ -393,7 +454,18 @@ function InventoryListPageInner() {
                           <Button size="sm" variant="outline" onClick={() => { setAdjustingId(null); setAdjustDelta("") }}>Cancel</Button>
                         </div>
                       ) : (
-                        <Button size="sm" variant="outline" onClick={() => { setAdjustingId(s.id); setAdjustDelta("") }}>Adjust</Button>
+                        <div className="flex items-center justify-end gap-2">
+                          <Button size="sm" variant="outline" onClick={() => { setAdjustingId(s.id); setAdjustDelta("") }}>Adjust</Button>
+                          {canDelete && (
+                            <button
+                              onClick={() => handleDeleteStock(s)}
+                              className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-bg hover:text-danger"
+                              title="Delete stock record"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
                       )}
                     </td>
                   </tr>

@@ -92,3 +92,42 @@ export async function PATCH(
 
   return NextResponse.json(updated)
 }
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+
+  if (!(await hasPermission(session.user.id, "purchaseOrders.delete"))) {
+    return NextResponse.json({ error: "You don't have permission to delete purchase orders" }, { status: 403 })
+  }
+
+  const { id } = await params
+
+  const po = await prisma.purchaseOrder.findUnique({
+    where: { id, companyId: session.user.companyId },
+    include: {
+      lineItems: { include: { polineItemSerials: { select: { id: true } } } },
+    },
+  })
+
+  if (!po) {
+    return NextResponse.json({ error: "Purchase Order not found" }, { status: 404 })
+  }
+
+  const hasReceivedSerials = po.lineItems.some((li) => li.polineItemSerials.length > 0)
+  if (hasReceivedSerials || po.status === "RECEIVED") {
+    return NextResponse.json(
+      { error: "This purchase order has already been received and has inventory tracked against it. It can't be deleted." },
+      { status: 409 }
+    )
+  }
+
+  await prisma.purchaseOrder.delete({ where: { id } })
+
+  return NextResponse.json({ deleted: true })
+}
