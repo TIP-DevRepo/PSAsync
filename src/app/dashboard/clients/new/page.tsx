@@ -1,14 +1,22 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { Combobox } from "@/components/ui/combobox"
 import { formatPhoneInput } from "@/lib/phone"
 
 export default function NewClientPage() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [industries, setIndustries] = useState<{ id: string; name: string }[]>([])
+
+  useEffect(() => {
+    fetch("/api/industries")
+      .then((res) => res.json())
+      .then((data) => Array.isArray(data) && setIndustries(data))
+  }, [])
 
   const [form, setForm] = useState({
     name: "",
@@ -16,22 +24,14 @@ export default function NewClientPage() {
     email: "",
     phone: "",
     website: "",
-    industry: "",
+    industryId: "",
     status: "PROSPECT",
-    billAddress: "",
-    billCity: "",
-    billState: "",
-    billZip: "",
-    billCountry: "US",
-    shipAddress: "",
-    shipCity: "",
-    shipState: "",
-    shipZip: "",
-    shipCountry: "US",
+    paymentTerms: "",
+    isInternal: false,
     notes: "",
   })
 
-  function update(field: string, value: string) {
+  function update(field: string, value: string | boolean) {
     setForm({ ...form, [field]: value })
   }
 
@@ -126,99 +126,75 @@ export default function NewClientPage() {
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Industry</label>
-            <input
-              type="text"
-              value={form.industry}
-              onChange={(e) => update("industry", e.target.value)}
-              className="w-full rounded-md border px-3 py-2 text-sm"
+            <Combobox
+              options={industries.map((i) => ({ id: i.id, label: i.name }))}
+              value={form.industryId}
+              onChange={(id) => update("industryId", id)}
+              onCreate={async (label) => {
+                const res = await fetch("/api/industries", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ name: label }),
+                })
+                const created = await res.json()
+                setIndustries((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
+                return { id: created.id, label: created.name }
+              }}
+              placeholder="Search or create an industry..."
+              emptyLabel="No industry selected"
             />
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium mb-1">Status</label>
-          <select
-            value={form.status}
-            onChange={(e) => update("status", e.target.value)}
-            className="w-full rounded-md border px-3 py-2 text-sm"
-          >
-            <option value="PROSPECT">Prospect</option>
-            <option value="ACTIVE">Active</option>
-            <option value="INACTIVE">Inactive</option>
-            <option value="LOST">Lost</option>
-          </select>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className="block text-sm font-medium mb-1">Status</label>
+            <select
+              value={form.status}
+              onChange={(e) => update("status", e.target.value)}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            >
+              <option value="PROSPECT">Prospect</option>
+              <option value="ACTIVE">Active</option>
+              <option value="INACTIVE">Inactive</option>
+              <option value="LOST">Lost</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium mb-1">Payment Terms</label>
+            <select
+              value={form.paymentTerms}
+              onChange={(e) => update("paymentTerms", e.target.value)}
+              className="w-full rounded-md border px-3 py-2 text-sm"
+            >
+              <option value="">Not set</option>
+              <option value="Due on Receipt">Due on Receipt</option>
+              <option value="Net15">Net 15</option>
+              <option value="Net30">Net 30</option>
+              <option value="Net45">Net 45</option>
+              <option value="Net60">Net 60</option>
+              <option value="Prepaid">Prepaid</option>
+            </select>
+          </div>
         </div>
+
+        <label className="flex items-center gap-2 text-sm pt-1">
+          <input
+            type="checkbox"
+            checked={form.isInternal}
+            onChange={(e) => update("isInternal", e.target.checked)}
+            className="accent-primary"
+          />
+          This is your own company
+        </label>
+        <p className="text-xs text-muted-foreground">
+          Marking this client as your own company makes its locations available as ship-to options on Purchase Orders. Only one client can be marked this way.
+        </p>
       </div>
 
-      {/* Billing Address */}
-      <div className="rounded-md border p-4 space-y-3">
-        <h2 className="font-semibold text-sm">Billing Address</h2>
-        <input
-          type="text"
-          placeholder="Street Address"
-          value={form.billAddress}
-          onChange={(e) => update("billAddress", e.target.value)}
-          className="w-full rounded-md border px-3 py-2 text-sm"
-        />
-        <div className="grid grid-cols-3 gap-3">
-          <input
-            type="text"
-            placeholder="City"
-            value={form.billCity}
-            onChange={(e) => update("billCity", e.target.value)}
-            className="rounded-md border px-3 py-2 text-sm"
-          />
-          <input
-            type="text"
-            placeholder="State"
-            value={form.billState}
-            onChange={(e) => update("billState", e.target.value)}
-            className="rounded-md border px-3 py-2 text-sm"
-          />
-          <input
-            type="text"
-            placeholder="Zip"
-            value={form.billZip}
-            onChange={(e) => update("billZip", e.target.value)}
-            className="rounded-md border px-3 py-2 text-sm"
-          />
-        </div>
-      </div>
-
-      {/* Shipping Address */}
-      <div className="rounded-md border p-4 space-y-3">
-        <h2 className="font-semibold text-sm">Shipping Address</h2>
-        <input
-          type="text"
-          placeholder="Street Address"
-          value={form.shipAddress}
-          onChange={(e) => update("shipAddress", e.target.value)}
-          className="w-full rounded-md border px-3 py-2 text-sm"
-        />
-        <div className="grid grid-cols-3 gap-3">
-          <input
-            type="text"
-            placeholder="City"
-            value={form.shipCity}
-            onChange={(e) => update("shipCity", e.target.value)}
-            className="rounded-md border px-3 py-2 text-sm"
-          />
-          <input
-            type="text"
-            placeholder="State"
-            value={form.shipState}
-            onChange={(e) => update("shipState", e.target.value)}
-            className="rounded-md border px-3 py-2 text-sm"
-          />
-          <input
-            type="text"
-            placeholder="Zip"
-            value={form.shipZip}
-            onChange={(e) => update("shipZip", e.target.value)}
-            className="rounded-md border px-3 py-2 text-sm"
-          />
-        </div>
-      </div>
+      <p className="text-xs text-muted-foreground">
+        Billing and shipping locations are added from the client&apos;s Locations tab after it&apos;s created.
+      </p>
 
       {/* Notes */}
       <div className="rounded-md border p-4 space-y-3">

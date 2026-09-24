@@ -37,6 +37,16 @@ export async function POST(req: NextRequest) {
 
   const body = await req.json()
 
+  // Only one client per company can be marked as "your own company" at a
+  // time — same rule PATCH enforces, so a client created as internal
+  // doesn't end up alongside an existing one.
+  if (body.isInternal === true) {
+    await prisma.client.updateMany({
+      where: { companyId: session.user.companyId, isInternal: true },
+      data: { isInternal: false },
+    })
+  }
+
   const client = await prisma.client.create({
     data: {
       companyId: session.user.companyId,
@@ -48,6 +58,8 @@ export async function POST(req: NextRequest) {
       industryId: body.industryId || null,
       status: body.status || "PROSPECT",
       notes: body.notes || null,
+      paymentTerms: body.paymentTerms || null,
+      isInternal: body.isInternal === true,
     },
   })
 
