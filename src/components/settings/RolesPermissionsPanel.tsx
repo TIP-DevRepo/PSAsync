@@ -29,6 +29,8 @@ interface RolePermissions {
   clients: { create: boolean; edit: boolean; delete: boolean; viewAllClients: boolean }
   salesOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; generatePO: boolean; viewAll: boolean }
   purchaseOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; send: boolean; viewAll: boolean }
+  catalog: { delete: boolean }
+  inventory: { delete: boolean }
   settingsSections: {
     company: boolean
     users: boolean
@@ -93,6 +95,14 @@ const PURCHASE_ORDER_LABELS: [keyof RolePermissions["purchaseOrders"], string][]
   ["changeStatus", "Change purchase order status manually"],
   ["send", "Send purchase orders to vendors"],
   ["viewAll", "See all users' purchase orders (not just their own)"],
+]
+
+const CATALOG_LABELS: [keyof RolePermissions["catalog"], string][] = [
+  ["delete", "Delete catalog items"],
+]
+
+const INVENTORY_LABELS: [keyof RolePermissions["inventory"], string][] = [
+  ["delete", "Delete inventory assets and stock"],
 ]
 
 const SETTINGS_LABELS: [keyof RolePermissions["settingsSections"], string][] = [
@@ -230,6 +240,14 @@ export function RolesPermissionsPanel() {
   function updatePurchaseOrderPerm(key: keyof RolePermissions["purchaseOrders"], value: boolean) {
     if (!draft) return
     setDraft({ ...draft, permissions: { ...draft.permissions, purchaseOrders: { ...draft.permissions.purchaseOrders, [key]: value } } })
+  }
+  function updateCatalogPerm(key: keyof RolePermissions["catalog"], value: boolean) {
+    if (!draft) return
+    setDraft({ ...draft, permissions: { ...draft.permissions, catalog: { ...draft.permissions.catalog, [key]: value } } })
+  }
+  function updateInventoryPerm(key: keyof RolePermissions["inventory"], value: boolean) {
+    if (!draft) return
+    setDraft({ ...draft, permissions: { ...draft.permissions, inventory: { ...draft.permissions.inventory, [key]: value } } })
   }
   function updateSettingsPerm(key: keyof RolePermissions["settingsSections"], value: boolean) {
     if (!draft) return
@@ -440,6 +458,40 @@ export function RolesPermissionsPanel() {
                       checked={draft.isGlobalAdmin ? true : draft.permissions.purchaseOrders?.[key] ?? false}
                       disabled={isLocked}
                       onChange={(e) => updatePurchaseOrderPerm(key, e.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold text-sm mb-2">Catalog Actions</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {CATALOG_LABELS.map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.catalog?.[key] ?? false}
+                      disabled={isLocked}
+                      onChange={(e) => updateCatalogPerm(key, e.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold text-sm mb-2">Inventory Actions</h3>
+              <div className="grid grid-cols-2 gap-2">
+                {INVENTORY_LABELS.map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.inventory?.[key] ?? false}
+                      disabled={isLocked}
+                      onChange={(e) => updateInventoryPerm(key, e.target.checked)}
                     />
                     {label}
                   </label>

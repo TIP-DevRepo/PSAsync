@@ -13,6 +13,31 @@ const VALID_STATUSES = [
   "READY_TO_CLOSEOUT",
   "CLOSED",
 ]
+const VALID_PAYMENT_TERMS = ["", "Due on Receipt", "Net15", "Net30", "Net45", "Net60", "Prepaid"]
+
+// Payment terms, client PO number, and billing/shipping details stop being
+// editable once a Purchase Order has been generated from this order, same
+// line the existing Delete block already draws, so there's one consistent
+// definition of "too far along to change" rather than two different rules
+// for Delete and Edit.
+const EDIT_GATED_FIELDS = [
+  "clientPoNumber",
+  "paymentTerms",
+  "billContactName",
+  "billAddress",
+  "billAddress2",
+  "billCity",
+  "billState",
+  "billZip",
+  "billCountry",
+  "shipContactName",
+  "shipAddress",
+  "shipAddress2",
+  "shipCity",
+  "shipState",
+  "shipZip",
+  "shipCountry",
+]
 
 export async function GET(
   req: NextRequest,
@@ -90,8 +115,27 @@ export async function PATCH(
     data.status = body.status
   }
 
+  const touchesGatedField = EDIT_GATED_FIELDS.some((field) => body[field] !== undefined)
+  if (touchesGatedField) {
+    if (!(await hasPermission(session.user.id, "salesOrders.edit"))) {
+      return NextResponse.json({ error: "You don't have permission to edit this sales order" }, { status: 403 })
+    }
+    const linkedPOCount = await prisma.purchaseOrder.count({ where: { salesOrderId: id } })
+    if (linkedPOCount > 0) {
+      return NextResponse.json(
+        { error: "This sales order has purchase orders generated from it. Payment and billing/shipping details can no longer be edited." },
+        { status: 409 }
+      )
+    }
+  }
+
   if (body.clientPoNumber !== undefined) data.clientPoNumber = body.clientPoNumber || null
-  if (body.paymentTerms !== undefined) data.paymentTerms = body.paymentTerms || null
+  if (body.paymentTerms !== undefined) {
+    if (!VALID_PAYMENT_TERMS.includes(body.paymentTerms)) {
+      return NextResponse.json({ error: "Invalid payment terms" }, { status: 400 })
+    }
+    data.paymentTerms = body.paymentTerms || null
+  }
   if (body.internalNotes !== undefined) data.internalNotes = body.internalNotes || null
   if (body.clientNotes !== undefined) data.clientNotes = body.clientNotes || null
   if (body.billContactName !== undefined) data.billContactName = body.billContactName || null
@@ -119,4 +163,42 @@ export async function PATCH(
   }
 
   return NextResponse.json(updated)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+
+  if (!(await hasPermission(session.user.id, "salesOrders.delete"))) {
+    return NextResponse.json({ error: "You don't have permission to delete sales orders" }, { status: 403 })
+  }
+
+  const { id } = await params
+
+  const salesOrder = await prisma.salesOrder.findUnique({
+    where: { id, companyId: session.user.companyId },
+    include: { purchaseOrders: { select: { id: true } } },
+  })
+
+  if (!salesOrder) {
+    return NextResponse.json({ error: "Sales Order not found" }, { status: 404 })
+  }
+
+  if (salesOrder.purchaseOrders.length > 0) {
+    return NextResponse.json(
+      {
+        error: `This sales order has ${salesOrder.purchaseOrders.length} purchase order(s) linked to it and can't be deleted. Delete those first.`,
+      },
+      { status: 409 }
+    )
+  }
+
+  await prisma.salesOrder.delete({ where: { id } })
+
+  return NextResponse.json({ deleted: true })
 }

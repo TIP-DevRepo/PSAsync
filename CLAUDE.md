@@ -17,7 +17,7 @@ Key dependencies are newer than typical training data: Next.js 16.2.9, React 19.
 Keep changes scoped to what was asked. Don't refactor, rename, or "clean up" unrelated code while fixing a bug or adding a feature — separate cleanup into its own explicitly-requested change.
 
 # Secrets and config
-`.env*` files are gitignored — never commit them, print their contents, or hardcode values from them into source. If a task needs a new env var, add it to `.env` locally and call out in your summary that the user needs to set it (and add it to `.env.development.local` / deployment config as applicable).
+`.env*` files are gitignored. Never read or write any `.env*` file (`.env`, `.env.local`, `.env.development.local`, etc.) by any means: no `Read`, `cat`, `Get-Content`, `grep`/`Select-String` over them, no `Write`/`Edit`, no shell redirection into them. Never commit them, print their contents, or hardcode values from them into source. If a task needs a new env var, tell the user in your summary which variable to add, to which file, and why. Do not add it yourself.
 
 # Branching and commits (project conventions)
 - Never work directly on `main`. All work happens on `feature/*` or `bugfix/*` branches created off `dev`, or directly on `dev` for small fixes.

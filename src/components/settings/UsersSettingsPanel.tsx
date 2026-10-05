@@ -54,7 +54,12 @@ export function UsersSettingsPanel() {
       .then((res) => res.json())
       .then((session) => {
         const role = session?.user?.role
-        setMyRank(role?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : role?.rank ?? 0)
+        // Anyone with the actual Manage Users permission gets full use of
+        // this dropdown, same as Global Admin — rank is only meant to
+        // restrict which roles a permitted user can hand out, not whether
+        // they can use the feature at all.
+        const canManageUsers = !!role?.isGlobalAdmin || !!role?.permissions?.settingsSections?.users
+        setMyRank(canManageUsers ? Number.MAX_SAFE_INTEGER : role?.rank ?? 0)
       })
   }, [])
 

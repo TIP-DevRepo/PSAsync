@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { hasPermission } from "@/lib/permissions"
 
 export async function GET(
   req: NextRequest,
@@ -169,4 +170,78 @@ export async function PATCH(
   }
 
   return NextResponse.json(item)
+}
+
+export async function DELETE(
+  req: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  const session = await auth()
+  if (!session?.user) {
+    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+
+  if (!(await hasPermission(session.user.id, "catalog.delete"))) {
+    return NextResponse.json({ error: "You don't have permission to delete catalog items" }, { status: 403 })
+  }
+
+  const { id } = await params
+  const companyId = session.user.companyId
+
+  const item = await prisma.catalogItem.findUnique({
+    where: { id, companyId },
+    include: {
+      quoteLineItems: { select: { id: true } },
+      soLineItems: { select: { id: true } },
+      poLineItems: { select: { id: true } },
+      inventoryAssets: { select: { id: true } },
+      inventoryStocks: { select: { id: true } },
+      customPricing: { select: { id: true } },
+    },
+  })
+
+  if (!item) {
+    return NextResponse.json({ error: "Item not found" }, { status: 404 })
+  }
+
+  if (item.quoteLineItems.length > 0) {
+    return NextResponse.json(
+      { error: `This item is used on ${item.quoteLineItems.length} quote(s) and can't be deleted.` },
+      { status: 409 }
+    )
+  }
+  if (item.soLineItems.length > 0) {
+    return NextResponse.json(
+      { error: `This item is used on ${item.soLineItems.length} sales order(s) and can't be deleted.` },
+      { status: 409 }
+    )
+  }
+  if (item.poLineItems.length > 0) {
+    return NextResponse.json(
+      { error: `This item is used on ${item.poLineItems.length} purchase order(s) and can't be deleted.` },
+      { status: 409 }
+    )
+  }
+  if (item.inventoryAssets.length > 0) {
+    return NextResponse.json(
+      { error: `This item has ${item.inventoryAssets.length} inventory asset(s) tracked against it and can't be deleted.` },
+      { status: 409 }
+    )
+  }
+  if (item.inventoryStocks.length > 0) {
+    return NextResponse.json(
+      { error: "This item has pooled inventory stock tracked against it and can't be deleted." },
+      { status: 409 }
+    )
+  }
+  if (item.customPricing.length > 0) {
+    return NextResponse.json(
+      { error: "This item has client-specific custom pricing set up and can't be deleted. Remove that pricing first." },
+      { status: 409 }
+    )
+  }
+
+  await prisma.catalogItem.delete({ where: { id } })
+
+  return NextResponse.json({ deleted: true })
 }

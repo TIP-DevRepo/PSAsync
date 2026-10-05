@@ -1,10 +1,10 @@
 import Image from "next/image"
-import { PRODUCT_UPDATES, PSASYNC_OVERVIEW, type UpdateCategory } from "@/lib/product-updates"
+import { PRODUCT_UPDATES, PSASYNC_OVERVIEW, type ProductUpdate, type UpdateCategory } from "@/lib/product-updates"
 
 const CATEGORY_COLORS: Record<UpdateCategory, string> = {
-  "New Feature": "bg-success-bg text-success",
-  Improvement: "bg-info-bg text-info",
-  Fix: "bg-warning-bg text-warning",
+  Added: "bg-success-bg text-success",
+  Improved: "bg-info-bg text-info",
+  Fixed: "bg-warning-bg text-warning",
 }
 
 function formatDate(dateStr: string) {
@@ -13,6 +13,27 @@ function formatDate(dateStr: string) {
     month: "long",
     day: "numeric",
   })
+}
+
+function UpdateSections({ sections }: { sections: ProductUpdate["sections"] }) {
+  return (
+    <div className="space-y-3">
+      {sections
+        .filter((section) => section.items.length > 0)
+        .map((section) => (
+          <div key={section.category} className="space-y-1.5">
+            <span className={`inline-block rounded-full px-2 py-1 text-xs font-medium ${CATEGORY_COLORS[section.category]}`}>
+              {section.category}
+            </span>
+            <ul className="list-disc space-y-1 pl-5 text-sm text-foreground">
+              {section.items.map((item, index) => (
+                <li key={index}>{item}</li>
+              ))}
+            </ul>
+          </div>
+        ))}
+    </div>
+  )
 }
 
 export default function UpdatesPage() {
@@ -41,14 +62,11 @@ export default function UpdatesPage() {
             <span className="rounded-full bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground">
               Latest
             </span>
-            <span className={`rounded-full px-2 py-1 text-xs font-medium ${CATEGORY_COLORS[latest.category]}`}>
-              {latest.category}
-            </span>
             <span className="text-xs text-muted-foreground ml-auto">{latest.version}</span>
           </div>
           <h2 className="text-heading font-semibold text-foreground">{latest.title}</h2>
           <p className="text-sm text-muted-foreground">{formatDate(latest.date)}</p>
-          <p className="text-sm text-foreground">{latest.description}</p>
+          <UpdateSections sections={latest.sections} />
         </div>
       )}
 
@@ -62,14 +80,11 @@ export default function UpdatesPage() {
                 className="rounded-lg border border-border bg-card shadow-card p-4 space-y-2"
               >
                 <div className="flex items-center gap-2">
-                  <span className={`rounded-full px-2 py-1 text-xs font-medium ${CATEGORY_COLORS[update.category]}`}>
-                    {update.category}
-                  </span>
+                  <h4 className="font-medium text-foreground">{update.title}</h4>
                   <span className="text-xs text-muted-foreground ml-auto">{update.version}</span>
                 </div>
-                <h4 className="font-medium text-foreground">{update.title}</h4>
                 <p className="text-xs text-muted-foreground">{formatDate(update.date)}</p>
-                <p className="text-sm text-muted-foreground">{update.description}</p>
+                <UpdateSections sections={update.sections} />
               </div>
             ))}
           </div>
