@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
 
 interface VendorOption {
   id: string
@@ -21,18 +22,6 @@ interface ClientOption {
   isInternal: boolean
 }
 
-interface ClientLocationOption {
-  id: string
-  name: string
-  address: string | null
-  address2: string | null
-  city: string | null
-  state: string | null
-  zip: string | null
-  country: string | null
-  shippingContact: { firstName: string; lastName: string } | null
-}
-
 export default function NewPurchaseOrderPage() {
   const router = useRouter()
   const [vendors, setVendors] = useState<VendorOption[]>([])
@@ -45,12 +34,11 @@ export default function NewPurchaseOrderPage() {
   // shipping snapshot, or picked directly from a client's saved shipping
   // location if no Sales Order is linked.
   const [shipClientId, setShipClientId] = useState("")
-  const [shipClientLocations, setShipClientLocations] = useState<ClientLocationOption[]>([])
   const [shipClientLocationId, setShipClientLocationId] = useState("")
 
   // Ship-to-own-company resolution: locations belonging to whichever
   // client is flagged isInternal.
-  const [ownLocations, setOwnLocations] = useState<ClientLocationOption[]>([])
+  const [internalClientId, setInternalClientId] = useState("")
   const [ownLocationId, setOwnLocationId] = useState("")
   const [noInternalClient, setNoInternalClient] = useState(false)
 
@@ -86,9 +74,7 @@ export default function NewPurchaseOrderPage() {
           setNoInternalClient(true)
           return
         }
-        fetch(`/api/clients/${internal.id}`)
-          .then((res) => res.json())
-          .then((full) => setOwnLocations(full.locations ?? []))
+        setInternalClientId(internal.id)
       })
   }, [])
 
@@ -118,46 +104,38 @@ export default function NewPurchaseOrderPage() {
     }))
   }
 
-  async function handleShipClientSelect(clientId: string) {
+  function handleShipClientSelect(clientId: string) {
     setShipClientId(clientId)
     setShipClientLocationId("")
-    setShipClientLocations([])
-    if (!clientId) return
-
-    const res = await fetch(`/api/clients/${clientId}`)
-    const client = await res.json()
-    setShipClientLocations(client.locations ?? [])
   }
 
-  function applyShipClientLocation(locationId: string) {
+  function applyShipClientLocation(locationId: string, address: ClientLocationAddress | null) {
     setShipClientLocationId(locationId)
-    const loc = shipClientLocations.find((l) => l.id === locationId)
-    if (!loc) return
+    if (!address) return
     setForm((prev) => ({
       ...prev,
-      shipContactName: loc.shippingContact ? `${loc.shippingContact.firstName} ${loc.shippingContact.lastName}` : "",
-      shipAddress: loc.address ?? "",
-      shipAddress2: loc.address2 ?? "",
-      shipCity: loc.city ?? "",
-      shipState: loc.state ?? "",
-      shipZip: loc.zip ?? "",
-      shipCountry: loc.country ?? "",
+      shipContactName: address.contactName,
+      shipAddress: address.address,
+      shipAddress2: address.address2,
+      shipCity: address.city,
+      shipState: address.state,
+      shipZip: address.zip,
+      shipCountry: address.country,
     }))
   }
 
-  function applyOwnLocation(locationId: string) {
+  function applyOwnLocation(locationId: string, address: ClientLocationAddress | null) {
     setOwnLocationId(locationId)
-    const loc = ownLocations.find((l) => l.id === locationId)
-    if (!loc) return
+    if (!address) return
     setForm((prev) => ({
       ...prev,
-      shipContactName: loc.shippingContact ? `${loc.shippingContact.firstName} ${loc.shippingContact.lastName}` : "",
-      shipAddress: loc.address ?? "",
-      shipAddress2: loc.address2 ?? "",
-      shipCity: loc.city ?? "",
-      shipState: loc.state ?? "",
-      shipZip: loc.zip ?? "",
-      shipCountry: loc.country ?? "",
+      shipContactName: address.contactName,
+      shipAddress: address.address,
+      shipAddress2: address.address2,
+      shipCity: address.city,
+      shipState: address.state,
+      shipZip: address.zip,
+      shipCountry: address.country,
     }))
   }
 
@@ -301,18 +279,13 @@ export default function NewPurchaseOrderPage() {
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
-                {shipClientLocations.length > 0 && (
-                  <select
-                    value={shipClientLocationId}
-                    onChange={(e) => applyShipClientLocation(e.target.value)}
-                    className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  >
-                    <option value="">Select a location...</option>
-                    {shipClientLocations.map((loc) => (
-                      <option key={loc.id} value={loc.id}>{loc.name}</option>
-                    ))}
-                  </select>
-                )}
+                <ClientLocationPicker
+                  clientId={shipClientId}
+                  contactType="shipping"
+                  value={shipClientLocationId}
+                  onSelect={applyShipClientLocation}
+                  className="mt-2 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                />
               </div>
             )}
           </div>
@@ -325,16 +298,12 @@ export default function NewPurchaseOrderPage() {
             ) : (
               <div>
                 <label className="block text-xs text-muted-foreground mb-1">Ship to which of your locations?</label>
-                <select
+                <ClientLocationPicker
+                  clientId={internalClientId}
+                  contactType="shipping"
                   value={ownLocationId}
-                  onChange={(e) => applyOwnLocation(e.target.value)}
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                >
-                  <option value="">Select a location...</option>
-                  {ownLocations.map((loc) => (
-                    <option key={loc.id} value={loc.id}>{loc.name}</option>
-                  ))}
-                </select>
+                  onSelect={applyOwnLocation}
+                />
               </div>
             )}
           </div>

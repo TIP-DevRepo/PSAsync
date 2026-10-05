@@ -10,6 +10,7 @@ import { confirmDialog } from "@/lib/confirm-dialog"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { SOLineItemBuilder, type SOCatalogOption, type SOVendorOption, type SOLineItemBuilderItem } from "@/components/sales-orders/SOLineItemBuilder"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
+import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface SOLineItem {
@@ -117,6 +118,8 @@ const STATUS_OPTIONS = [
   "CLOSED",
 ]
 
+const PAYMENT_TERMS_OPTIONS = ["", "Due on Receipt", "Net15", "Net30", "Net45", "Net60", "Prepaid"]
+
 const PO_STATUS_COLORS: Record<string, string> = {
   DRAFT: "bg-muted text-muted-foreground",
   PARTS_ORDERED: "bg-info-bg text-info",
@@ -168,6 +171,7 @@ export default function SalesOrderDetailPage({
   const [showGeneratePO, setShowGeneratePO] = useState(false)
   const [activeTab, setActiveTab] = useState<SOTabKey>("details")
   const [canDelete, setCanDelete] = useState(false)
+  const [canEdit, setCanEdit] = useState(false)
 
   const [comments, setComments] = useState<SOCommentType[]>([])
   const [newComment, setNewComment] = useState("")
@@ -220,6 +224,7 @@ export default function SalesOrderDetailPage({
       .then((session) => {
         const role = session?.user?.role
         setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.salesOrders?.delete)
+        setCanEdit(!!role?.isGlobalAdmin || !!role?.permissions?.salesOrders?.edit)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
@@ -256,12 +261,67 @@ export default function SalesOrderDetailPage({
   }
 
   async function handleUpdateField(field: string, value: string | null) {
-    await fetch(`/api/sales-orders/${id}`, {
+    const res = await fetch(`/api/sales-orders/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: value }),
     })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't save that change", data.error)
+    }
     loadSO()
+  }
+
+  // Picking a saved location copies its address in as a snapshot, same as
+  // creating a Sales Order does. Sales Orders don't store a real location
+  // link (same as creation), only the address fields themselves.
+  async function handleApplyBillLocation(locationId: string, address: ClientLocationAddress | null) {
+    if (!address) return
+    const res = await fetch(`/api/sales-orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        billContactName: address.contactName || null,
+        billAddress: address.address || null,
+        billAddress2: address.address2 || null,
+        billCity: address.city || null,
+        billState: address.state || null,
+        billZip: address.zip || null,
+        billCountry: address.country || null,
+      }),
+    })
+    if (res.ok) {
+      toast.success("Billing address updated")
+      loadSO()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't update billing address", data.error)
+    }
+  }
+
+  async function handleApplyShipLocation(locationId: string, address: ClientLocationAddress | null) {
+    if (!address) return
+    const res = await fetch(`/api/sales-orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        shipContactName: address.contactName || null,
+        shipAddress: address.address || null,
+        shipAddress2: address.address2 || null,
+        shipCity: address.city || null,
+        shipState: address.state || null,
+        shipZip: address.zip || null,
+        shipCountry: address.country || null,
+      }),
+    })
+    if (res.ok) {
+      toast.success("Shipping address updated")
+      loadSO()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't update shipping address", data.error)
+    }
   }
 
   async function handlePostComment() {
@@ -351,6 +411,11 @@ export default function SalesOrderDetailPage({
 
   const pricedItems = so.lineItems.filter((li) => !li.isTextBlock)
   const subtotal = pricedItems.reduce((sum, li) => sum + lineTotal(li), 0)
+  // Same line the Delete block already draws: once a Purchase Order has
+  // been generated from this order, payment and billing/shipping details
+  // stop being editable.
+  const locked = so.purchaseOrders.length > 0
+  const canEditFields = canEdit && !locked
 
   const bundleChildIds = new Set<string>()
   so.lineItems.forEach((li) => {
@@ -427,25 +492,202 @@ export default function SalesOrderDetailPage({
               <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1 text-sm">
                 <p><span className="text-muted-foreground">Client:</span> <span className="text-foreground">{so.client.name}</span></p>
                 <p><span className="text-muted-foreground">Owner:</span> <span className="text-foreground">{so.user.name}</span></p>
-                <p><span className="text-muted-foreground">Client PO #:</span> <span className="text-foreground">{so.clientPoNumber ?? "—"}</span></p>
-                <p><span className="text-muted-foreground">Payment Terms:</span> <span className="text-foreground">{so.paymentTerms ?? "—"}</span></p>
+                {canEditFields ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Client PO #:</span>
+                    <input
+                      key={`client-po-${so.clientPoNumber}`}
+                      type="text"
+                      defaultValue={so.clientPoNumber ?? ""}
+                      onBlur={(e) => handleUpdateField("clientPoNumber", e.target.value || null)}
+                      className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  </div>
+                ) : (
+                  <p><span className="text-muted-foreground">Client PO #:</span> <span className="text-foreground">{so.clientPoNumber ?? "—"}</span></p>
+                )}
+                {canEditFields ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Payment Terms:</span>
+                    <select
+                      value={so.paymentTerms ?? ""}
+                      onChange={(e) => handleUpdateField("paymentTerms", e.target.value || null)}
+                      className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {PAYMENT_TERMS_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>{opt || "Not set"}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <p><span className="text-muted-foreground">Payment Terms:</span> <span className="text-foreground">{so.paymentTerms ?? "—"}</span></p>
+                )}
                 <p><span className="text-muted-foreground">Created:</span> <span className="text-foreground">{new Date(so.createdAt).toLocaleDateString()}</span></p>
+                {canEdit && locked && (
+                  <p className="text-xs text-muted-foreground pt-1">
+                    This sales order has purchase orders generated from it, so payment, billing, and shipping details are locked.
+                  </p>
+                )}
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1 text-sm">
                   <h2 className="font-semibold text-sm mb-1 text-foreground">Bill To</h2>
-                  <p className="text-foreground">{so.billContactName ?? "—"}</p>
-                  <p className="text-muted-foreground">{so.billAddress ?? "—"}</p>
-                  {so.billAddress2 && <p className="text-muted-foreground">{so.billAddress2}</p>}
-                  <p className="text-muted-foreground">{[so.billCity, so.billState, so.billZip].filter(Boolean).join(", ")}</p>
+                  {canEditFields ? (
+                    <div className="space-y-2 pt-1">
+                      <ClientLocationPicker
+                        clientId={so.client.id}
+                        contactType="billing"
+                        value=""
+                        onSelect={handleApplyBillLocation}
+                        placeholder="Apply a saved location..."
+                      />
+                      <input
+                        key={`bill-contact-${so.billContactName}`}
+                        type="text"
+                        placeholder="Contact Name"
+                        defaultValue={so.billContactName ?? ""}
+                        onBlur={(e) => handleUpdateField("billContactName", e.target.value || null)}
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <input
+                        key={`bill-address-${so.billAddress}`}
+                        type="text"
+                        placeholder="Address"
+                        defaultValue={so.billAddress ?? ""}
+                        onBlur={(e) => handleUpdateField("billAddress", e.target.value || null)}
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <input
+                        key={`bill-address2-${so.billAddress2}`}
+                        type="text"
+                        placeholder="Suite, Apt, Unit (optional)"
+                        defaultValue={so.billAddress2 ?? ""}
+                        onBlur={(e) => handleUpdateField("billAddress2", e.target.value || null)}
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <div className="grid grid-cols-3 gap-2">
+                        <input
+                          key={`bill-city-${so.billCity}`}
+                          type="text"
+                          placeholder="City"
+                          defaultValue={so.billCity ?? ""}
+                          onBlur={(e) => handleUpdateField("billCity", e.target.value || null)}
+                          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                        <input
+                          key={`bill-state-${so.billState}`}
+                          type="text"
+                          placeholder="State"
+                          defaultValue={so.billState ?? ""}
+                          onBlur={(e) => handleUpdateField("billState", e.target.value || null)}
+                          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                        <input
+                          key={`bill-zip-${so.billZip}`}
+                          type="text"
+                          placeholder="Zip"
+                          defaultValue={so.billZip ?? ""}
+                          onBlur={(e) => handleUpdateField("billZip", e.target.value || null)}
+                          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                      </div>
+                      <input
+                        key={`bill-country-${so.billCountry}`}
+                        type="text"
+                        placeholder="Country"
+                        defaultValue={so.billCountry ?? ""}
+                        onBlur={(e) => handleUpdateField("billCountry", e.target.value || null)}
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-foreground">{so.billContactName ?? "—"}</p>
+                      <p className="text-muted-foreground">{so.billAddress ?? "—"}</p>
+                      {so.billAddress2 && <p className="text-muted-foreground">{so.billAddress2}</p>}
+                      <p className="text-muted-foreground">{[so.billCity, so.billState, so.billZip].filter(Boolean).join(", ")}</p>
+                    </>
+                  )}
                 </div>
                 <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1 text-sm">
                   <h2 className="font-semibold text-sm mb-1 text-foreground">Ship To</h2>
-                  <p className="text-foreground">{so.shipContactName ?? "—"}</p>
-                  <p className="text-muted-foreground">{so.shipAddress ?? "—"}</p>
-                  {so.shipAddress2 && <p className="text-muted-foreground">{so.shipAddress2}</p>}
-                  <p className="text-muted-foreground">{[so.shipCity, so.shipState, so.shipZip].filter(Boolean).join(", ")}</p>
+                  {canEditFields ? (
+                    <div className="space-y-2 pt-1">
+                      <ClientLocationPicker
+                        clientId={so.client.id}
+                        contactType="shipping"
+                        value=""
+                        onSelect={handleApplyShipLocation}
+                        placeholder="Apply a saved location..."
+                      />
+                      <input
+                        key={`ship-contact-${so.shipContactName}`}
+                        type="text"
+                        placeholder="Contact Name"
+                        defaultValue={so.shipContactName ?? ""}
+                        onBlur={(e) => handleUpdateField("shipContactName", e.target.value || null)}
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <input
+                        key={`ship-address-${so.shipAddress}`}
+                        type="text"
+                        placeholder="Address"
+                        defaultValue={so.shipAddress ?? ""}
+                        onBlur={(e) => handleUpdateField("shipAddress", e.target.value || null)}
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <input
+                        key={`ship-address2-${so.shipAddress2}`}
+                        type="text"
+                        placeholder="Suite, Apt, Unit (optional)"
+                        defaultValue={so.shipAddress2 ?? ""}
+                        onBlur={(e) => handleUpdateField("shipAddress2", e.target.value || null)}
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <div className="grid grid-cols-3 gap-2">
+                        <input
+                          key={`ship-city-${so.shipCity}`}
+                          type="text"
+                          placeholder="City"
+                          defaultValue={so.shipCity ?? ""}
+                          onBlur={(e) => handleUpdateField("shipCity", e.target.value || null)}
+                          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                        <input
+                          key={`ship-state-${so.shipState}`}
+                          type="text"
+                          placeholder="State"
+                          defaultValue={so.shipState ?? ""}
+                          onBlur={(e) => handleUpdateField("shipState", e.target.value || null)}
+                          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                        <input
+                          key={`ship-zip-${so.shipZip}`}
+                          type="text"
+                          placeholder="Zip"
+                          defaultValue={so.shipZip ?? ""}
+                          onBlur={(e) => handleUpdateField("shipZip", e.target.value || null)}
+                          className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        />
+                      </div>
+                      <input
+                        key={`ship-country-${so.shipCountry}`}
+                        type="text"
+                        placeholder="Country"
+                        defaultValue={so.shipCountry ?? ""}
+                        onBlur={(e) => handleUpdateField("shipCountry", e.target.value || null)}
+                        className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    </div>
+                  ) : (
+                    <>
+                      <p className="text-foreground">{so.shipContactName ?? "—"}</p>
+                      <p className="text-muted-foreground">{so.shipAddress ?? "—"}</p>
+                      {so.shipAddress2 && <p className="text-muted-foreground">{so.shipAddress2}</p>}
+                      <p className="text-muted-foreground">{[so.shipCity, so.shipState, so.shipZip].filter(Boolean).join(", ")}</p>
+                    </>
+                  )}
                 </div>
               </div>
 

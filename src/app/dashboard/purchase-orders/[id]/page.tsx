@@ -11,6 +11,7 @@ import { POLineItemBuilder, type POLineItemBuilderItem, type POCatalogOption } f
 import type { ReceivePayload } from "@/components/purchase-orders/ReceiveModal"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
 import { buildLocationPathOptions, type LocationPathOption } from "@/lib/inventory/locationPaths"
+import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Shipment {
@@ -73,6 +74,7 @@ const PO_TABS: { key: POTabKey; label: string }[] = [
 ]
 
 const STATUS_OPTIONS = ["DRAFT", "PARTS_ORDERED", "RECEIVED", "ON_HOLD", "BACKORDERED", "CANCELLED"]
+const PAYMENT_TYPE_OPTIONS = ["Due on Receipt", "Net15", "Net30", "Net45", "Net60", "Prepaid", "Credit Card"]
 
 function statusLabel(status: string) {
   return status
@@ -105,6 +107,8 @@ export default function PurchaseOrderDetailPage({
   const [changingStatus, setChangingStatus] = useState(false)
   const [activeTab, setActiveTab] = useState<POTabKey>("details")
   const [canDelete, setCanDelete] = useState(false)
+  const [canEdit, setCanEdit] = useState(false)
+  const [internalClientId, setInternalClientId] = useState("")
 
   const [comments, setComments] = useState<POCommentType[]>([])
   const [newComment, setNewComment] = useState("")
@@ -160,6 +164,16 @@ export default function PurchaseOrderDetailPage({
       .then((session) => {
         const role = session?.user?.role
         setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.purchaseOrders?.delete)
+        setCanEdit(!!role?.isGlobalAdmin || !!role?.permissions?.purchaseOrders?.edit)
+      })
+    // Resolved up front so the "ships to us" location picker has a client
+    // to scope itself to, same lookup the New Purchase Order page does.
+    fetch("/api/clients")
+      .then((res) => res.json())
+      .then((data: { id: string; isInternal: boolean }[]) => {
+        if (!Array.isArray(data)) return
+        const internal = data.find((c) => c.isInternal)
+        if (internal) setInternalClientId(internal.id)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
@@ -234,12 +248,49 @@ export default function PurchaseOrderDetailPage({
   }
 
   async function handleUpdateField(field: string, value: string | null) {
-    await fetch(`/api/purchase-orders/${id}`, {
+    const res = await fetch(`/api/purchase-orders/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ [field]: value }),
     })
-    loadPO()
+    if (res.ok) {
+      loadPO()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't save that change", data.error)
+      loadPO()
+    }
+  }
+
+  // Picking a saved location copies its address in as a snapshot, same as
+  // creating a Purchase Order does — if it's a ship-to-client PO, the
+  // real location link is updated too, matching create's behavior exactly.
+  async function handleApplyShipLocation(locationId: string, address: ClientLocationAddress | null) {
+    if (!address) return
+    const payload: Record<string, unknown> = {
+      shipContactName: address.contactName || null,
+      shipAddress: address.address || null,
+      shipAddress2: address.address2 || null,
+      shipCity: address.city || null,
+      shipState: address.state || null,
+      shipZip: address.zip || null,
+      shipCountry: address.country || null,
+    }
+    if (po?.shipToClient) {
+      payload.shipClientLocationId = locationId || null
+    }
+    const res = await fetch(`/api/purchase-orders/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    })
+    if (res.ok) {
+      toast.success("Shipping address updated")
+      loadPO()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't update shipping address", data.error)
+    }
   }
 
   async function handlePostComment() {
@@ -354,6 +405,11 @@ export default function PurchaseOrderDetailPage({
 
   const total = po.lineItems.reduce((sum, li) => sum + li.unitCost * li.quantity, 0)
   const receivedCount = po.lineItems.filter((li) => li.received).length
+  // Same line the Delete block already draws: once anything's been
+  // received, payment and shipping details stop being editable.
+  const locked = po.status === "RECEIVED" || receivedCount > 0
+  const canEditFields = canEdit && !locked
+  const shipLocationClientId = po.shipToClient ? po.shipToClientRef?.id ?? "" : internalClientId
 
   return (
     <div className="w-full space-y-6">
@@ -403,7 +459,22 @@ export default function PurchaseOrderDetailPage({
               <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-1 text-sm">
                 <p><span className="text-muted-foreground">Vendor:</span> <span className="text-foreground">{po.vendor.name}</span></p>
                 <p><span className="text-muted-foreground">Owner:</span> <span className="text-foreground">{po.user.name}</span></p>
-                <p><span className="text-muted-foreground">Payment Terms:</span> <span className="text-foreground">{po.paymentType}</span></p>
+                {canEditFields ? (
+                  <div className="flex items-center gap-2">
+                    <span className="text-muted-foreground">Payment Terms:</span>
+                    <select
+                      value={po.paymentType}
+                      onChange={(e) => handleUpdateField("paymentType", e.target.value)}
+                      className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    >
+                      {PAYMENT_TYPE_OPTIONS.map((opt) => (
+                        <option key={opt} value={opt}>{opt}</option>
+                      ))}
+                    </select>
+                  </div>
+                ) : (
+                  <p><span className="text-muted-foreground">Payment Terms:</span> <span className="text-foreground">{po.paymentType}</span></p>
+                )}
                 <p><span className="text-muted-foreground">Created:</span> <span className="text-foreground">{new Date(po.createdAt).toLocaleDateString()}</span></p>
                 <div className="flex items-center gap-2 pt-1">
                   <span className="text-muted-foreground">Expected:</span>
@@ -421,13 +492,92 @@ export default function PurchaseOrderDetailPage({
                 <h2 className="font-semibold text-sm mb-1 text-foreground">
                   Ship To {po.shipToClient ? "(Client)" : "(Us)"}
                 </h2>
-                <p className="text-foreground">{po.shipContactName ?? "—"}</p>
-                <p className="text-muted-foreground">{po.shipAddress ?? "—"}</p>
-                {po.shipAddress2 && <p className="text-muted-foreground">{po.shipAddress2}</p>}
-                <p className="text-muted-foreground">{[po.shipCity, po.shipState, po.shipZip].filter(Boolean).join(", ")}</p>
+                {canEditFields ? (
+                  <div className="space-y-2 pt-1">
+                    {shipLocationClientId && (
+                      <ClientLocationPicker
+                        clientId={shipLocationClientId}
+                        contactType="shipping"
+                        value={po.shipToClient ? po.shipToClientLocation?.id ?? "" : ""}
+                        onSelect={handleApplyShipLocation}
+                        placeholder="Apply a saved location..."
+                      />
+                    )}
+                    <input
+                      key={`ship-contact-${po.shipContactName}`}
+                      type="text"
+                      placeholder="Contact Name"
+                      defaultValue={po.shipContactName ?? ""}
+                      onBlur={(e) => handleUpdateField("shipContactName", e.target.value || null)}
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <input
+                      key={`ship-address-${po.shipAddress}`}
+                      type="text"
+                      placeholder="Address"
+                      defaultValue={po.shipAddress ?? ""}
+                      onBlur={(e) => handleUpdateField("shipAddress", e.target.value || null)}
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <input
+                      key={`ship-address2-${po.shipAddress2}`}
+                      type="text"
+                      placeholder="Suite, Apt, Unit (optional)"
+                      defaultValue={po.shipAddress2 ?? ""}
+                      onBlur={(e) => handleUpdateField("shipAddress2", e.target.value || null)}
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                    <div className="grid grid-cols-3 gap-2">
+                      <input
+                        key={`ship-city-${po.shipCity}`}
+                        type="text"
+                        placeholder="City"
+                        defaultValue={po.shipCity ?? ""}
+                        onBlur={(e) => handleUpdateField("shipCity", e.target.value || null)}
+                        className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <input
+                        key={`ship-state-${po.shipState}`}
+                        type="text"
+                        placeholder="State"
+                        defaultValue={po.shipState ?? ""}
+                        onBlur={(e) => handleUpdateField("shipState", e.target.value || null)}
+                        className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                      <input
+                        key={`ship-zip-${po.shipZip}`}
+                        type="text"
+                        placeholder="Zip"
+                        defaultValue={po.shipZip ?? ""}
+                        onBlur={(e) => handleUpdateField("shipZip", e.target.value || null)}
+                        className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      />
+                    </div>
+                    <input
+                      key={`ship-country-${po.shipCountry}`}
+                      type="text"
+                      placeholder="Country"
+                      defaultValue={po.shipCountry ?? ""}
+                      onBlur={(e) => handleUpdateField("shipCountry", e.target.value || null)}
+                      className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <p className="text-foreground">{po.shipContactName ?? "—"}</p>
+                    <p className="text-muted-foreground">{po.shipAddress ?? "—"}</p>
+                    {po.shipAddress2 && <p className="text-muted-foreground">{po.shipAddress2}</p>}
+                    <p className="text-muted-foreground">{[po.shipCity, po.shipState, po.shipZip].filter(Boolean).join(", ")}</p>
+                  </>
+                )}
                 {po.shipToClient && po.receivingClientLocation && (
                   <p className="text-xs text-muted-foreground pt-1">
                     Inventory location for received items: <span className="text-foreground">{po.receivingClientLocation.name}</span>
+                  </p>
+                )}
+                {canEdit && locked && (
+                  <p className="text-xs text-muted-foreground pt-1">
+                    This purchase order has been received, so payment and shipping details are locked.
                   </p>
                 )}
               </div>

@@ -13,6 +13,31 @@ const VALID_STATUSES = [
   "READY_TO_CLOSEOUT",
   "CLOSED",
 ]
+const VALID_PAYMENT_TERMS = ["", "Due on Receipt", "Net15", "Net30", "Net45", "Net60", "Prepaid"]
+
+// Payment terms, client PO number, and billing/shipping details stop being
+// editable once a Purchase Order has been generated from this order, same
+// line the existing Delete block already draws, so there's one consistent
+// definition of "too far along to change" rather than two different rules
+// for Delete and Edit.
+const EDIT_GATED_FIELDS = [
+  "clientPoNumber",
+  "paymentTerms",
+  "billContactName",
+  "billAddress",
+  "billAddress2",
+  "billCity",
+  "billState",
+  "billZip",
+  "billCountry",
+  "shipContactName",
+  "shipAddress",
+  "shipAddress2",
+  "shipCity",
+  "shipState",
+  "shipZip",
+  "shipCountry",
+]
 
 export async function GET(
   req: NextRequest,
@@ -90,8 +115,27 @@ export async function PATCH(
     data.status = body.status
   }
 
+  const touchesGatedField = EDIT_GATED_FIELDS.some((field) => body[field] !== undefined)
+  if (touchesGatedField) {
+    if (!(await hasPermission(session.user.id, "salesOrders.edit"))) {
+      return NextResponse.json({ error: "You don't have permission to edit this sales order" }, { status: 403 })
+    }
+    const linkedPOCount = await prisma.purchaseOrder.count({ where: { salesOrderId: id } })
+    if (linkedPOCount > 0) {
+      return NextResponse.json(
+        { error: "This sales order has purchase orders generated from it. Payment and billing/shipping details can no longer be edited." },
+        { status: 409 }
+      )
+    }
+  }
+
   if (body.clientPoNumber !== undefined) data.clientPoNumber = body.clientPoNumber || null
-  if (body.paymentTerms !== undefined) data.paymentTerms = body.paymentTerms || null
+  if (body.paymentTerms !== undefined) {
+    if (!VALID_PAYMENT_TERMS.includes(body.paymentTerms)) {
+      return NextResponse.json({ error: "Invalid payment terms" }, { status: 400 })
+    }
+    data.paymentTerms = body.paymentTerms || null
+  }
   if (body.internalNotes !== undefined) data.internalNotes = body.internalNotes || null
   if (body.clientNotes !== undefined) data.clientNotes = body.clientNotes || null
   if (body.billContactName !== undefined) data.billContactName = body.billContactName || null

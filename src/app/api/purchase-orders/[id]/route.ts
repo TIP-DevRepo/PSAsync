@@ -4,6 +4,23 @@ import { prisma } from "@/lib/prisma"
 import { hasPermission } from "@/lib/permissions"
 
 const VALID_STATUSES = ["DRAFT", "PARTS_ORDERED", "RECEIVED", "ON_HOLD", "BACKORDERED", "CANCELLED"]
+const VALID_PAYMENT_TYPES = ["Due on Receipt", "Net15", "Net30", "Net45", "Net60", "Prepaid", "Credit Card"]
+
+// Payment and shipping details stop being editable once the order has
+// actually been received, same line the existing Delete block already
+// draws, so there's one consistent definition of "too far along to change"
+// rather than two different rules for Delete and Edit.
+const EDIT_GATED_FIELDS = [
+  "paymentType",
+  "shipContactName",
+  "shipAddress",
+  "shipAddress2",
+  "shipCity",
+  "shipState",
+  "shipZip",
+  "shipCountry",
+  "shipClientLocationId",
+]
 
 export async function GET(
   req: NextRequest,
@@ -76,7 +93,26 @@ export async function PATCH(
     if (body.status === "RECEIVED" && !existing.receivedAt) data.receivedAt = new Date()
   }
 
-  if (body.paymentType !== undefined) data.paymentType = body.paymentType
+  const touchesGatedField = EDIT_GATED_FIELDS.some((field) => body[field] !== undefined)
+  if (touchesGatedField) {
+    if (!(await hasPermission(session.user.id, "purchaseOrders.edit"))) {
+      return NextResponse.json({ error: "You don't have permission to edit this purchase order" }, { status: 403 })
+    }
+    const receivedLineItemCount = await prisma.pOLineItem.count({ where: { purchaseOrderId: id, received: true } })
+    if (existing.status === "RECEIVED" || receivedLineItemCount > 0) {
+      return NextResponse.json(
+        { error: "This purchase order has already been received. Payment and shipping details can no longer be edited." },
+        { status: 409 }
+      )
+    }
+  }
+
+  if (body.paymentType !== undefined) {
+    if (!VALID_PAYMENT_TYPES.includes(body.paymentType)) {
+      return NextResponse.json({ error: "Invalid payment type" }, { status: 400 })
+    }
+    data.paymentType = body.paymentType
+  }
   if (body.internalNotes !== undefined) data.internalNotes = body.internalNotes || null
   if (body.expectedAt !== undefined) data.expectedAt = body.expectedAt ? new Date(body.expectedAt) : null
   if (body.shipToClient !== undefined) data.shipToClient = body.shipToClient
@@ -87,6 +123,23 @@ export async function PATCH(
   if (body.shipState !== undefined) data.shipState = body.shipState || null
   if (body.shipZip !== undefined) data.shipZip = body.shipZip || null
   if (body.shipCountry !== undefined) data.shipCountry = body.shipCountry || null
+
+  if (body.shipClientLocationId !== undefined) {
+    if (body.shipClientLocationId) {
+      if (!existing.shipToClientId) {
+        return NextResponse.json({ error: "This purchase order has no ship-to client to pick a location from" }, { status: 400 })
+      }
+      const location = await prisma.clientLocation.findFirst({
+        where: { id: body.shipClientLocationId, clientId: existing.shipToClientId },
+      })
+      if (!location) {
+        return NextResponse.json({ error: "Shipping location not found for this client" }, { status: 404 })
+      }
+      data.shipToClientLocationId = location.id
+    } else {
+      data.shipToClientLocationId = null
+    }
+  }
 
   const updated = await prisma.purchaseOrder.update({ where: { id }, data })
 
