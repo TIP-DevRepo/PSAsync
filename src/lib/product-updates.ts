@@ -38,7 +38,8 @@ export const PRODUCT_UPDATES: ProductUpdate[] = [
         items: [
           "Phone numbers now format automatically as (000) 000-0000 as you type, and display the same way everywhere they are shown on Clients, Vendors, and Quotes.",
           "The New Client form now matches the Edit Client form, with Industry, Payment Terms, and the This is your own company option. Addresses are added from the Locations tab once the client exists.",
-          "Failed edits on Purchase Order and Sales Order pages now show an error message instead of failing silently."
+          "Failed edits on Purchase Order and Sales Order pages now show an error message instead of failing silently.",
+          "The Features and Updates page now groups each release into Added, Improved, and Fixed sections with bulleted lists, so changes are easier to scan."
         ],
       },
       {
