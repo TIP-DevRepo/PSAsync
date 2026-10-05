@@ -103,6 +103,11 @@ model User {
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
+  // Rate limit for wrong current password attempts on My Account. Kept in
+  // the database because serverless instances don't share memory.
+  passwordChangeFailedAttempts Int       @default(0)
+  passwordChangeLockedUntil    DateTime?
+
   // Which dashboard loads for this user at /dashboard — their own, or
   // the shared company Default. Null means "use the company Default,"
   // same as if they'd never picked one. Cleared automatically if that

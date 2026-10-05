@@ -5,7 +5,7 @@ import { Check, Eye, EyeOff } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import { MIN_PASSWORD_LENGTH } from "@/lib/password-rules"
+import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
 
 const EMPTY_FORM = { currentPassword: "", newPassword: "", confirmPassword: "" }
 
@@ -70,9 +70,13 @@ export function ChangePasswordCard() {
   const [saving, setSaving] = useState(false)
 
   const longEnough = form.newPassword.length >= MIN_PASSWORD_LENGTH
+  // Measured in bytes, matching the API. No maxLength on the input, since
+  // that silently cuts off pasted text.
+  const shortEnough = form.newPassword.length > 0 && passwordByteLength(form.newPassword) <= MAX_PASSWORD_BYTES
   const matches = form.newPassword.length > 0 && form.newPassword === form.confirmPassword
   const different = form.newPassword.length > 0 && form.newPassword !== form.currentPassword
-  const canSubmit = form.currentPassword.length > 0 && longEnough && matches && different && !saving
+  const canSubmit =
+    form.currentPassword.length > 0 && longEnough && shortEnough && matches && different && !saving
 
   function setField(key: FieldKey, value: string) {
     setForm((prev) => ({ ...prev, [key]: value }))
@@ -95,6 +99,10 @@ export function ChangePasswordCard() {
       } else {
         const err = await res.json().catch(() => ({}))
         toast.error("Couldn't change password", err.error)
+        // Locked out: nothing typed is usable until the lock expires
+        if (res.status === 429) {
+          setForm(EMPTY_FORM)
+        }
       }
     } catch {
       toast.error("Couldn't change password", "Check your connection and try again.")
@@ -137,6 +145,7 @@ export function ChangePasswordCard() {
 
         <ul className="space-y-1 text-xs" aria-live="polite">
           <Requirement met={longEnough}>At least {MIN_PASSWORD_LENGTH} characters</Requirement>
+          <Requirement met={shortEnough}>No more than {MAX_PASSWORD_BYTES} characters</Requirement>
           <Requirement met={different}>Different from your current password</Requirement>
           <Requirement met={matches}>Confirmation matches</Requirement>
         </ul>
