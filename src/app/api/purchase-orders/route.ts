@@ -149,6 +149,7 @@ export async function POST(req: NextRequest) {
       status: "DRAFT",
       paymentType,
       internalNotes: body.internalNotes || null,
+      expectedAt: body.expectedAt ? new Date(body.expectedAt) : null,
       shipToClient: body.shipToClient ?? false,
       shipToClientId,
       shipToClientLocationId,

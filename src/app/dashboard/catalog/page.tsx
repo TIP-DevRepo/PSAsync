@@ -4,7 +4,9 @@ import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { ArrowUp, ArrowDown, ArrowUpDown, Trash2 } from "lucide-react"
+import { confirmDialog } from "@/lib/confirm-dialog"
+import { toast } from "@/lib/toast"
 
 interface CatalogItem {
   id: string
@@ -95,6 +97,7 @@ export default function CatalogListPage() {
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
   const [density, setDensity] = useState<Density>("default")
+  const [canDelete, setCanDelete] = useState(false)
 
   useEffect(() => {
     fetch("/api/catalog")
@@ -103,7 +106,32 @@ export default function CatalogListPage() {
         setItems(json)
         setLoading(false)
       })
+    fetch("/api/auth/session")
+      .then((res) => res.json())
+      .then((session) => {
+        const role = session?.user?.role
+        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.catalog?.delete)
+      })
   }, [])
+
+  async function handleDelete(e: React.MouseEvent, item: CatalogItem) {
+    e.stopPropagation()
+    const confirmed = await confirmDialog({
+      title: `Delete "${item.name}"?`,
+      description: "This can't be undone.",
+      confirmLabel: "Delete",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    const res = await fetch(`/api/catalog/${item.id}`, { method: "DELETE" })
+    if (res.ok) {
+      toast.success("Catalog item deleted")
+      setItems((prev) => prev.filter((i) => i.id !== item.id))
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't delete this catalog item", data.error)
+    }
+  }
 
   const categories = Array.from(new Set(items.map((i) => categoryLabel(i))))
 
@@ -199,6 +227,7 @@ export default function CatalogListPage() {
               <SortableHeader label="MSRP" column="msrp" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} align="right" />
               <th className="py-2 px-3 uppercase tracking-wide text-center">Taxable</th>
               <SortableHeader label="Status" column="status" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort} />
+              {canDelete && <th className="py-2 px-3" />}
             </tr>
           </thead>
           <tbody>
@@ -229,11 +258,22 @@ export default function CatalogListPage() {
                     {item.active ? "Active" : "Inactive"}
                   </span>
                 </td>
+                {canDelete && (
+                  <td className={`${ROW_PADDING[density]} px-3 text-right`}>
+                    <button
+                      onClick={(e) => handleDelete(e, item)}
+                      className="rounded-md p-1.5 text-muted-foreground hover:bg-danger-bg hover:text-danger"
+                      title="Delete catalog item"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  </td>
+                )}
               </tr>
             ))}
             {sorted.length === 0 && (
               <tr>
-                <td colSpan={7} className="py-6 text-center text-muted-foreground">
+                <td colSpan={canDelete ? 8 : 7} className="py-6 text-center text-muted-foreground">
                   No catalog items found.
                 </td>
               </tr>

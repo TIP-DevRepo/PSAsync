@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
+import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
 
 interface ClientOption {
   id: string
@@ -10,6 +11,7 @@ interface ClientOption {
 }
 
 interface ClientLocation {
+  id: string
   name: string
   address: string | null
   address2: string | null
@@ -33,12 +35,14 @@ export default function NewSalesOrderPage() {
   const [clients, setClients] = useState<ClientOption[]>([])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [billLocationId, setBillLocationId] = useState("")
+  const [shipLocationId, setShipLocationId] = useState("")
 
   const [form, setForm] = useState({
     clientId: "",
     clientPoNumber: "",
     paymentTerms: "",
-    internalNotes: "",
+    clientNotes: "",
     billContactName: "",
     billAddress: "",
     billAddress2: "",
@@ -70,6 +74,8 @@ export default function NewSalesOrderPage() {
   // from here on and is stored as a snapshot on the SO, not a live link.
   async function handleClientSelect(clientId: string) {
     update("clientId", clientId)
+    setBillLocationId("")
+    setShipLocationId("")
     if (!clientId) return
 
     const res = await fetch(`/api/clients/${clientId}`)
@@ -77,6 +83,9 @@ export default function NewSalesOrderPage() {
 
     const bill = client.mainBillingLocation
     const ship = client.mainShippingLocation
+
+    setBillLocationId(bill?.id ?? "")
+    setShipLocationId(ship?.id ?? "")
 
     setForm((prev) => ({
       ...prev,
@@ -100,6 +109,36 @@ export default function NewSalesOrderPage() {
       shipState: ship?.state ?? "",
       shipZip: ship?.zip ?? "",
       shipCountry: ship?.country ?? "",
+    }))
+  }
+
+  function applyBillLocation(locationId: string, address: ClientLocationAddress | null) {
+    setBillLocationId(locationId)
+    if (!address) return
+    setForm((prev) => ({
+      ...prev,
+      billContactName: address.contactName,
+      billAddress: address.address,
+      billAddress2: address.address2,
+      billCity: address.city,
+      billState: address.state,
+      billZip: address.zip,
+      billCountry: address.country,
+    }))
+  }
+
+  function applyShipLocation(locationId: string, address: ClientLocationAddress | null) {
+    setShipLocationId(locationId)
+    if (!address) return
+    setForm((prev) => ({
+      ...prev,
+      shipContactName: address.contactName,
+      shipAddress: address.address,
+      shipAddress2: address.address2,
+      shipCity: address.city,
+      shipState: address.state,
+      shipZip: address.zip,
+      shipCountry: address.country,
     }))
   }
 
@@ -185,8 +224,15 @@ export default function NewSalesOrderPage() {
         <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
           <h2 className="font-semibold text-sm text-foreground">Bill To</h2>
           <p className="text-xs text-muted-foreground">
-            Auto-filled from the client&apos;s main billing location — edit freely if this order bills differently.
+            Auto-filled from the client&apos;s main billing location — pick a different saved location or edit freely if this order bills differently.
           </p>
+          <ClientLocationPicker
+            clientId={form.clientId}
+            contactType="billing"
+            value={billLocationId}
+            onSelect={applyBillLocation}
+            placeholder="Select a billing location..."
+          />
           <input
             type="text"
             placeholder="Contact Name"
@@ -243,8 +289,15 @@ export default function NewSalesOrderPage() {
         <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
           <h2 className="font-semibold text-sm text-foreground">Ship To</h2>
           <p className="text-xs text-muted-foreground">
-            Auto-filled from the client&apos;s main shipping location — edit freely if this order ships differently.
+            Auto-filled from the client&apos;s main shipping location — pick a different saved location or edit freely if this order ships differently.
           </p>
+          <ClientLocationPicker
+            clientId={form.clientId}
+            contactType="shipping"
+            value={shipLocationId}
+            onSelect={applyShipLocation}
+            placeholder="Select a shipping location..."
+          />
           <input
             type="text"
             placeholder="Contact Name"
@@ -300,15 +353,19 @@ export default function NewSalesOrderPage() {
       </div>
 
       <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
-        <h2 className="font-semibold text-sm text-foreground">Internal Notes</h2>
+        <h2 className="font-semibold text-sm text-foreground">Client Notes</h2>
         <textarea
-          value={form.internalNotes}
-          onChange={(e) => update("internalNotes", e.target.value)}
+          value={form.clientNotes}
+          onChange={(e) => update("clientNotes", e.target.value)}
           rows={3}
-          placeholder="Not visible to the client"
+          placeholder="Notes about this order from or for the client"
           className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
         />
       </div>
+
+      <p className="text-xs text-muted-foreground">
+        Internal notes are added from the Internal Notes tab after the sales order is created.
+      </p>
 
       <div className="flex justify-end gap-3">
         <Button variant="outline" onClick={() => router.push("/dashboard/sales-orders")}>

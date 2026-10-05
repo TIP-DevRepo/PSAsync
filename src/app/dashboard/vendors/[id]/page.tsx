@@ -9,6 +9,7 @@ import { TabsBar } from "@/components/ui/tabs-bar"
 import { Modal } from "@/components/Modal"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
 import { RotateCcw, Upload, X } from "lucide-react"
+import { formatPhoneInput, formatPhoneDisplay } from "@/lib/phone"
 
 interface VendorContact {
   id: string
@@ -384,7 +385,7 @@ export default function VendorDetailPage() {
                   <p><span className="font-medium text-foreground">Type:</span> <span className="text-muted-foreground">{vendor.type}</span></p>
                   <p><span className="font-medium text-foreground">Status:</span> <span className="text-muted-foreground">{vendor.status}</span></p>
                   <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{vendor.email ?? "—"}</span></p>
-                  <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{vendor.phone ?? "—"}</span></p>
+                  <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(vendor.phone)}</span></p>
                   <p><span className="font-medium text-foreground">Website:</span> <span className="text-muted-foreground">{vendor.website ?? "—"}</span></p>
                   <p><span className="font-medium text-foreground">Address:</span> <span className="text-muted-foreground">{vendor.address ?? "—"}</span></p>
                   <p><span className="font-medium text-foreground">Payment Terms:</span> <span className="text-muted-foreground">{vendor.paymentTerms ?? "—"}</span></p>
@@ -451,7 +452,7 @@ export default function VendorDetailPage() {
                       <input
                         type="text"
                         value={detailsDraft.phone}
-                        onChange={(e) => setDetailsDraft({ ...detailsDraft, phone: e.target.value })}
+                        onChange={(e) => setDetailsDraft({ ...detailsDraft, phone: formatPhoneInput(e.target.value) })}
                         className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                       />
                     </div>
@@ -564,7 +565,7 @@ export default function VendorDetailPage() {
                   <input type="text" placeholder="Zip" value={newLocation.zip} onChange={(e) => setNewLocation({ ...newLocation, zip: e.target.value })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <input type="text" placeholder="Country" value={newLocation.country} onChange={(e) => setNewLocation({ ...newLocation, country: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-                <input type="text" placeholder="Phone" value={newLocation.phone} onChange={(e) => setNewLocation({ ...newLocation, phone: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                <input type="text" placeholder="Phone" value={newLocation.phone} onChange={(e) => setNewLocation({ ...newLocation, phone: formatPhoneInput(e.target.value) })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 <textarea placeholder="Notes (optional)" value={newLocation.notes} onChange={(e) => setNewLocation({ ...newLocation, notes: e.target.value })} rows={2} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 <label className="flex items-center gap-2 text-sm text-foreground">
                   <input type="checkbox" checked={newLocation.isPrimary} onChange={(e) => setNewLocation({ ...newLocation, isPrimary: e.target.checked })} className="accent-primary" />
@@ -610,8 +611,8 @@ export default function VendorDetailPage() {
                 <input type="text" placeholder="Title" value={newContact.title} onChange={(e) => setNewContact({ ...newContact, title: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 <input type="email" placeholder="Email" value={newContact.email} onChange={(e) => setNewContact({ ...newContact, email: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 <div className="grid grid-cols-2 gap-3">
-                  <input type="text" placeholder="Work Phone" value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-                  <input type="text" placeholder="Cell Phone" value={newContact.mobile} onChange={(e) => setNewContact({ ...newContact, mobile: e.target.value })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input type="text" placeholder="Work Phone" value={newContact.phone} onChange={(e) => setNewContact({ ...newContact, phone: formatPhoneInput(e.target.value) })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+                  <input type="text" placeholder="Cell Phone" value={newContact.mobile} onChange={(e) => setNewContact({ ...newContact, mobile: formatPhoneInput(e.target.value) })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
                 </div>
                 <select value={newContact.locationId} onChange={(e) => setNewContact({ ...newContact, locationId: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                   <option value="">No location</option>
@@ -640,7 +641,7 @@ export default function VendorDetailPage() {
                     {contact.isPrimary && <span className="ml-2 rounded-full bg-info-bg px-2 py-0.5 text-xs text-info">Primary</span>}
                   </p>
                   <p className="text-muted-foreground">{contact.title}</p>
-                  <p className="text-muted-foreground">{contact.email} {contact.phone && `· ${contact.phone}`}</p>
+                  <p className="text-muted-foreground">{contact.email} {contact.phone && `· ${formatPhoneInput(contact.phone)}`}</p>
                 </button>
               ))}
               {vendor.contacts.length === 0 && <p className="text-sm text-muted-foreground">No contacts yet.</p>}
@@ -776,7 +777,7 @@ function VendorLocationModal({
       {!editing ? (
         <div className="space-y-3 text-sm">
           <p><span className="font-medium text-foreground">Address:</span> <span className="text-muted-foreground">{locationAddress(location)}</span></p>
-          <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{location.phone ?? "—"}</span></p>
+          <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(location.phone)}</span></p>
           {location.notes && <p><span className="font-medium text-foreground">Notes:</span> <span className="text-muted-foreground">{location.notes}</span></p>}
         </div>
       ) : (
@@ -790,7 +791,7 @@ function VendorLocationModal({
             <input type="text" placeholder="Zip" value={draft.zip} onChange={(e) => setDraft({ ...draft, zip: e.target.value })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           </div>
           <input type="text" placeholder="Country" value={draft.country} onChange={(e) => setDraft({ ...draft, country: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-          <input type="text" placeholder="Phone" value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+          <input type="text" placeholder="Phone" value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: formatPhoneInput(e.target.value) })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           <textarea placeholder="Notes" value={draft.notes} onChange={(e) => setDraft({ ...draft, notes: e.target.value })} rows={2} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           <label className="flex items-center gap-2 text-sm text-foreground">
             <input type="checkbox" checked={draft.isPrimary} onChange={(e) => setDraft({ ...draft, isPrimary: e.target.checked })} className="accent-primary" />
@@ -851,8 +852,8 @@ function VendorContactModal({
         <div className="space-y-3 text-sm">
           <p><span className="font-medium text-foreground">Title:</span> <span className="text-muted-foreground">{contact.title ?? "—"}</span></p>
           <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{contact.email ?? "—"}</span></p>
-          <p><span className="font-medium text-foreground">Work Phone:</span> <span className="text-muted-foreground">{contact.phone ?? "—"}</span></p>
-          <p><span className="font-medium text-foreground">Cell Phone:</span> <span className="text-muted-foreground">{contact.mobile ?? "—"}</span></p>
+          <p><span className="font-medium text-foreground">Work Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(contact.phone)}</span></p>
+          <p><span className="font-medium text-foreground">Cell Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(contact.mobile)}</span></p>
           <p><span className="font-medium text-foreground">Location:</span> <span className="text-muted-foreground">{currentLocation?.name ?? "—"}</span></p>
           {contact.notes && <p><span className="font-medium text-foreground">Notes:</span> <span className="text-muted-foreground">{contact.notes}</span></p>}
         </div>
@@ -865,8 +866,8 @@ function VendorContactModal({
           <input type="text" placeholder="Title" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           <input type="email" placeholder="Email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           <div className="grid grid-cols-2 gap-2">
-            <input type="text" placeholder="Work Phone" value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: e.target.value })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
-            <input type="text" placeholder="Cell Phone" value={draft.mobile} onChange={(e) => setDraft({ ...draft, mobile: e.target.value })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+            <input type="text" placeholder="Work Phone" value={draft.phone} onChange={(e) => setDraft({ ...draft, phone: formatPhoneInput(e.target.value) })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
+            <input type="text" placeholder="Cell Phone" value={draft.mobile} onChange={(e) => setDraft({ ...draft, mobile: formatPhoneInput(e.target.value) })} className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" />
           </div>
           <select value={draft.locationId} onChange={(e) => setDraft({ ...draft, locationId: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             <option value="">No location</option>

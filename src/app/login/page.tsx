@@ -61,6 +61,16 @@ function LoginPage() {
     setLoading(false)
   }
 
+  function handleMicrosoftLogin(e: React.FormEvent) {
+    e.preventDefault()
+    if (!email) {
+      setError("Enter your email above, then select Login with Microsoft.")
+      return
+    }
+    setError("")
+    window.location.href = `/api/sso/start?email=${encodeURIComponent(email)}`
+  }
+
   async function handlePasswordSubmit(e: React.FormEvent) {
     e.preventDefault()
     setLoading(true)
@@ -138,6 +148,26 @@ function LoginPage() {
               className="w-full bg-[var(--accent)] text-[var(--accent-foreground)] rounded-lg py-2 text-sm font-medium hover:bg-[var(--accent-hover)] disabled:opacity-50"
             >
               {loading ? "Checking..." : "Continue"}
+            </button>
+
+            <div className="flex items-center gap-3">
+              <div className="h-px flex-1 bg-gray-200" />
+              <span className="text-xs text-gray-400">or</span>
+              <div className="h-px flex-1 bg-gray-200" />
+            </div>
+
+            <button
+              type="button"
+              onClick={handleMicrosoftLogin}
+              className="w-full flex items-center justify-center gap-2 border border-gray-300 rounded-lg py-2 text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+            >
+              <svg width="16" height="16" viewBox="0 0 21 21" aria-hidden="true">
+                <rect x="1" y="1" width="9" height="9" fill="#F25022" />
+                <rect x="11" y="1" width="9" height="9" fill="#7FBA00" />
+                <rect x="1" y="11" width="9" height="9" fill="#00A4EF" />
+                <rect x="11" y="11" width="9" height="9" fill="#FFB900" />
+              </svg>
+              Login with Microsoft
             </button>
           </form>
         )}

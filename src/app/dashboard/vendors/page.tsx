@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
+import { formatPhoneDisplay } from "@/lib/phone"
 
 interface Vendor {
   id: string
@@ -210,7 +211,7 @@ export default function VendorsListPage() {
                 </td>
                 <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{vendor.type}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{vendor.email ?? "—"}</td>
-                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{vendor.phone ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{formatPhoneDisplay(vendor.phone)}</td>
                 <td className={`${ROW_PADDING[density]} px-3`}>
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_COLORS[vendor.status]}`}>
                     {vendor.status}
