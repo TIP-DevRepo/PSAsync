@@ -18,6 +18,41 @@ export interface ProductUpdate {
 // update appears on /updates the moment the release goes live.
 export const PRODUCT_UPDATES: ProductUpdate[] = [
   {
+    version: "v0.9.03",
+    date: "2026-10-05",
+    title: "Delete Actions, Editable Orders, and Microsoft Login Button",
+    sections: [
+      {
+        category: "Added",
+        items: [
+          "You can now delete Purchase Orders, Sales Orders, Catalog Items, and Inventory assets or stock. Each one has its own permission in Roles & Permissions. Deleting is blocked with a clear message when it would break related records, such as a received Purchase Order or an asset that is currently deployed.",
+          "Purchase Order and Sales Order details are now editable after creation: payment type or terms, Bill To and Ship To addresses, and the client PO number on Sales Orders. Fields lock once a Purchase Order has been received or a Sales Order has linked Purchase Orders.",
+          "Sales Orders can now pick any of a client's saved locations for Bill To and Ship To, the same way Purchase Orders already could.",
+          "Purchase Orders have a new Expected Date field, and Sales Orders have a new Client Notes field.",
+          "A search bar on a client's Assets tab that filters by name, serial number, or asset tag.",
+          "A Login with Microsoft button on the login page."
+        ],
+      },
+      {
+        category: "Improved",
+        items: [
+          "Phone numbers now format automatically as (000) 000-0000 as you type, and display the same way everywhere they are shown on Clients, Vendors, and Quotes.",
+          "The New Client form now matches the Edit Client form, with Industry, Payment Terms, and the This is your own company option. Addresses are added from the Locations tab once the client exists.",
+          "Failed edits on Purchase Order and Sales Order pages now show an error message instead of failing silently.",
+          "The Features and Updates page now groups each release into Added, Improved, and Fixed sections with bulleted lists, so changes are easier to scan."
+        ],
+      },
+      {
+        category: "Fixed",
+        items: [
+          "The Role dropdown on Manage Users only worked for Global Admins. Any role with Manage Users access can now use it.",
+          "Industry not saving when creating a new client.",
+          "Notes typed into Internal Notes while creating a Purchase Order or Sales Order never showing up afterward. Notes are now added from the Internal Notes tab once the order exists."
+        ],
+      },
+    ],
+  },
+  {
     version: "v0.9.02",
     date: "2026-09-22",
     title: "Manual Inventory Entry and a Global Admin Role",
