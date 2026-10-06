@@ -304,3 +304,15 @@ select option {
   background-color: var(--popover);
   color: var(--popover-foreground);
 }
+
+/* Toast close button. HeroUI only reveals it while the frontmost toast is
+   hovered, which leaves touch and keyboard users without one. Keep it
+   always visible on the frontmost toast, and take it out of the tab order
+   on the stacked toasts tucked behind it. */
+.app-toast[data-frontmost="true"] .toast__close-button {
+  opacity: 1;
+  pointer-events: auto;
+}
+.app-toast:not([data-frontmost="true"]) .toast__close-button {
+  visibility: hidden;
+}
