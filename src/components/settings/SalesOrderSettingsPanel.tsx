@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button"
 interface RoleOption {
   id: string
   name: string
+  isEveryone?: boolean
 }
 
 interface UserOption {
@@ -54,7 +55,7 @@ export function SalesOrderSettingsPanel() {
       })
     fetch("/api/roles")
       .then((res) => res.json())
-      .then((data: RoleOption[]) => setRoles(data))
+      .then((data: RoleOption[]) => setRoles(data.filter((r) => !r.isEveryone)))
     fetch("/api/users")
       .then((res) => res.json())
       .then((data: (UserOption & { active: boolean })[]) => setUsers(data.filter((u) => u.active)))

@@ -222,9 +222,9 @@ export default function SalesOrderDetailPage({
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((session) => {
-        const role = session?.user?.role
-        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.salesOrders?.delete)
-        setCanEdit(!!role?.isGlobalAdmin || !!role?.permissions?.salesOrders?.edit)
+        const access = session?.user?.access
+        setCanDelete(!!access?.isGlobalAdmin || !!access?.permissions?.salesOrders?.delete)
+        setCanEdit(!!access?.isGlobalAdmin || !!access?.permissions?.salesOrders?.edit)
       })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])

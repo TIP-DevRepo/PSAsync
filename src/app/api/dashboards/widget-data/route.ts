@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "type is required" }, { status: 400 })
   }
 
-  const pagePermissions = resolvePagePermissions(session.user.role)
+  const pagePermissions = resolvePagePermissions(session.user.access)
   if (!canViewWidgetType(pagePermissions, type)) {
     return NextResponse.json({ error: "You don't have permission to view this widget's data" }, { status: 403 })
   }

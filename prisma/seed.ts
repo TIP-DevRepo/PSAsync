@@ -4,6 +4,8 @@ import { Pool } from "pg"
 import bcrypt from "bcryptjs"
 import { loadEnvFile } from "process"
 import { globalAdminRoleData } from "../src/lib/global-admin-role"
+import { ensureEveryoneRole } from "../src/lib/everyone-role"
+import { setUserRoles } from "../src/lib/user-roles"
 
 loadEnvFile(".env")
 
@@ -42,21 +44,25 @@ async function main() {
     },
   })
 
-  await prisma.user.create({
+  const adminUser = await prisma.user.create({
     data: {
       companyId: company.id,
       name: "Admin",
       email: "admin@tipinc.ai",
       password: hashedPassword,
-      roleId: adminRole.id,
     },
   })
+  // Also sets the legacy roleId to match
+  await setUserRoles(prisma, adminUser.id, [adminRole.id])
 
   await prisma.role.create({
     data: globalAdminRoleData(company.id),
   })
 
-  console.log("Seed complete: admin user and Global Admin role created")
+  // Every company gets exactly one implicit Everyone role, with no permissions
+  await ensureEveryoneRole(prisma, company.id)
+
+  console.log("Seed complete: admin user, Global Admin role, and Everyone role created")
   await prisma.$disconnect()
   await pool.end()
 }

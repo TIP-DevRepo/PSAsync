@@ -27,7 +27,7 @@ export async function GET(
         select: {
           name: true,
           triggerType: true,
-          requiredRole: { select: { id: true, name: true, rank: true } },
+          requiredRole: { select: { id: true, name: true, rank: true, color: true, isGlobalAdmin: true } },
         },
       },
       approvedByUser: { select: { name: true } },

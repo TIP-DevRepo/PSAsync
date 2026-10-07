@@ -2,7 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission, getUserRank, type RolePermissions } from "@/lib/permissions"
-import { GLOBAL_ADMIN_RANK } from "@/lib/global-admin-role"
+import { syncLegacyRoleId } from "@/lib/user-roles"
+import { readRoleColor } from "@/lib/role-colors"
 
 export async function PATCH(
   req: NextRequest,
@@ -38,17 +39,29 @@ export async function PATCH(
 
   const body = await req.json()
 
-  if (body.rank !== undefined) {
-    const newRank = Number(body.rank)
-    if (newRank >= GLOBAL_ADMIN_RANK) {
+  // Rank is only ever changed by dragging roles into order (PUT
+  // /api/roles/order), which renumbers the whole company at once
+  if (body.rank !== undefined && Number(body.rank) !== existing.rank) {
+    return NextResponse.json(
+      { error: "A role's rank is set by dragging it into order in Roles & Permissions" },
+      { status: 400 }
+    )
+  }
+
+  const color = readRoleColor(body.color)
+  if (color === false) {
+    return NextResponse.json({ error: "Color must be a hex value like #3B82F6" }, { status: 400 })
+  }
+
+  // The Everyone role's name and color are fixed (it is always "Everyone"
+  // in neutral gray), only its permissions can change. An unchanged name
+  // sent back by the panel is fine, only an actual change is rejected.
+  if (existing.isEveryone) {
+    const renaming = body.name !== undefined && body.name.trim() !== existing.name
+    const recoloring = color !== undefined && color !== existing.color
+    if (renaming || recoloring) {
       return NextResponse.json(
-        { error: "A role's rank can't reach or exceed the Global Admin role's rank" },
-        { status: 400 }
-      )
-    }
-    if (newRank >= actorRank) {
-      return NextResponse.json(
-        { error: "You can't set a role's rank at or above your own" },
+        { error: "The Everyone role's name and color can't be changed, only its permissions" },
         { status: 403 }
       )
     }
@@ -77,8 +90,8 @@ export async function PATCH(
   }
 
   const data: Record<string, unknown> = {}
-  if (body.name !== undefined) data.name = body.name.trim()
-  if (body.rank !== undefined) data.rank = Number(body.rank)
+  if (body.name !== undefined && !existing.isEveryone) data.name = body.name.trim()
+  if (color !== undefined && !existing.isEveryone) data.color = color
   if (body.permissions !== undefined) data.permissions = body.permissions
 
   const role = await prisma.role.update({ where: { id }, data })
@@ -99,16 +112,17 @@ export async function DELETE(
   }
 
   const { id } = await params
-  const existing = await prisma.role.findUnique({
-    where: { id },
-    include: { users: { select: { id: true } } },
-  })
+  const existing = await prisma.role.findUnique({ where: { id } })
   if (!existing || existing.companyId !== session.user.companyId) {
     return NextResponse.json({ error: "Role not found" }, { status: 404 })
   }
 
   if (existing.isGlobalAdmin) {
     return NextResponse.json({ error: "The Global Admin role cannot be deleted" }, { status: 403 })
+  }
+
+  if (existing.isEveryone) {
+    return NextResponse.json({ error: "The Everyone role cannot be deleted" }, { status: 403 })
   }
 
   const actorRank = await getUserRank(session.user.id)
@@ -119,9 +133,22 @@ export async function DELETE(
     )
   }
 
-  if (existing.users.length > 0) {
+  // Approval workflows require a role (required column, ON DELETE
+  // RESTRICT), so deleting one a workflow uses would fail at the database.
+  // Block with the workflow names instead, since quietly deleting or
+  // rewriting approval rules isn't something a role delete should do.
+  const workflows = await prisma.approvalWorkflow.findMany({
+    where: { requiredRoleId: id },
+    select: { name: true },
+    orderBy: { name: "asc" },
+  })
+  if (workflows.length > 0) {
     return NextResponse.json(
-      { error: `This role is assigned to ${existing.users.length} user(s). Reassign them to a different role before deleting.` },
+      {
+        error: `This role is required by ${workflows.length === 1 ? "an approval workflow" : "approval workflows"}: ${workflows
+          .map((w) => w.name)
+          .join(", ")}. Change or delete ${workflows.length === 1 ? "that workflow" : "those workflows"} first.`,
+      },
       { status: 400 }
     )
   }
@@ -144,7 +171,44 @@ export async function DELETE(
     }
   }
 
-  await prisma.role.delete({ where: { id } })
+  const affectedUsers = await prisma.$transaction(async (tx) => {
+    // Everyone who held this role, through UserRole or the legacy column
+    const holders = await tx.user.findMany({
+      where: { OR: [{ userRoles: { some: { roleId: id } } }, { roleId: id }] },
+      select: { id: true },
+    })
 
-  return NextResponse.json({ deleted: true })
+    // Sales order status notification rules that point at this role would
+    // be left targeting nothing, so clear just those statuses
+    const settings = await tx.companySettings.findUnique({
+      where: { companyId: session.user.companyId },
+      select: { id: true, soStatusNotifyRules: true },
+    })
+    const rules = settings?.soStatusNotifyRules as Record<string, { type: string; id: string } | null> | null | undefined
+    if (settings && rules && typeof rules === "object") {
+      let cleared = false
+      const nextRules: Record<string, { type: string; id: string } | null> = {}
+      for (const [status, rule] of Object.entries(rules)) {
+        if (rule?.type === "role" && rule.id === id) {
+          nextRules[status] = null
+          cleared = true
+        } else {
+          nextRules[status] = rule
+        }
+      }
+      if (cleared) {
+        await tx.companySettings.update({ where: { id: settings.id }, data: { soStatusNotifyRules: nextRules } })
+      }
+    }
+
+    // UserRole rows cascade, the legacy User.roleId is set null by its FK,
+    // then each former holder's legacy roleId is re-pointed at whatever
+    // their highest remaining role is
+    await tx.role.delete({ where: { id } })
+    await syncLegacyRoleId(tx, holders.map((h) => h.id))
+
+    return holders.length
+  })
+
+  return NextResponse.json({ deleted: true, affectedUsers })
 }

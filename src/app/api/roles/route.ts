@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission } from "@/lib/permissions"
-import { GLOBAL_ADMIN_RANK } from "@/lib/global-admin-role"
+import { ensureEveryoneRole } from "@/lib/everyone-role"
+import { readRoleColor } from "@/lib/role-colors"
+import { getRegularRolesInOrder, applyRegularRoleOrder } from "@/lib/role-order"
 
 const DEFAULT_PERMISSIONS = {
   pages: { clients: false, catalog: false, vendors: false, inventory: false, quotes: false, settings: false, salesOrders: false, purchaseOrders: false },
@@ -22,12 +24,20 @@ export async function GET() {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
   }
 
+  // Every company always has exactly one Everyone role, created here on
+  // demand if it is somehow missing so Roles & Permissions can edit it
+  await ensureEveryoneRole(prisma, session.user.companyId)
+
+  // Highest rank first, ties oldest first: the same order getRegularRolesInOrder
+  // uses, so what the Roles & Permissions list shows is what a reorder saves.
+  // userCount is how many users hold the role (Everyone is implicit, so 0).
   const roles = await prisma.role.findMany({
     where: { companyId: session.user.companyId },
-    orderBy: { rank: "desc" },
+    orderBy: [{ rank: "desc" }, { createdAt: "asc" }],
+    include: { _count: { select: { userRoles: true } } },
   })
 
-  return NextResponse.json(roles)
+  return NextResponse.json(roles.map(({ _count, ...role }) => ({ ...role, userCount: _count.userRoles })))
 }
 
 export async function POST(req: NextRequest) {
@@ -40,34 +50,45 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "You don't have permission to create roles" }, { status: 403 })
   }
 
+  const companyId = session.user.companyId
   const body = await req.json()
   if (!body.name?.trim()) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 })
   }
 
+  const color = readRoleColor(body.color)
+  if (color === false) {
+    return NextResponse.json({ error: "Color must be a hex value like #3B82F6" }, { status: 400 })
+  }
+
   const existing = await prisma.role.findUnique({
-    where: { companyId_name: { companyId: session.user.companyId, name: body.name.trim() } },
+    where: { companyId_name: { companyId, name: body.name.trim() } },
   })
   if (existing) {
     return NextResponse.json({ error: "A role with that name already exists" }, { status: 400 })
   }
 
-  const rank = Number(body.rank) || 0
-  if (rank >= GLOBAL_ADMIN_RANK) {
-    return NextResponse.json(
-      { error: "A role's rank can't reach or exceed the Global Admin role's rank" },
-      { status: 400 }
-    )
-  }
+  await ensureEveryoneRole(prisma, companyId)
 
-  const role = await prisma.role.create({
-    data: {
-      companyId: session.user.companyId,
-      name: body.name.trim(),
-      rank,
-      permissions: DEFAULT_PERMISSIONS,
-      isSystem: false,
-    },
+  // Rank is no longer typed in. A new role always starts at the bottom of
+  // the draggable list, just above Everyone, and the regular roles are
+  // renumbered so it gets rank 1 with every other role keeping its order.
+  const role = await prisma.$transaction(async (tx) => {
+    const ordered = await getRegularRolesInOrder(tx, companyId)
+    const created = await tx.role.create({
+      data: {
+        companyId,
+        name: body.name.trim(),
+        rank: 0,
+        color: color ?? null,
+        permissions: DEFAULT_PERMISSIONS,
+        isSystem: false,
+      },
+    })
+    const currentRanks = new Map(ordered.map((r) => [r.id, r.rank]))
+    currentRanks.set(created.id, created.rank)
+    await applyRegularRoleOrder(tx, companyId, [...ordered.map((r) => r.id), created.id], currentRanks)
+    return tx.role.findUniqueOrThrow({ where: { id: created.id } })
   })
 
   return NextResponse.json(role)

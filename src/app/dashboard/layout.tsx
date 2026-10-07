@@ -15,7 +15,7 @@ export default async function DashboardLayout({
     redirect("/login")
   }
 
-  const pagePermissions: PagePermissions = resolvePagePermissions(session.user.role)
+  const pagePermissions: PagePermissions = resolvePagePermissions(session.user.access)
 
   return (
     <div className="flex h-screen">

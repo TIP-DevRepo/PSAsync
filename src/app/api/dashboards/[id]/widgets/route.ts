@@ -35,7 +35,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid widget type" }, { status: 400 })
   }
 
-  const pagePermissions = resolvePagePermissions(session.user.role)
+  const pagePermissions = resolvePagePermissions(session.user.access)
   if (!canViewWidgetType(pagePermissions, widgetType)) {
     return NextResponse.json({ error: "You don't have permission to view that widget's data" }, { status: 403 })
   }
