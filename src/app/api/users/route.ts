@@ -5,6 +5,7 @@ import { prisma } from "@/lib/prisma"
 import { hasPermission, getUserRank, getEffectiveAccess } from "@/lib/permissions"
 import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
 import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
+import { usesMicrosoftSso } from "@/lib/sso-account"
 
 export async function GET() {
   const session = await auth()
@@ -111,6 +112,13 @@ export async function POST(req: NextRequest) {
 
   const hashedPassword = await bcrypt.hash(tempPassword, 10)
 
+  // A company that signs in with Microsoft never uses this password, so
+  // only password companies make the new user replace it on first sign in
+  const company = await prisma.company.findUnique({
+    where: { id: session.user.companyId },
+    select: { settings: { select: { ssoEnabled: true } } },
+  })
+
   const user = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
@@ -118,6 +126,7 @@ export async function POST(req: NextRequest) {
         name,
         email,
         password: hashedPassword,
+        mustChangePassword: !usesMicrosoftSso(company?.settings),
       },
     })
     // Also sets the legacy roleId to the highest of these roles

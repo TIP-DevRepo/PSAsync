@@ -67,7 +67,16 @@ export function Requirement({ met, children }: { met: boolean; children: React.R
   )
 }
 
-export function ChangePasswordCard() {
+// My Account uses the defaults. The first sign in screen passes its own
+// description and redirectTo, so a successful change goes straight on into
+// the app with a full page load (the layout then sees the gate is lifted).
+export function ChangePasswordCard({
+  description = "Enter your current password, then choose a new one.",
+  redirectTo,
+}: {
+  description?: string
+  redirectTo?: string
+} = {}) {
   const [form, setForm] = useState(EMPTY_FORM)
   const [saving, setSaving] = useState(false)
 
@@ -96,6 +105,10 @@ export function ChangePasswordCard() {
         body: JSON.stringify(form),
       })
       if (res.ok) {
+        if (redirectTo) {
+          window.location.href = redirectTo
+          return
+        }
         toast.success("Password updated", "Use your new password the next time you sign in.")
         setForm(EMPTY_FORM)
       } else {
@@ -117,9 +130,7 @@ export function ChangePasswordCard() {
     <section className="rounded-lg border border-border bg-card shadow-card p-6 space-y-4">
       <div>
         <h2 className="text-heading font-semibold text-foreground">Change Password</h2>
-        <p className="text-sm text-muted-foreground mt-1">
-          Enter your current password, then choose a new one.
-        </p>
+        <p className="text-sm text-muted-foreground mt-1">{description}</p>
       </div>
 
       <form onSubmit={handleSubmit} className="space-y-4">
