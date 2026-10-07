@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
-import { hasPermission, getUserRank } from "@/lib/permissions"
+import { hasPermission, getUserRank, getEffectiveAccess } from "@/lib/permissions"
 import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
 
 export async function GET() {
@@ -19,6 +19,7 @@ export async function GET() {
       email: true,
       active: true,
       createdAt: true,
+      loginLockedUntil: true,
       userRoles: {
         where: { role: { isEveryone: false } },
         select: { role: { select: { id: true, name: true, rank: true, color: true, isGlobalAdmin: true } } },
@@ -27,13 +28,21 @@ export async function GET() {
     orderBy: { createdAt: "asc" },
   })
 
+  // Only a Global Admin can unlock a login, so only they are told who is
+  // locked. The attempt counter itself is never sent to anyone.
+  const access = await getEffectiveAccess(session.user.id)
+  const showLocks = !!access?.isGlobalAdmin
+  const now = Date.now()
+
   // roles is every role the user holds (highest rank first), with the rank
   // and color Manage Users needs for its pills and hierarchy locks. role is
   // the highest of them.
   return NextResponse.json(
-    users.map(({ userRoles, ...user }) => {
+    users.map(({ userRoles, loginLockedUntil, ...user }) => {
       const roles = userRoles.map((ur) => ur.role).sort((a, b) => b.rank - a.rank)
-      return { ...user, role: roles[0] ?? null, roles }
+      if (!showLocks) return { ...user, role: roles[0] ?? null, roles }
+      const lockedUntil = loginLockedUntil && loginLockedUntil.getTime() > now ? loginLockedUntil : null
+      return { ...user, role: roles[0] ?? null, roles, loginLockedUntil: lockedUntil }
     })
   )
 }

@@ -26,6 +26,8 @@ interface User {
   active: boolean
   // Every role the user holds, highest rank first (never Everyone)
   roles: AssignableRole[]
+  // Only sent to Global Admins, and only set while the login is locked
+  loginLockedUntil?: string | null
 }
 
 export function UsersSettingsPanel() {
@@ -35,6 +37,9 @@ export function UsersSettingsPanel() {
   // use (Global Admin is effectively infinite). Null until it loads, which
   // keeps every role and user locked rather than briefly looking editable.
   const [myRank, setMyRank] = useState<number | null>(null)
+  // Only a Global Admin sees login locks and can unlock them. The server
+  // enforces this too, this only decides whether to show the button.
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState(false)
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
   const [newUser, setNewUser] = useState({ name: "", email: "", tempPassword: "" })
@@ -63,6 +68,7 @@ export function UsersSettingsPanel() {
       .then((session) => {
         const access = session?.user?.access
         setMyRank(access?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : access?.rank ?? 0)
+        setIsGlobalAdmin(!!access?.isGlobalAdmin)
       })
   }, [])
 
@@ -135,6 +141,17 @@ export function UsersSettingsPanel() {
     } else {
       const err = await res.json().catch(() => ({}))
       toast.error("Couldn't update user", err.error)
+    }
+    loadUsers()
+  }
+
+  async function unlockUser(user: User) {
+    const res = await fetch(`/api/users/${user.id}/unlock`, { method: "POST" })
+    if (res.ok) {
+      toast.success("User unlocked", user.name)
+    } else {
+      const err = await res.json().catch(() => ({}))
+      toast.error("Couldn't unlock user", err.error)
     }
     loadUsers()
   }
@@ -252,18 +269,33 @@ export function UsersSettingsPanel() {
                     />
                   </td>
                   <td className="py-2">
-                    <button
-                      onClick={() => setUserActive(user, !user.active)}
-                      disabled={!!lockedReason}
-                      title={lockedReason ? "This user is at or above your rank" : undefined}
-                      className={`rounded-full px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
-                        user.active
-                          ? "bg-green-100 text-green-700"
-                          : "bg-zinc-100 text-zinc-500"
-                      }`}
-                    >
-                      {user.active ? "Active" : "Inactive"}
-                    </button>
+                    <div className="flex flex-col items-start gap-1">
+                      <button
+                        onClick={() => setUserActive(user, !user.active)}
+                        disabled={!!lockedReason}
+                        title={lockedReason ? "This user is at or above your rank" : undefined}
+                        className={`rounded-full px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
+                          user.active
+                            ? "bg-green-100 text-green-700"
+                            : "bg-zinc-100 text-zinc-500"
+                        }`}
+                      >
+                        {user.active ? "Active" : "Inactive"}
+                      </button>
+                      {isGlobalAdmin && user.loginLockedUntil && (
+                        <>
+                          <span
+                            className="rounded-full bg-danger/10 px-2 py-1 text-xs font-medium text-danger"
+                            title={`Too many wrong passwords. Locked until ${new Date(user.loginLockedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
+                          >
+                            Locked
+                          </span>
+                          <Button size="xs" variant="outline" onClick={() => unlockUser(user)}>
+                            Unlock
+                          </Button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               )
