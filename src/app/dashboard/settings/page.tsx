@@ -4,6 +4,7 @@ import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
 import { IndustriesSettingsPanel } from "@/components/settings/IndustriesSettingsPanel"
 import { CategoriesSettingsPanel } from "@/components/settings/CategoriesSettingsPanel"
@@ -137,7 +138,14 @@ function renderPanel(key: PanelKey | null) {
 
 export default function SettingsIndexPage() {
   return (
-    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
+    <Suspense
+      fallback={
+        <div className="w-full">
+          <Breadcrumbs items={[{ label: "Settings", href: "/dashboard/settings" }]} current={null} />
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        </div>
+      }
+    >
       <SettingsPageContent />
     </Suspense>
   )
@@ -184,6 +192,11 @@ function SettingsPageContent() {
 
   return (
     <div className="space-y-6">
+      {/* Follows the selected section, which starts from ?panel= and changes as the user picks another. */}
+      <Breadcrumbs
+        items={selected ? [{ label: "Settings", href: "/dashboard/settings" }] : []}
+        current={selected ? selected.label : "Settings"}
+      />
       <h1 className="text-display font-semibold tracking-tight text-foreground">Settings</h1>
 
       <div className="flex gap-6 items-start">

@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { usesMicrosoftSso } from "@/lib/sso-account"
 import { ChangePasswordCard } from "@/components/account/ChangePasswordCard"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 
 // Every signed in user can reach their own account page, so this is
 // deliberately not gated by any Roles & Permissions page permission.
@@ -30,6 +31,7 @@ export default async function AccountPage() {
 
   return (
     <div className="w-full max-w-2xl space-y-6">
+      <Breadcrumbs current="My Account" />
       <div>
         <h1 className="text-display font-semibold tracking-tight text-foreground">My Account</h1>
         <p className="text-muted-foreground mt-1">Your profile and sign-in details.</p>

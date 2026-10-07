@@ -2,6 +2,7 @@
 
 import { useState, useEffect, Suspense } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { ContactSearchInput, type ContactSearchResult } from "@/components/ContactSearchInput"
 import { formatPhoneInput } from "@/lib/phone"
@@ -30,7 +31,14 @@ function addDaysIso(days: number) {
 // ─── Page wrapper (Suspense required for useSearchParams) ──────────────────
 export default function NewQuotePage() {
   return (
-    <Suspense fallback={<p className="text-sm text-zinc-500">Loading...</p>}>
+    <Suspense
+      fallback={
+        <div className="w-full">
+          <Breadcrumbs items={[{ label: "Quotes", href: "/dashboard/quotes" }]} current="New Quote" />
+          <p className="text-sm text-zinc-500">Loading...</p>
+        </div>
+      }
+    >
       <NewQuoteForm />
     </Suspense>
   )
@@ -143,6 +151,7 @@ function NewQuoteForm() {
 
   return (
     <div className="w-full space-y-6">
+      <Breadcrumbs items={[{ label: "Quotes", href: "/dashboard/quotes" }]} current="New Quote" />
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">New Quote</h1>
         {template && (
