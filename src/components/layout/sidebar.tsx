@@ -57,9 +57,15 @@ export function Sidebar({ pagePermissions = {} }: { pagePermissions?: PagePermis
         <span className="text-lg font-bold tracking-tight">PSAsync</span>
       </Link>
       {visibleItems.map((item) => {
+        // Sections stay highlighted on their nested routes (detail pages,
+        // new forms, quote templates). Matching on a "/" boundary keeps
+        // /dashboard/client-x from matching Clients, and Dashboard home only
+        // highlights on /dashboard itself.
         const isActive = item.href === "/dashboard/settings"
           ? pathname.startsWith("/dashboard/settings")
-          : pathname === item.href
+          : item.href === "/dashboard"
+            ? pathname === item.href
+            : pathname === item.href || pathname.startsWith(`${item.href}/`)
         const Icon = item.icon
         return (
           <Link
