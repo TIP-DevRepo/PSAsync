@@ -114,6 +114,11 @@ model User {
   passwordChangeFailedAttempts Int       @default(0)
   passwordChangeLockedUntil    DateTime?
 
+  // Rate limit for wrong password attempts on the login page. Separate
+  // from the password change counter above so neither can reset the other.
+  loginFailedAttempts Int       @default(0)
+  loginLockedUntil    DateTime?
+
   // Which dashboard loads for this user at /dashboard — their own, or
   // the shared company Default. Null means "use the company Default,"
   // same as if they'd never picked one. Cleared automatically if that
