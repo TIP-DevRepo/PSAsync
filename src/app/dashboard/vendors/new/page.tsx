@@ -57,7 +57,7 @@ export default function NewVendorPage() {
   }
 
   return (
-    <div className="w-full space-y-6:">
+    <div className="w-full space-y-6">
       <Breadcrumbs items={[{ label: "Vendors", href: "/dashboard/vendors" }]} current="New Vendor" />
       <h1 className="text-2xl font-bold">Add Vendor</h1>
 
