@@ -305,6 +305,22 @@ select option {
   color: var(--popover-foreground);
 }
 
+/* Role pills: the tinted pill pattern (low opacity background, text and
+   border in the accent color) driven by a per role --role-color set inline.
+   The text is mixed toward black in light mode and toward white in dark
+   mode, so very light colors (yellow) and very dark ones (navy) both keep
+   readable contrast without any per color tuning. */
+.role-pill {
+  color: color-mix(in oklab, var(--role-color) 55%, black);
+  background-color: color-mix(in oklab, var(--role-color) 12%, transparent);
+  border-color: color-mix(in oklab, var(--role-color) 40%, transparent);
+}
+.dark .role-pill {
+  color: color-mix(in oklab, var(--role-color) 55%, white);
+  background-color: color-mix(in oklab, var(--role-color) 18%, transparent);
+  border-color: color-mix(in oklab, var(--role-color) 45%, transparent);
+}
+
 /* Toast close button. HeroUI only reveals it while the frontmost toast is
    hovered, which leaves touch and keyboard users without one. Keep it
    always visible on the frontmost toast, and take it out of the tab order

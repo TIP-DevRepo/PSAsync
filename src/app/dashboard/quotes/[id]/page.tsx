@@ -15,6 +15,7 @@ import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
+import { RolePill } from "@/components/roles/RolePill"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface QuoteDetail {
@@ -60,7 +61,7 @@ interface ApprovalRequirement {
   workflow: {
     name: string
     triggerType: string
-    requiredRole: { id: string; name: string; rank: number } | null
+    requiredRole: { id: string; name: string; rank: number; color: string | null; isGlobalAdmin: boolean } | null
   }
   approvedByUser: { name: string } | null
 }
@@ -591,7 +592,8 @@ export default function QuoteDetailPage({
               .map((a) => {
                 const myRank = myAccess?.rank ?? 0
                 const requiredRank = a.workflow.requiredRole?.rank ?? 999
-                const requiredRoleName = a.workflow.requiredRole?.name ?? "sufficient permission"
+                const requiredRole = a.workflow.requiredRole
+                const requiredRoleName = requiredRole ? <RolePill role={requiredRole} /> : "sufficient permission"
                 const canDecide = myRank >= requiredRank
 
                 return (

@@ -3,11 +3,9 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { RoleAssignControl, type AssignableRole } from "@/components/roles/RoleAssignControl"
 
-interface RoleOption {
-  id: string
-  name: string
-  rank: number
+interface RoleOption extends AssignableRole {
   isEveryone?: boolean
 }
 
@@ -26,16 +24,24 @@ interface User {
   name: string
   email: string
   active: boolean
-  role: RoleOption | null
+  // Every role the user holds, highest rank first (never Everyone)
+  roles: AssignableRole[]
 }
 
 export function UsersSettingsPanel() {
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<RoleOption[]>([])
-  const [myRank, setMyRank] = useState(0)
+  // Your own highest rank, the same number the server's hierarchy rules
+  // use (Global Admin is effectively infinite). Null until it loads, which
+  // keeps every role and user locked rather than briefly looking editable.
+  const [myRank, setMyRank] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
-  const [newUser, setNewUser] = useState({ name: "", email: "", roleId: "", tempPassword: "" })
+  const [newUser, setNewUser] = useState({ name: "", email: "", tempPassword: "" })
+  const [inviteRoleIds, setInviteRoleIds] = useState<string[]>([])
+  // The user whose roles are mid-save. Their checklist is disabled until it
+  // finishes, so two quick toggles can't race and save out of order.
+  const [savingUserId, setSavingUserId] = useState<string | null>(null)
 
   function loadUsers() {
     fetch("/api/users")
@@ -56,34 +62,32 @@ export function UsersSettingsPanel() {
       .then((res) => res.json())
       .then((session) => {
         const access = session?.user?.access
-        // Anyone with the actual Manage Users permission gets full use of
-        // this dropdown, same as Global Admin — rank is only meant to
-        // restrict which roles a permitted user can hand out, not whether
-        // they can use the feature at all.
-        const canManageUsers = !!access?.isGlobalAdmin || !!access?.permissions?.settingsSections?.users
-        setMyRank(canManageUsers ? Number.MAX_SAFE_INTEGER : access?.rank ?? 0)
+        setMyRank(access?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : access?.rank ?? 0)
       })
   }, [])
 
-  // Roles you're allowed to hand out to an EXISTING user: anything ranked
-  // strictly below you. Keeps the dropdown from offering choices the API
-  // would reject anyway.
-  const assignableRoles = roles.filter((r) => r.rank < myRank)
-  // Roles you're allowed to invite a brand-new user into: at or below your
-  // own rank (equal is fine here, unlike reassigning an existing user).
-  const invitableRoles = roles.filter((r) => r.rank <= myRank)
-  // Falls back to the first invitable role whenever newUser.roleId hasn't
-  // been set yet or points at something you're no longer allowed to pick
-  // (e.g. roles/myRank arrived after the form's initial empty state).
-  const selectedInviteRoleId = invitableRoles.some((r) => r.id === newUser.roleId)
-    ? newUser.roleId
-    : invitableRoles[0]?.id ?? ""
+  // Same rules the users API enforces. Changing an existing user's roles
+  // needs the user AND every role involved strictly below your own rank.
+  // Inviting allows roles at or below your rank.
+  function existingUserRoleReason(role: AssignableRole) {
+    if (myRank === null || role.rank >= myRank) return "At or above your rank"
+    return null
+  }
+  function inviteRoleReason(role: AssignableRole) {
+    if (myRank === null || role.rank > myRank) return "Above your rank"
+    return null
+  }
+  function userLockedReason(user: User) {
+    const userRank = user.roles.length > 0 ? Math.max(...user.roles.map((r) => r.rank)) : 0
+    if (myRank === null || userRank >= myRank) return "This user is at or above your rank, so you can't change their roles"
+    return null
+  }
 
   async function handleInvite() {
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...newUser, roleId: selectedInviteRoleId }),
+      body: JSON.stringify({ ...newUser, roleIds: inviteRoleIds }),
     })
 
     if (!res.ok) {
@@ -93,23 +97,41 @@ export function UsersSettingsPanel() {
     }
 
     toast.success(`Invited ${newUser.name || newUser.email}`)
-    setNewUser({ name: "", email: "", roleId: invitableRoles[0]?.id ?? "", tempPassword: "" })
+    setNewUser({ name: "", email: "", tempPassword: "" })
+    setInviteRoleIds([])
     setShowInvite(false)
     loadUsers()
   }
 
-  async function updateUser(id: string, changes: { roleId?: string; active?: boolean }) {
-    const res = await fetch(`/api/users/${id}`, {
+  // Saves a user's full role set as soon as a role is toggled. The pills
+  // update right away and are corrected from the server either way.
+  async function setUserRoles(user: User, nextIds: string[]) {
+    const nextRoles = roles.filter((r) => nextIds.includes(r.id))
+    setUsers((prev) => prev.map((u) => (u.id === user.id ? { ...u, roles: nextRoles } : u)))
+    setSavingUserId(user.id)
+    const res = await fetch(`/api/users/${user.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(changes),
+      body: JSON.stringify({ roleIds: nextIds }),
     })
     if (res.ok) {
-      if (changes.active !== undefined) {
-        toast.success(changes.active ? "User activated" : "User deactivated")
-      } else if (changes.roleId !== undefined) {
-        toast.success("Role updated")
-      }
+      toast.success("Roles updated", user.name)
+    } else {
+      const err = await res.json().catch(() => ({}))
+      toast.error("Couldn't update roles", err.error)
+    }
+    setSavingUserId(null)
+    loadUsers()
+  }
+
+  async function setUserActive(user: User, active: boolean) {
+    const res = await fetch(`/api/users/${user.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ active }),
+    })
+    if (res.ok) {
+      toast.success(active ? "User activated" : "User deactivated")
     } else {
       const err = await res.json().catch(() => ({}))
       toast.error("Couldn't update user", err.error)
@@ -123,16 +145,16 @@ export function UsersSettingsPanel() {
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-500">Manage who has access and what role they hold.</p>
-        <Button onClick={() => setShowInvite(!showInvite)} disabled={invitableRoles.length === 0}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="text-sm text-zinc-500">Manage who has access and which roles they hold.</p>
+        <Button onClick={() => setShowInvite(!showInvite)}>
           {showInvite ? "Cancel" : "Invite User"}
         </Button>
       </div>
 
       {roles.length === 0 && (
         <p className="text-xs text-amber-600">
-          No roles found for your company yet — something's wrong with your role setup. Contact support.
+          No roles found for your company yet. Something&apos;s wrong with your role setup, contact support.
         </p>
       )}
 
@@ -157,16 +179,14 @@ export function UsersSettingsPanel() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium mb-1">Role</label>
-            <select
-              value={selectedInviteRoleId}
-              onChange={(e) => setNewUser({ ...newUser, roleId: e.target.value })}
-              className="w-full rounded-md border px-3 py-2 text-sm"
-            >
-              {invitableRoles.map((r) => (
-                <option key={r.id} value={r.id}>{r.name}</option>
-              ))}
-            </select>
+            <span className="block text-sm font-medium mb-1">Roles</span>
+            <RoleAssignControl
+              roles={roles}
+              selectedIds={inviteRoleIds}
+              onChange={setInviteRoleIds}
+              disabledReason={inviteRoleReason}
+              label="Edit roles for the new user"
+            />
           </div>
           <div>
             <label className="block text-sm font-medium mb-1">Temporary Password</label>
@@ -175,7 +195,7 @@ export function UsersSettingsPanel() {
                 type="text"
                 value={newUser.tempPassword}
                 onChange={(e) => setNewUser({ ...newUser, tempPassword: e.target.value })}
-                className="flex-1 rounded-md border px-3 py-2 text-sm"
+                className="min-w-0 flex-1 rounded-md border px-3 py-2 text-sm"
                 placeholder="Tell this to the new user directly"
               />
               <Button
@@ -191,54 +211,66 @@ export function UsersSettingsPanel() {
         </div>
       )}
 
-      <table className="w-full text-sm border-collapse">
-        <thead>
-          <tr className="border-b text-left">
-            <th className="py-2">Name</th>
-            <th className="py-2">Email</th>
-            <th className="py-2">Role</th>
-            <th className="py-2">Status</th>
-          </tr>
-        </thead>
-        <tbody>
-          {users.map((user) => {
-            const isLocked = (user.role?.rank ?? 0) >= myRank
-            return (
-            <tr key={user.id} className="border-b">
-              <td className="py-2">{user.name}</td>
-              <td className="py-2">{user.email}</td>
-              <td className="py-2">
-                <select
-                  value={user.role?.id ?? ""}
-                  disabled={isLocked}
-                  title={isLocked ? "This user's role is at or above your own in the hierarchy" : undefined}
-                  onChange={(e) => updateUser(user.id, { roleId: e.target.value })}
-                  className="rounded-md border px-2 py-1 text-sm disabled:opacity-60"
-                >
-                  {!user.role && <option value="">Unassigned</option>}
-                  {user.role && isLocked && <option value={user.role.id}>{user.role.name}</option>}
-                  {assignableRoles.map((r) => (
-                    <option key={r.id} value={r.id}>{r.name}</option>
-                  ))}
-                </select>
-              </td>
-              <td className="py-2">
-                <button
-                  onClick={() => updateUser(user.id, { active: !user.active })}
-                  className={`rounded-full px-2 py-1 text-xs font-medium ${
-                    user.active
-                      ? "bg-green-100 text-green-700"
-                      : "bg-zinc-100 text-zinc-500"
-                  }`}
-                >
-                  {user.active ? "Active" : "Inactive"}
-                </button>
-              </td>
+      {/* Fixed table layout: column widths come from the colgroup, never from
+          cell content, so expanding a row's roles only makes that row taller.
+          Roles and Status have set widths; Name and Email split the rest and
+          truncate with a tooltip. Below the min width the table scrolls
+          sideways instead of squeezing columns. */}
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[49rem] table-fixed text-sm border-collapse">
+          <colgroup>
+            <col />
+            <col />
+            <col className="w-84" />
+            <col className="w-28" />
+          </colgroup>
+          <thead>
+            <tr className="border-b text-left">
+              <th className="py-2 pr-3">Name</th>
+              <th className="py-2 pr-3">Email</th>
+              <th className="py-2 pr-3">Roles</th>
+              <th className="py-2">Status</th>
             </tr>
-            )
-          })}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {users.map((user) => {
+              const lockedReason = userLockedReason(user)
+              return (
+                <tr key={user.id} className="border-b align-top">
+                  <td className="truncate py-2 pr-3" title={user.name}>{user.name}</td>
+                  <td className="truncate py-2 pr-3" title={user.email}>{user.email}</td>
+                  <td className="py-2 pr-3">
+                    <RoleAssignControl
+                      collapsible
+                      roles={roles}
+                      selectedIds={user.roles.map((r) => r.id)}
+                      onChange={(nextIds) => setUserRoles(user, nextIds)}
+                      disabledReason={existingUserRoleReason}
+                      lockedReason={lockedReason}
+                      busy={savingUserId === user.id}
+                      label={`Edit roles for ${user.name}`}
+                    />
+                  </td>
+                  <td className="py-2">
+                    <button
+                      onClick={() => setUserActive(user, !user.active)}
+                      disabled={!!lockedReason}
+                      title={lockedReason ? "This user is at or above your rank" : undefined}
+                      className={`rounded-full px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
+                        user.active
+                          ? "bg-green-100 text-green-700"
+                          : "bg-zinc-100 text-zinc-500"
+                      }`}
+                    >
+                      {user.active ? "Active" : "Inactive"}
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

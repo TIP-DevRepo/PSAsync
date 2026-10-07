@@ -21,21 +21,18 @@ export async function GET() {
       createdAt: true,
       userRoles: {
         where: { role: { isEveryone: false } },
-        select: { role: { select: { id: true, name: true, rank: true } } },
+        select: { role: { select: { id: true, name: true, rank: true, color: true, isGlobalAdmin: true } } },
       },
     },
     orderBy: { createdAt: "asc" },
   })
 
-  // roles is every role the user holds (highest rank first). role is the
-  // highest of them, which is what the existing single role dropdown in
-  // Manage Users shows, in the same { id, name } shape it always had.
+  // roles is every role the user holds (highest rank first), with the rank
+  // and color Manage Users needs for its pills and hierarchy locks. role is
+  // the highest of them.
   return NextResponse.json(
     users.map(({ userRoles, ...user }) => {
-      const roles = userRoles
-        .map((ur) => ur.role)
-        .sort((a, b) => b.rank - a.rank)
-        .map(({ id, name }) => ({ id, name }))
+      const roles = userRoles.map((ur) => ur.role).sort((a, b) => b.rank - a.rank)
       return { ...user, role: roles[0] ?? null, roles }
     })
   )
