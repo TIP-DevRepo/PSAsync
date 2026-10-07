@@ -258,7 +258,7 @@ export default function TemplateDetailPage({
   const marginPct = subtotal > 0 ? (totalMargin / subtotal) * 100 : 0
 
   return (
-    <div className="w-full space-y-6:">
+    <div className="w-full space-y-6">
       <div>
         <Breadcrumbs items={breadcrumbItems} current={template.name.trim() || "Untitled template"} />
         <Link href="/dashboard/quotes" className="text-sm text-zinc-500 hover:underline">
