@@ -1,9 +1,17 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
+import { Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { toast } from "@/lib/toast"
-import { RoleAssignControl, type AssignableRole } from "@/components/roles/RoleAssignControl"
+import { RoleAssignControl, RoleChecklist, type AssignableRole } from "@/components/roles/RoleAssignControl"
+import type { MenuAnchor } from "@/lib/useFixedMenu"
 
 interface RoleOption extends AssignableRole {
   isEveryone?: boolean
@@ -40,6 +48,8 @@ export function UsersSettingsPanel() {
   // Only a Global Admin sees login locks and can unlock them. The server
   // enforces this too, this only decides whether to show the button.
   const [isGlobalAdmin, setIsGlobalAdmin] = useState(false)
+  // The signed in user's id, so their own row can't offer Deactivate
+  const [myId, setMyId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
   const [newUser, setNewUser] = useState({ name: "", email: "", tempPassword: "" })
@@ -69,6 +79,7 @@ export function UsersSettingsPanel() {
         const access = session?.user?.access
         setMyRank(access?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : access?.rank ?? 0)
         setIsGlobalAdmin(!!access?.isGlobalAdmin)
+        setMyId(session?.user?.id ?? null)
       })
   }, [])
 
@@ -230,23 +241,27 @@ export function UsersSettingsPanel() {
 
       {/* Fixed table layout: column widths come from the colgroup, never from
           cell content, so expanding a row's roles only makes that row taller.
-          Roles and Status have set widths; Name and Email split the rest and
-          truncate with a tooltip. Below the min width the table scrolls
-          sideways instead of squeezing columns. */}
+          Roles, Status, and Actions have set widths; Name and Email split the
+          rest and truncate with a tooltip. Below the min width the table
+          scrolls sideways instead of squeezing columns. */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[49rem] table-fixed text-sm border-collapse">
+        <table className="w-full min-w-[52.5rem] table-fixed text-sm border-collapse">
           <colgroup>
             <col />
             <col />
             <col className="w-84" />
             <col className="w-28" />
+            <col className="w-14" />
           </colgroup>
           <thead>
             <tr className="border-b text-left">
               <th className="py-2 pr-3">Name</th>
               <th className="py-2 pr-3">Email</th>
               <th className="py-2 pr-3">Roles</th>
-              <th className="py-2">Status</th>
+              <th className="py-2 pr-3">Status</th>
+              <th className="py-2">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -266,36 +281,45 @@ export function UsersSettingsPanel() {
                       lockedReason={lockedReason}
                       busy={savingUserId === user.id}
                       label={`Edit roles for ${user.name}`}
+                      showEditButton={false}
                     />
                   </td>
-                  <td className="py-2">
+                  <td className="py-2 pr-3">
+                    {/* Read only. Activating, deactivating, and unlocking
+                        all live in the row's Actions menu. */}
                     <div className="flex flex-col items-start gap-1">
-                      <button
-                        onClick={() => setUserActive(user, !user.active)}
-                        disabled={!!lockedReason}
-                        title={lockedReason ? "This user is at or above your rank" : undefined}
-                        className={`rounded-full px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-medium ${
                           user.active
                             ? "bg-green-100 text-green-700"
                             : "bg-zinc-100 text-zinc-500"
                         }`}
                       >
                         {user.active ? "Active" : "Inactive"}
-                      </button>
+                      </span>
                       {isGlobalAdmin && user.loginLockedUntil && (
-                        <>
-                          <span
-                            className="rounded-full bg-danger/10 px-2 py-1 text-xs font-medium text-danger"
-                            title={`Too many wrong passwords. Locked until ${new Date(user.loginLockedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
-                          >
-                            Locked
-                          </span>
-                          <Button size="xs" variant="outline" onClick={() => unlockUser(user)}>
-                            Unlock
-                          </Button>
-                        </>
+                        <span
+                          className="rounded-full bg-danger/10 px-2 py-1 text-xs font-medium text-danger"
+                          title={`Too many wrong passwords. Locked until ${new Date(user.loginLockedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
+                        >
+                          Locked
+                        </span>
                       )}
                     </div>
+                  </td>
+                  <td className="py-2">
+                    <UserActionsMenu
+                      user={user}
+                      manageReason={lockedReason ? "This user is at or above your rank" : null}
+                      isSelf={user.id === myId}
+                      canUnlock={isGlobalAdmin && !!user.loginLockedUntil}
+                      onSetActive={(active) => setUserActive(user, active)}
+                      onUnlock={() => unlockUser(user)}
+                      roles={roles}
+                      onRolesChange={(nextIds) => setUserRoles(user, nextIds)}
+                      roleDisabledReason={existingUserRoleReason}
+                      rolesBusy={savingUserId === user.id}
+                    />
                   </td>
                 </tr>
               )
@@ -304,5 +328,140 @@ export function UsersSettingsPanel() {
         </table>
       </div>
     </div>
+  )
+}
+
+// One row's Actions menu: Edit Roles, Deactivate or Activate, and (Global
+// Admins, locked users only) Unlock. Built on the same dropdown menu as the
+// top bar's user menu, which handles the keyboard, Escape, focus return,
+// and portals the menu out of the table's scroll area. Items the acting
+// user can't use stay visible, disabled, with the reason underneath.
+function UserActionsMenu({
+  user,
+  manageReason,
+  isSelf,
+  canUnlock,
+  onSetActive,
+  onUnlock,
+  roles,
+  onRolesChange,
+  roleDisabledReason,
+  rolesBusy,
+}: {
+  user: User
+  // Set when the user is at or above your rank, so you can't manage them
+  manageReason: string | null
+  isSelf: boolean
+  canUnlock: boolean
+  onSetActive: (active: boolean) => void
+  onUnlock: () => void
+  roles: AssignableRole[]
+  onRolesChange: (nextIds: string[]) => void
+  roleDisabledReason: (role: AssignableRole) => string | null
+  rolesBusy: boolean
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const [checklistOpen, setChecklistOpen] = useState(false)
+  const [checklistAnchor, setChecklistAnchor] = useState<MenuAnchor | null>(null)
+  // The chosen item's action runs once the menu has finished closing and
+  // focus is back on the trigger, so a dialog or checklist it opens takes
+  // focus from (and later returns it to) the trigger, not the closing menu
+  const pendingAction = useRef<(() => void) | null>(null)
+
+  const activeReason = user.active && isSelf ? "You cannot deactivate your own account." : manageReason
+
+  function openChecklist() {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect()
+      setChecklistAnchor({ top: rect.top, bottom: rect.bottom, right: rect.right })
+    }
+    setChecklistOpen(true)
+  }
+
+  return (
+    <>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (open) setChecklistOpen(false)
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <Button
+            ref={triggerRef}
+            variant="ghost"
+            size="icon"
+            aria-label={`Actions for ${user.name}`}
+            className="size-10 sm:size-8"
+          >
+            <Menu aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-60"
+          onCloseAutoFocus={(e) => {
+            const action = pendingAction.current
+            if (!action) return
+            pendingAction.current = null
+            e.preventDefault()
+            triggerRef.current?.focus()
+            action()
+          }}
+        >
+          <UserActionItem
+            label="Edit Roles"
+            reason={manageReason}
+            onSelect={() => (pendingAction.current = openChecklist)}
+          />
+          <UserActionItem
+            label={user.active ? "Deactivate User" : "Activate User"}
+            reason={activeReason}
+            destructive={user.active}
+            onSelect={() => (pendingAction.current = () => onSetActive(!user.active))}
+          />
+          {canUnlock && <UserActionItem label="Unlock User" reason={null} onSelect={onUnlock} />}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <RoleChecklist
+        open={checklistOpen}
+        anchor={checklistAnchor}
+        triggerRef={triggerRef}
+        onClose={() => setChecklistOpen(false)}
+        roles={roles}
+        selectedIds={user.roles.map((r) => r.id)}
+        onChange={onRolesChange}
+        disabledReason={roleDisabledReason}
+        busy={rolesBusy}
+        label={`Edit roles for ${user.name}`}
+        autoFocus
+      />
+    </>
+  )
+}
+
+function UserActionItem({
+  label,
+  reason,
+  destructive = false,
+  onSelect,
+}: {
+  label: string
+  reason: string | null
+  destructive?: boolean
+  onSelect: () => void
+}) {
+  return (
+    <DropdownMenuItem
+      disabled={!!reason}
+      variant={destructive ? "destructive" : "default"}
+      onSelect={onSelect}
+      className="min-h-11 py-2 sm:min-h-9"
+    >
+      <span className="flex min-w-0 flex-col">
+        <span>{label}</span>
+        {reason && <span className="text-caption text-muted-foreground">{reason}</span>}
+      </span>
+    </DropdownMenuItem>
   )
 }
