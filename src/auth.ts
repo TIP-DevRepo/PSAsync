@@ -6,7 +6,7 @@ import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import bcrypt from "bcryptjs"
 import { verifySsoRelayToken } from "@/lib/sso-relay-token"
-import type { SessionRole } from "./types/next-auth.d"
+import { getEffectiveAccess } from "@/lib/permissions"
 
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -19,19 +19,6 @@ const pool = new Pool({
 
 const adapter = new PrismaPg(pool)
 const prisma = new PrismaClient({ adapter })
-
-// Shapes a DB user + its Role relation into the flat object stored in the
-// session/JWT, so every part of the app reads role info the same way
-function toSessionRole(role: { id: string; name: string; rank: number; isGlobalAdmin: boolean; permissions: unknown } | null): SessionRole | null {
-  if (!role) return null
-  return {
-    id: role.id,
-    name: role.name,
-    rank: role.rank,
-    isGlobalAdmin: role.isGlobalAdmin,
-    permissions: role.permissions as Record<string, unknown>,
-  }
-}
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: PrismaAdapter(prisma),
@@ -52,7 +39,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         const user = await prisma.user.findUnique({
           where: { email: credentials.email as string },
-          include: { company: { include: { settings: true } }, role: true },
+          include: { company: { include: { settings: true } } },
         })
 
         if (!user || !user.password) return null
@@ -68,10 +55,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         if (!passwordMatch) return null
 
-        return {
-          ...user,
-          role: toSessionRole(user.role),
-        }
+        return user
       },
     }),
     // Used only internally by /api/sso/callback after a verified Microsoft
@@ -90,61 +74,33 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
 
         const user = await prisma.user.findUnique({
           where: { id: verified.userId },
-          include: { role: true },
         })
         if (!user || !user.active) return null
 
-        return {
-          ...user,
-          role: toSessionRole(user.role),
-        }
+        return user
       },
     }),
   ],
   callbacks: {
-    async jwt({ token, user, trigger }) {
+    async jwt({ token, user }) {
+      // The token only carries identity. Roles and permissions are never
+      // stored here, they're resolved from the database per request in
+      // session() below, so a role change applies on the next page load.
       if (user) {
-        // Fresh sign-in — token starts from what authorize() already
-        // fetched, and we stamp when the role was last confirmed
-        token.id = user.id
-        token.role = (user as any).role
-        token.companyId = (user as any).companyId
-        token.roleCheckedAt = Date.now()
-        return token
+        token.id = user.id as string
+        token.companyId = user.companyId
       }
-
-      // On every OTHER request, only re-check the database once the
-      // refresh window has passed (or if something explicitly asks for
-      // an immediate refresh via trigger === "update") — this is what
-      // makes role/permission changes take effect without requiring a
-      // logout/login, while still avoiding a DB hit on every request
-      const ROLE_REFRESH_INTERVAL_MS = 2 * 60 * 1000 // 2 minutes
-      const lastChecked = (token.roleCheckedAt as number | undefined) ?? 0
-      const dueForRefresh = Date.now() - lastChecked > ROLE_REFRESH_INTERVAL_MS
-
-      if (trigger === "update" || dueForRefresh) {
-        const current = await prisma.user.findUnique({
-          where: { id: token.id as string },
-          include: { role: true },
-        })
-
-        // Account deleted or deactivated since login — strip permissions
-        // immediately rather than leaving stale access in place
-        if (!current || !current.active) {
-          token.role = null
-        } else {
-          token.role = toSessionRole(current.role)
-        }
-        token.roleCheckedAt = Date.now()
-      }
-
       return token
     },
     async session({ session, token }) {
       if (token) {
         session.user.id = token.id as string
-        session.user.role = token.role as SessionRole | null
         session.user.companyId = token.companyId as string
+        // Runs server side for every auth() call and /api/auth/session
+        // fetch. getEffectiveAccess is cached per request, so a page that
+        // calls auth() several times only queries once. Null for a
+        // deactivated or deleted account, which strips all access.
+        session.user.access = await getEffectiveAccess(token.id as string)
       }
       return session
     },

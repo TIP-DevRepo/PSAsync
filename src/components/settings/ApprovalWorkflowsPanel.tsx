@@ -11,6 +11,7 @@ interface RoleOption {
   id: string
   name: string
   rank: number
+  isEveryone?: boolean
 }
 
 interface Workflow {
@@ -69,9 +70,10 @@ export function ApprovalWorkflowsPanel() {
     fetch("/api/roles")
       .then((res) => res.json())
       .then((data: RoleOption[]) => {
-        setRoles(data)
-        if (data.length > 0) {
-          setForm((prev) => ({ ...prev, requiredRoleId: prev.requiredRoleId || data[0].id }))
+        const requirableRoles = data.filter((r) => !r.isEveryone)
+        setRoles(requirableRoles)
+        if (requirableRoles.length > 0) {
+          setForm((prev) => ({ ...prev, requiredRoleId: prev.requiredRoleId || requirableRoles[0].id }))
         }
       })
   }, [])

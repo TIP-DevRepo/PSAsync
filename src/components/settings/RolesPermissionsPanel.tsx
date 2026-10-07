@@ -48,6 +48,7 @@ interface Role {
   rank: number
   isSystem: boolean
   isGlobalAdmin: boolean
+  isEveryone: boolean
   permissions: RolePermissions
 }
 
@@ -145,8 +146,8 @@ export function RolesPermissionsPanel() {
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((session) => {
-        const role = session?.user?.role
-        setMyRank(role?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : role?.rank ?? 0)
+        const access = session?.user?.access
+        setMyRank(access?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : access?.rank ?? 0)
       })
   }, [])
 
@@ -329,6 +330,9 @@ export function RolesPermissionsPanel() {
         {draft && (() => {
           const rankLocked = !draft.isGlobalAdmin && isRankLocked(draft)
           const isLocked = draft.isGlobalAdmin || rankLocked
+          // Everyone keeps its fixed name and rank and can never be
+          // deleted, but its permissions stay editable like any other role
+          const identityLocked = isLocked || draft.isEveryone
           return (
           <div className="space-y-6">
             {error && (
@@ -340,6 +344,12 @@ export function RolesPermissionsPanel() {
             {draft.isGlobalAdmin && (
               <div className="rounded-md border border-zinc-300 bg-zinc-50 dark:bg-zinc-900 p-3 text-sm text-zinc-600 dark:text-zinc-400">
                 The Global Admin role always has access to everything and cannot be edited or deleted.
+              </div>
+            )}
+
+            {draft.isEveryone && !isLocked && (
+              <div className="rounded-md border border-zinc-300 bg-zinc-50 dark:bg-zinc-900 p-3 text-sm text-zinc-600 dark:text-zinc-400">
+                Every user in the company automatically has the Everyone role. Its name and rank are fixed and it can&apos;t be deleted, but its permissions can be edited.
               </div>
             )}
 
@@ -356,7 +366,7 @@ export function RolesPermissionsPanel() {
                   <input
                     type="text"
                     value={draft.name}
-                    disabled={isLocked}
+                    disabled={identityLocked}
                     onChange={(e) => setDraft({ ...draft, name: e.target.value })}
                     className="w-full rounded-md border px-3 py-2 text-sm disabled:opacity-60"
                   />
@@ -367,13 +377,13 @@ export function RolesPermissionsPanel() {
                     type="number"
                     value={draft.rank}
                     max={GLOBAL_ADMIN_RANK - 1}
-                    disabled={isLocked}
+                    disabled={identityLocked}
                     onChange={(e) => setDraft({ ...draft, rank: Number(e.target.value) })}
                     className="w-full rounded-md border px-3 py-2 text-sm disabled:opacity-60"
                   />
                 </div>
               </div>
-              {!isLocked && (
+              {!identityLocked && (
                 <Button variant="outline" onClick={() => handleDelete(draft)} className="text-red-600 hover:text-red-700">
                   Delete Role
                 </Button>

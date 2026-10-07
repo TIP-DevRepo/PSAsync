@@ -149,8 +149,8 @@ export default function CatalogItemDetailPage() {
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((session) => {
-        const role = session?.user?.role
-        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.catalog?.delete)
+        const access = session?.user?.access
+        setCanDelete(!!access?.isGlobalAdmin || !!access?.permissions?.catalog?.delete)
       })
   }, [id])
 

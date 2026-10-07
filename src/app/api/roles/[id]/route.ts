@@ -3,6 +3,8 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission, getUserRank, type RolePermissions } from "@/lib/permissions"
 import { GLOBAL_ADMIN_RANK } from "@/lib/global-admin-role"
+import { ensureEveryoneRole } from "@/lib/everyone-role"
+import { syncLegacyRoleId } from "@/lib/user-roles"
 
 export async function PATCH(
   req: NextRequest,
@@ -38,7 +40,22 @@ export async function PATCH(
 
   const body = await req.json()
 
-  if (body.rank !== undefined) {
+  // The Everyone role's name and rank are fixed (it is always "Everyone"
+  // and always the lowest rank), only its permissions can change. The
+  // Roles & Permissions panel always sends name and rank back unchanged,
+  // so only an actual change is rejected.
+  if (existing.isEveryone) {
+    const renaming = body.name !== undefined && body.name.trim() !== existing.name
+    const reranking = body.rank !== undefined && Number(body.rank) !== existing.rank
+    if (renaming || reranking) {
+      return NextResponse.json(
+        { error: "The Everyone role's name and rank can't be changed, only its permissions" },
+        { status: 403 }
+      )
+    }
+  }
+
+  if (body.rank !== undefined && !existing.isEveryone) {
     const newRank = Number(body.rank)
     if (newRank >= GLOBAL_ADMIN_RANK) {
       return NextResponse.json(
@@ -50,6 +67,13 @@ export async function PATCH(
       return NextResponse.json(
         { error: "You can't set a role's rank at or above your own" },
         { status: 403 }
+      )
+    }
+    const everyone = await ensureEveryoneRole(prisma, session.user.companyId)
+    if (newRank <= everyone.rank) {
+      return NextResponse.json(
+        { error: `A role's rank must be above the Everyone role's rank (${everyone.rank})` },
+        { status: 400 }
       )
     }
   }
@@ -77,11 +101,22 @@ export async function PATCH(
   }
 
   const data: Record<string, unknown> = {}
-  if (body.name !== undefined) data.name = body.name.trim()
-  if (body.rank !== undefined) data.rank = Number(body.rank)
+  if (body.name !== undefined && !existing.isEveryone) data.name = body.name.trim()
+  if (body.rank !== undefined && !existing.isEveryone) data.rank = Number(body.rank)
   if (body.permissions !== undefined) data.permissions = body.permissions
 
-  const role = await prisma.role.update({ where: { id }, data })
+  const role = await prisma.$transaction(async (tx) => {
+    const updated = await tx.role.update({ where: { id }, data })
+
+    // A rank change can change which held role is highest for users with
+    // more than one, so re-sync the legacy User.roleId for this role's holders
+    if (data.rank !== undefined && data.rank !== existing.rank) {
+      const holders = await tx.userRole.findMany({ where: { roleId: id }, select: { userId: true } })
+      await syncLegacyRoleId(tx, holders.map((h) => h.userId))
+    }
+
+    return updated
+  })
 
   return NextResponse.json(role)
 }
@@ -101,7 +136,7 @@ export async function DELETE(
   const { id } = await params
   const existing = await prisma.role.findUnique({
     where: { id },
-    include: { users: { select: { id: true } } },
+    include: { _count: { select: { userRoles: true } } },
   })
   if (!existing || existing.companyId !== session.user.companyId) {
     return NextResponse.json({ error: "Role not found" }, { status: 404 })
@@ -109,6 +144,10 @@ export async function DELETE(
 
   if (existing.isGlobalAdmin) {
     return NextResponse.json({ error: "The Global Admin role cannot be deleted" }, { status: 403 })
+  }
+
+  if (existing.isEveryone) {
+    return NextResponse.json({ error: "The Everyone role cannot be deleted" }, { status: 403 })
   }
 
   const actorRank = await getUserRank(session.user.id)
@@ -119,9 +158,10 @@ export async function DELETE(
     )
   }
 
-  if (existing.users.length > 0) {
+  const assignedCount = existing._count.userRoles
+  if (assignedCount > 0) {
     return NextResponse.json(
-      { error: `This role is assigned to ${existing.users.length} user(s). Reassign them to a different role before deleting.` },
+      { error: `This role is assigned to ${assignedCount} user(s). Reassign them to a different role before deleting.` },
       { status: 400 }
     )
   }

@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission } from "@/lib/permissions"
 import { GLOBAL_ADMIN_RANK } from "@/lib/global-admin-role"
+import { ensureEveryoneRole } from "@/lib/everyone-role"
 
 const DEFAULT_PERMISSIONS = {
   pages: { clients: false, catalog: false, vendors: false, inventory: false, quotes: false, settings: false, salesOrders: false, purchaseOrders: false },
@@ -21,6 +22,10 @@ export async function GET() {
   if (!session?.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
   }
+
+  // Every company always has exactly one Everyone role, created here on
+  // demand if it is somehow missing so Roles & Permissions can edit it
+  await ensureEveryoneRole(prisma, session.user.companyId)
 
   const roles = await prisma.role.findMany({
     where: { companyId: session.user.companyId },
@@ -56,6 +61,15 @@ export async function POST(req: NextRequest) {
   if (rank >= GLOBAL_ADMIN_RANK) {
     return NextResponse.json(
       { error: "A role's rank can't reach or exceed the Global Admin role's rank" },
+      { status: 400 }
+    )
+  }
+
+  // Everyone must always stay the lowest rank
+  const everyone = await ensureEveryoneRole(prisma, session.user.companyId)
+  if (rank <= everyone.rank) {
+    return NextResponse.json(
+      { error: `A role's rank must be above the Everyone role's rank (${everyone.rank})` },
       { status: 400 }
     )
   }

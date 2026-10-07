@@ -5,7 +5,7 @@ import { allowedWidgetTypes } from "@/lib/dashboards/widgetTypes"
 export default async function DashboardPage() {
   const session = await auth()
   const pagePermissions =
-    (session?.user.role?.permissions as { pages?: Record<string, boolean> } | undefined)?.pages ?? {}
+    (session?.user.access?.permissions as { pages?: Record<string, boolean> } | undefined)?.pages ?? {}
 
   return (
     <div className="w-full space-y-6">

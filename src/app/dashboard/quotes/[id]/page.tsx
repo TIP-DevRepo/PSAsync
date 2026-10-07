@@ -73,9 +73,7 @@ interface Comment {
   createdAt: string
 }
 
-interface MyRole {
-  id: string
-  name: string
+interface MyAccess {
   rank: number
   isGlobalAdmin?: boolean
   permissions: {
@@ -141,7 +139,7 @@ export default function QuoteDetailPage({
   const [creatingVersion, setCreatingVersion] = useState(false)
   const [reactivatingId, setReactivatingId] = useState<string | null>(null)
   const [approvals, setApprovals] = useState<ApprovalRequirement[]>([])
-  const [myRole, setMyRole] = useState<MyRole | null>(null)
+  const [myAccess, setMyAccess] = useState<MyAccess | null>(null)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [changingStatus, setChangingStatus] = useState(false)
@@ -202,7 +200,7 @@ export default function QuoteDetailPage({
       .then((json) => setCompanyDefaultTerms(json.quoteTerms ?? ""))
     fetch("/api/auth/session")
       .then((res) => res.json())
-      .then((session) => setMyRole(session?.user?.role ?? null))
+      .then((session) => setMyAccess(session?.user?.access ?? null))
     if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("send") === "1") {
       setShowSendModal(true)
     }
@@ -499,9 +497,9 @@ export default function QuoteDetailPage({
   const marginPct = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0
 
   const isLocked = quote.status !== "DRAFT"
-  const canChangeStatus = myRole?.isGlobalAdmin || !!myRole?.permissions?.quotes?.changeStatus
-  const canDeleteQuote = myRole?.isGlobalAdmin || !!myRole?.permissions?.quotes?.delete
-  const canEditQuote = myRole?.isGlobalAdmin || !!myRole?.permissions?.quotes?.edit
+  const canChangeStatus = myAccess?.isGlobalAdmin || !!myAccess?.permissions?.quotes?.changeStatus
+  const canDeleteQuote = myAccess?.isGlobalAdmin || !!myAccess?.permissions?.quotes?.delete
+  const canEditQuote = myAccess?.isGlobalAdmin || !!myAccess?.permissions?.quotes?.edit
   const showEditableHeader = !isLocked && canEditQuote
 
   return (
@@ -591,7 +589,7 @@ export default function QuoteDetailPage({
             {approvals
               .filter((a) => a.status === "PENDING")
               .map((a) => {
-                const myRank = myRole?.rank ?? 0
+                const myRank = myAccess?.rank ?? 0
                 const requiredRank = a.workflow.requiredRole?.rank ?? 999
                 const requiredRoleName = a.workflow.requiredRole?.name ?? "sufficient permission"
                 const canDecide = myRank >= requiredRank

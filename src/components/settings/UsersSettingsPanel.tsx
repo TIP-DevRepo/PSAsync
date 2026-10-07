@@ -8,6 +8,7 @@ interface RoleOption {
   id: string
   name: string
   rank: number
+  isEveryone?: boolean
 }
 
 // Excludes }{[]|\/><;:'"~`+=,.^ since those tend to cause trouble when a
@@ -49,17 +50,18 @@ export function UsersSettingsPanel() {
     loadUsers()
     fetch("/api/roles")
       .then((res) => res.json())
-      .then((data: RoleOption[]) => setRoles(data))
+      // Everyone is held by every user implicitly, so it is never assignable
+      .then((data: RoleOption[]) => setRoles(data.filter((r) => !r.isEveryone)))
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((session) => {
-        const role = session?.user?.role
+        const access = session?.user?.access
         // Anyone with the actual Manage Users permission gets full use of
         // this dropdown, same as Global Admin — rank is only meant to
         // restrict which roles a permitted user can hand out, not whether
         // they can use the feature at all.
-        const canManageUsers = !!role?.isGlobalAdmin || !!role?.permissions?.settingsSections?.users
-        setMyRank(canManageUsers ? Number.MAX_SAFE_INTEGER : role?.rank ?? 0)
+        const canManageUsers = !!access?.isGlobalAdmin || !!access?.permissions?.settingsSections?.users
+        setMyRank(canManageUsers ? Number.MAX_SAFE_INTEGER : access?.rank ?? 0)
       })
   }, [])
 
