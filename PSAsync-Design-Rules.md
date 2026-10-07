@@ -409,6 +409,7 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 - Select-all morphs empty → indeterminate → checked.
 - Never shrink or squeeze table columns to fit content. Keep column widths stable and handle long or growing content with expand and collapse, wrapping, or truncation with a tooltip instead.
 - If a column needs more room, widen that column rather than squeezing its neighbors; below the table's minimum width it scrolls sideways.
+- Row actions live in a hamburger menu in a fixed width Actions column at the far right. Destructive or access changing actions always go through a confirmation dialog, and an action the user must not perform on themselves stays visible but disabled with the reason.
 - **PSAsync relevance:** Quotes list, Clients list, and the line item builder table itself.
 
 ### Modal Hierarchy
