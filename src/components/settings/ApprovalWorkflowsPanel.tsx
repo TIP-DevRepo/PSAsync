@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { RolePill } from "@/components/roles/RolePill"
 
 type TriggerType = "TOTAL_THRESHOLD" | "DISCOUNT_THRESHOLD" | "SPECIFIC_USER"
 
@@ -11,6 +12,9 @@ interface RoleOption {
   id: string
   name: string
   rank: number
+  color?: string | null
+  isGlobalAdmin?: boolean
+  isEveryone?: boolean
 }
 
 interface Workflow {
@@ -69,9 +73,10 @@ export function ApprovalWorkflowsPanel() {
     fetch("/api/roles")
       .then((res) => res.json())
       .then((data: RoleOption[]) => {
-        setRoles(data)
-        if (data.length > 0) {
-          setForm((prev) => ({ ...prev, requiredRoleId: prev.requiredRoleId || data[0].id }))
+        const requirableRoles = data.filter((r) => !r.isEveryone)
+        setRoles(requirableRoles)
+        if (requirableRoles.length > 0) {
+          setForm((prev) => ({ ...prev, requiredRoleId: prev.requiredRoleId || requirableRoles[0].id }))
         }
       })
   }, [])
@@ -257,7 +262,8 @@ export function ApprovalWorkflowsPanel() {
                 )}
               </div>
               <p className="text-xs text-zinc-500 mt-0.5">
-                {describeCondition(w)} → requires {w.requiredRole?.name ?? "a role that no longer exists"} or higher
+                {describeCondition(w)} → requires{" "}
+                {w.requiredRole ? <RolePill role={w.requiredRole} /> : "a role that no longer exists"} or higher
               </p>
             </div>
             <div className="flex items-center gap-2">

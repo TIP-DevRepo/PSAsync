@@ -152,8 +152,8 @@ function InventoryListPageInner() {
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((session) => {
-        const role = session?.user?.role
-        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.inventory?.delete)
+        const access = session?.user?.access
+        setCanDelete(!!access?.isGlobalAdmin || !!access?.permissions?.inventory?.delete)
       })
   }, [])
 

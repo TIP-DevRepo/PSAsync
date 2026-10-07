@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { CategoryPicker } from "@/components/categories/CategoryPicker"
 
@@ -88,6 +89,7 @@ export default function NewCatalogItemPage() {
 
   return (
     <div className="w-full space-y-6">
+      <Breadcrumbs items={[{ label: "Catalog", href: "/dashboard/catalog" }]} current="New Catalog Item" />
       <h1 className="text-2xl font-bold">Add Catalog Item</h1>
 
       <div className="rounded-md border p-4 space-y-3">

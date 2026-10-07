@@ -11,7 +11,7 @@ export async function GET() {
 
   const workflows = await prisma.approvalWorkflow.findMany({
     where: { companyId: session.user.companyId },
-    include: { triggerUser: { select: { name: true } }, requiredRole: { select: { id: true, name: true } } },
+    include: { triggerUser: { select: { name: true } }, requiredRole: { select: { id: true, name: true, color: true, isGlobalAdmin: true } } },
     orderBy: { createdAt: "asc" },
   })
 

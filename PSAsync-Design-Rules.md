@@ -424,7 +424,11 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 - Hamburger is secondary nav, never primary (desktop hamburger drops engagement ~56%).
 - Command palette (⌘K) as a power-user accelerator, paired with visible nav.
 - Breadcrumbs only earn their space past 2 levels of hierarchy.
-- **PSAsync relevance:** directly informs your queued Breadcrumbs + Gooey Nav item — confirms breadcrumbs are worth it given PSAsync's nested structure (Settings → category → item; Quote → line items).
+- **PSAsync relevance:** Breadcrumbs are now built. The shared `Breadcrumbs` component (`src/components/Breadcrumbs.tsx`, built on HeroUI Breadcrumbs) renders one line at the top of the page content, above any existing Back link. Every trail starts with a Dashboard crumb, middle crumbs link to their list page, and the last crumb is the current page as plain text with `aria-current="page"` inside a `nav` labeled "Breadcrumb".
+  - Trails: detail pages use Dashboard / [list] / [record name] (asset tag for Inventory, quote, SO, or PO number for orders); quote templates use Dashboard / Quotes / [template name], since templates live in a tab on the Quotes page; new forms use Dashboard / [list] / New [item]; Settings uses Dashboard / Settings / [selected section] and follows section switches; My Account uses Dashboard / My Account.
+  - Not shown on the dashboard home, list pages, or Updates.
+  - While a record name loads, the last crumb shows a skeleton with the line height reserved, never a raw id. Long names truncate with an ellipsis and show the full name in a title tooltip; the trail stays on one line and never causes horizontal scroll or squeezes the page layout.
+  - Gooey Nav is still queued.
 
 ### Tabs System
 - Active indicator slides (spring), never teleports; timing matches content fade.
@@ -491,7 +495,7 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 - **Line item builder CSS Grid rewrite** → Drag and Drop, Data Table, Card Hover Anatomy
 - **Tooltip intermittent no-show bug** → Tooltip Design, Z-Index Mastery
 - **Client onboarding/offboarding stepper (Phase 2+)** → Stepper Wizard
-- **Breadcrumbs + Gooey Nav** → Navigation Patterns
+- **Gooey Nav** → Navigation Patterns (Breadcrumbs are built, see Navigation Patterns)
 - **Full UI overhaul / HeroUI conversion pass** → Design System Kit, Design Tokens, Golden Ratio, Grid System (do these first — everything else builds on them)
 - **Settings accordion** → Accordion Disclosure, Proximity Rule
 - **Quotes/Templates tabs** → Tabs System

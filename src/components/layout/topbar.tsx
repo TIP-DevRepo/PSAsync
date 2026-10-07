@@ -1,5 +1,6 @@
 "use client"
 
+import Link from "next/link"
 import { Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
@@ -53,6 +54,9 @@ export function Topbar({ userName, pagePermissions }: { userName: string; pagePe
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
+          <DropdownMenuItem asChild>
+            <Link href="/dashboard/account">My Account</Link>
+          </DropdownMenuItem>
           <DropdownMenuItem onClick={() => signOut({ callbackUrl: "/login" })}>
             Log out
           </DropdownMenuItem>

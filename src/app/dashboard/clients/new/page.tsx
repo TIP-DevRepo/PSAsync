@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { Combobox } from "@/components/ui/combobox"
 import { formatPhoneInput } from "@/lib/phone"
@@ -61,7 +62,8 @@ export default function NewClientPage() {
   }
 
   return (
-    <div className="w-full space-y-6:">
+    <div className="w-full space-y-6">
+      <Breadcrumbs items={[{ label: "Clients", href: "/dashboard/clients" }]} current="New Client" />
       <h1 className="text-2xl font-bold">Add Client</h1>
 
       {/* Core Info */}

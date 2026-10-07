@@ -88,20 +88,31 @@ model CompanySettings {
 
 // ─── USER ─────────────────────────────────────────────────────────────────────
 model User {
-  id                    String   @id @default(cuid())
+  id                    String     @id @default(cuid())
   companyId             String
-  company               Company  @relation(fields: [companyId], references: [id])
+  company               Company    @relation(fields: [companyId], references: [id])
   name                  String
-  email                 String   @unique
+  email                 String     @unique
   password              String?
+  // Legacy single role, kept for one release so a rollback to the
+  // previous code still works. Never read for permission checks anymore:
+  // real access comes from userRoles (plus the company's Everyone role)
+  // via getEffectiveAccess in src/lib/permissions.ts. Kept in sync with
+  // the user's highest ranked assigned role by src/lib/user-roles.ts.
   roleId                String?
-  role                  Role?    @relation(fields: [roleId], references: [id])
-  active                Boolean  @default(true)
-  maxDiscount           Float    @default(10)
-  microsoftId           String?  @unique
-  preferredDistributors String[] @default([])
-  createdAt             DateTime @default(now())
-  updatedAt             DateTime @updatedAt
+  role                  Role?      @relation(fields: [roleId], references: [id])
+  userRoles             UserRole[] @relation("UserRoleUser")
+  active                Boolean    @default(true)
+  maxDiscount           Float      @default(10)
+  microsoftId           String?    @unique
+  preferredDistributors String[]   @default([])
+  createdAt             DateTime   @default(now())
+  updatedAt             DateTime   @updatedAt
+
+  // Rate limit for wrong current password attempts on My Account. Kept in
+  // the database because serverless instances don't share memory.
+  passwordChangeFailedAttempts Int       @default(0)
+  passwordChangeLockedUntil    DateTime?
 
   // Which dashboard loads for this user at /dashboard — their own, or
   // the shared company Default. Null means "use the company Default,"
@@ -1232,13 +1243,39 @@ model Role {
   // Cannot be edited or deleted (see src/app/api/roles/[id]/route.ts) and
   // enforced unique per company by a partial index (see migration SQL).
   isGlobalAdmin Boolean  @default(false)
+  // The implicit base role every user in the company holds without a
+  // UserRole row. Always the lowest rank, never Global Admin, can't be
+  // assigned, removed, renamed, or deleted, but its permissions stay
+  // editable. Enforced unique per company by a partial index, and kept
+  // from ever also being Global Admin by a check constraint (see the
+  // add_multi_role_support migration SQL).
+  isEveryone    Boolean  @default(false)
+  // Hex color string (e.g. "#5865F2"), reserved for the role picker UI.
+  color         String?
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   users             User[]
+  userRoles         UserRole[]         @relation("UserRoleRole")
   approvalWorkflows ApprovalWorkflow[]
 
   @@unique([companyId, name])
+}
+
+// ─── USER ROLE ───────────────────────────────────────────────────────────────
+// Which roles a user holds. A user's permissions are the union of every
+// role here plus their company's Everyone role (which never gets a row).
+model UserRole {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation("UserRoleUser", fields: [userId], references: [id], onDelete: Cascade)
+  roleId    String
+  role      Role     @relation("UserRoleRole", fields: [roleId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, roleId])
+  @@index([userId])
+  @@index([roleId])
 }
 
 // ─── INVENTORY ASSET ─────────────────────────────────────────────────────────

@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
@@ -105,6 +106,8 @@ function money(n: number) {
   return `$${n.toFixed(2)}`
 }
 
+const breadcrumbItems = [{ label: "Catalog", href: "/dashboard/catalog" }]
+
 export default function CatalogItemDetailPage() {
   const params = useParams()
   const id = params.id as string
@@ -149,8 +152,8 @@ export default function CatalogItemDetailPage() {
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((session) => {
-        const role = session?.user?.role
-        setCanDelete(!!role?.isGlobalAdmin || !!role?.permissions?.catalog?.delete)
+        const access = session?.user?.access
+        setCanDelete(!!access?.isGlobalAdmin || !!access?.permissions?.catalog?.delete)
       })
   }, [id])
 
@@ -209,11 +212,21 @@ export default function CatalogItemDetailPage() {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current={null} />
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </div>
+    )
   }
 
   if (!item) {
-    return <p className="text-sm text-danger">Item not found.</p>
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current="Not found" />
+        <p className="text-sm text-danger">Item not found.</p>
+      </div>
+    )
   }
 
   const vendorOptions = vendors.filter((v) => v.isVendor)
@@ -224,6 +237,7 @@ export default function CatalogItemDetailPage() {
   return (
     <div className="w-full space-y-6">
       <div>
+        <Breadcrumbs items={breadcrumbItems} current={item.name} />
         <Link href="/dashboard/catalog" className="text-sm text-muted-foreground hover:text-foreground hover:underline inline-block mb-2">
           ← Back to Catalog
         </Link>

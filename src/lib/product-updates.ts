@@ -18,6 +18,44 @@ export interface ProductUpdate {
 // update appears on /updates the moment the release goes live.
 export const PRODUCT_UPDATES: ProductUpdate[] = [
   {
+    version: "v0.9.04",
+    date: "2026-10-07",
+    title: "Multiple Roles, My Account, and Breadcrumbs",
+    sections: [
+      {
+        category: "Added",
+        items: [
+          "Users can now hold more than one role. Their access is the combination of everything their roles allow, so a Team A Manager role can add to a Team A role without taking anything away.",
+          "A locked Everyone role that every user automatically has. It starts with no permissions, and you can choose what it grants in Roles & Permissions.",
+          "Manage Users now shows each person's roles as colored pills. The two highest roles show first, with a +N more button to expand the rest, and an Edit Roles button to assign or remove roles.",
+          "Roles can have a color, chosen from a palette or a custom color.",
+          "Roles are ordered by dragging them into place, like Discord, with Global Admin always on top and Everyone always at the bottom. Dragging sets who outranks whom.",
+          "A new My Account page, opened from the user menu, where you can change your own password. Accounts that sign in with Microsoft see a note that their password is managed there.",
+          "Breadcrumb trails at the top of detail pages, New forms, Settings sections, and My Account, so you can see where you are and jump back up."
+        ],
+      },
+      {
+        category: "Improved",
+        items: [
+          "Notifications now appear at the top center of the screen. Success messages disappear after a few seconds, errors stay until you close them, and several notifications stack with the newest on top. They always show above open dialogs.",
+          "Confirmation dialogs have a refreshed look, with a clear warning icon on delete confirmations.",
+          "Changes to a person's roles, and deactivating a user, now take effect on their next page load instead of after a delay.",
+          "Deleting a role that people hold is now allowed, and the confirmation tells you how many users will lose it.",
+          "The sidebar now keeps a section highlighted while you are on its inner pages, such as a single client or a New form.",
+          "Password changes now require at least 12 characters, allow at most 72, and lock for 15 minutes after 5 wrong current password attempts."
+        ],
+      },
+      {
+        category: "Fixed",
+        items: [
+          "Deleting a role used by an approval workflow showed a confusing error. It now explains which workflows use it.",
+          "A company can no longer end up without an active Global Admin.",
+          "Missing spacing between sections on the New Client, New Vendor, and quote template pages."
+        ],
+      },
+    ],
+  },
+  {
     version: "v0.9.03",
     date: "2026-10-05",
     title: "Delete Actions, Editable Orders, and Microsoft Login Button",

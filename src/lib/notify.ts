@@ -140,15 +140,26 @@ export async function notifySalesOrderStatusChange(salesOrderId: string, status:
   const rule = rules?.[status]
   if (!rule) return
 
-  const recipientUserIds =
-    rule.type === "user"
-      ? [rule.id]
-      : (
-          await prisma.user.findMany({
-            where: { roleId: rule.id, active: true },
-            select: { id: true },
-          })
-        ).map((u) => u.id)
+  // A role rule matches every active user holding that role among any of
+  // their roles. The Everyone role is held implicitly by every user in the
+  // company, so it matches all of them.
+  let recipientUserIds: string[]
+  if (rule.type === "user") {
+    recipientUserIds = [rule.id]
+  } else {
+    const role = await prisma.role.findUnique({
+      where: { id: rule.id },
+      select: { companyId: true, isEveryone: true },
+    })
+    if (!role || role.companyId !== salesOrder.companyId) return
+    const users = await prisma.user.findMany({
+      where: role.isEveryone
+        ? { companyId: salesOrder.companyId, active: true }
+        : { active: true, userRoles: { some: { roleId: rule.id } } },
+      select: { id: true },
+    })
+    recipientUserIds = users.map((u) => u.id)
+  }
 
   const label = soStatusLabel(status)
   const message = `${salesOrder.soNumber} (${salesOrder.client.name}) is ${label}`

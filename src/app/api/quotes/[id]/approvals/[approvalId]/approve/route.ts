@@ -3,6 +3,7 @@ import { auth } from "@/auth"
 import { sendQuoteEmail } from "@/lib/send-quote-email"
 import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
+import { getUserRank } from "@/lib/permissions"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
@@ -30,15 +31,9 @@ export async function POST(
     return NextResponse.json({ error: "This approval has already been decided" }, { status: 400 })
   }
 
-  // Role rank isn't reliable from the session token yet (JWT still reflects
-  // whatever shape it had at login), so look up the current user's role
-  // rank fresh from the database for this permission check
-  const currentUser = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    include: { role: true },
-  })
-
-  const userRank = currentUser?.role?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : currentUser?.role?.rank ?? 0
+  // Highest rank across every role the user holds, resolved fresh from the
+  // database (Global Admin always outranks any requirement)
+  const userRank = await getUserRank(session.user.id)
   const requiredRank = approval.workflow.requiredRole?.rank ?? 999
   if (userRank < requiredRank) {
     return NextResponse.json(
