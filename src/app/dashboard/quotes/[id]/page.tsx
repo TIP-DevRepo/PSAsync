@@ -14,6 +14,7 @@ import {
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { promptDialog } from "@/lib/prompt-dialog"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
 import { RolePill } from "@/components/roles/RolePill"
@@ -265,7 +266,11 @@ export default function QuoteDetailPage({
   }
 
   async function handleReject(approvalId: string) {
-    const reason = window.prompt("Reason for rejecting (optional):") || ""
+    // Same outcome as the window.prompt this replaced: an answer is sent as
+    // the reason, while a blank answer or a cancel both still reject with
+    // an empty reason
+    const reason =
+      (await promptDialog({ title: "Reason for rejecting (optional):", confirmLabel: "OK", allowEmpty: true })) || ""
     setDecidingId(approvalId)
     await fetch(`/api/quotes/${id}/approvals/${approvalId}/reject`, {
       method: "POST",
