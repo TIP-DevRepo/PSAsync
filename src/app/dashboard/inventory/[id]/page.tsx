@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams, useRouter } from "next/navigation"
 import Link from "next/link"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
@@ -119,6 +120,8 @@ function returnClientFor(asset: AssetDetail) {
   if (asset.status === "LOANED") return asset.loanedToClient
   return null
 }
+
+const breadcrumbItems = [{ label: "Inventory", href: "/dashboard/inventory" }]
 
 export default function InventoryAssetDetailPage() {
   const params = useParams()
@@ -238,12 +241,27 @@ export default function InventoryAssetDetailPage() {
     }
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
-  if (!asset) return <p className="text-sm text-danger">Asset not found.</p>
+  if (loading) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current={null} />
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </div>
+    )
+  }
+  if (!asset) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current="Not found" />
+        <p className="text-sm text-danger">Asset not found.</p>
+      </div>
+    )
+  }
 
   return (
     <div className="w-full space-y-6">
       <div>
+        <Breadcrumbs items={breadcrumbItems} current={asset.assetTag} />
         <Link href="/dashboard/inventory" className="text-sm text-muted-foreground hover:text-foreground hover:underline inline-block mb-2">
           ← Back to Inventory
         </Link>

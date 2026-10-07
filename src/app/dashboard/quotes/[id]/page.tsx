@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, use } from "react"
 import Link from "next/link"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { Button as HeroButton } from "@heroui/react"
 import {
@@ -122,6 +123,8 @@ function statusLabel(status: string) {
 }
 
 // ─── Page ─────────────────────────────────────────────────────────────────
+const breadcrumbItems = [{ label: "Quotes", href: "/dashboard/quotes" }]
+
 export default function QuoteDetailPage({
   params,
 }: {
@@ -222,8 +225,22 @@ export default function QuoteDetailPage({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quote?.id])
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
-  if (notFound) return <p className="text-sm text-danger">Quote not found.</p>
+  if (loading) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current={null} />
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </div>
+    )
+  }
+  if (notFound) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current="Not found" />
+        <p className="text-sm text-danger">Quote not found.</p>
+      </div>
+    )
+  }
   if (!quote) return null
 
   // ─── Send / portal link actions ────────────────────────────────────────
@@ -506,6 +523,7 @@ export default function QuoteDetailPage({
   return (
     <div className="w-full space-y-6">
       <div>
+        <Breadcrumbs items={breadcrumbItems} current={quote.version > 1 ? `${quote.quoteNumber} v${quote.version}` : quote.quoteNumber} />
         <Link href="/dashboard/quotes" className="text-sm text-muted-foreground hover:text-foreground hover:underline inline-block mb-2">
           ← Back to Quotes
         </Link>

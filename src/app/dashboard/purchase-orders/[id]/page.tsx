@@ -3,6 +3,7 @@
 import { useState, useEffect, use } from "react"
 import { useRouter } from "next/navigation"
 import Link from "next/link"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
@@ -93,6 +94,8 @@ function fileSizeLabel(bytes: number | null) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+const breadcrumbItems = [{ label: "Purchase Orders", href: "/dashboard/purchase-orders" }]
 
 export default function PurchaseOrderDetailPage({
   params,
@@ -400,8 +403,22 @@ export default function PurchaseOrderDetailPage({
     loadPO()
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
-  if (notFound || !po) return <p className="text-sm text-danger">Purchase Order not found.</p>
+  if (loading) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current={null} />
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </div>
+    )
+  }
+  if (notFound || !po) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current="Not found" />
+        <p className="text-sm text-danger">Purchase Order not found.</p>
+      </div>
+    )
+  }
 
   const total = po.lineItems.reduce((sum, li) => sum + li.unitCost * li.quantity, 0)
   const receivedCount = po.lineItems.filter((li) => li.received).length
@@ -414,6 +431,7 @@ export default function PurchaseOrderDetailPage({
   return (
     <div className="w-full space-y-6">
       <div>
+        <Breadcrumbs items={breadcrumbItems} current={po.poNumber} />
         <Link href="/dashboard/purchase-orders" className="text-sm text-muted-foreground hover:text-foreground hover:underline inline-block mb-2">
           ← Back to Purchase Orders
         </Link>

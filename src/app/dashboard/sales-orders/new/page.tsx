@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
 
@@ -170,6 +171,7 @@ export default function NewSalesOrderPage() {
 
   return (
     <div className="w-full max-w-4xl space-y-6">
+      <Breadcrumbs items={[{ label: "Sales Orders", href: "/dashboard/sales-orders" }]} current="New Sales Order" />
       <h1 className="text-display font-semibold tracking-tight text-foreground">New Sales Order</h1>
 
       {error && (
