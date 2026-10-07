@@ -253,11 +253,13 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 ## Feedback
 
 ### Toast Notifications
-- Position bottom-right desktop, top edge mobile — never screen center.
-- Dismiss timing by severity: routine ~4s, warnings ~7s, critical stays until acknowledged.
-- Cap stack at 3 visible; newest enters bottom, older float up/out, rest queue.
-- Close button + swipe-to-dismiss + pause-on-hover.
+- Position top center on every screen size, never bottom right and never screen center.
+- Dismiss timing by severity: success and info close automatically after about 4 seconds; errors and warnings stay until the user closes them.
+- Cap stack at 3 visible; newest on top, older ones below, the rest queue.
+- Every notification has an always visible close button, never one that only appears on hover.
+- Notifications render above all modals, dialogs, and popovers, so a notification fired from inside one is never hidden behind it.
 - Color-code by type but pair with icon + accent border (never color alone).
+- **PSAsync relevance:** built on HeroUI's Toast. The shared `AppToastProvider` (`src/components/ToastProvider.tsx`) is mounted once in the root layout, and every notification goes through the helpers in `src/lib/toast.ts` (`toast.success`, `toast.info`, `toast.warning`, `toast.error`), which set the timing above.
 
 ### Doherty Threshold
 - 400ms is the threshold — under 200ms feels instant, 200–400ms tolerable, over 400ms breaks engagement.
@@ -315,6 +317,7 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 - Snap to nearest valid slot on structured surfaces; expose valid target slots while dragging.
 - Pair every drop with a short undo toast (~5s).
 - **PSAsync relevance:** directly informs the queued line item builder CSS Grid rewrite — the pickup/drop-zone/undo rules apply to our reorder feature.
+- **Drag to reorder pattern:** built on `@dnd-kit` (see role rank on Settings > Roles and Permissions, `src/components/settings/RolesPermissionsPanel.tsx`). Rows that must stay in place, like Global Admin at the top and Everyone at the bottom, are pinned: they show a lock instead of a drag handle and cannot be dragged or dropped past. Reordering works from the keyboard too, using `KeyboardSensor` with `sortableKeyboardCoordinates` on a focusable drag handle.
 
 ### Dropdown Design
 - 48px touch target, visible caret, real hover state on the trigger.
@@ -404,6 +407,8 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 - Row density as one token-driven control (36/48/60px), not per-table guessing.
 - Whole row as the selection target, not just a tiny checkbox.
 - Select-all morphs empty → indeterminate → checked.
+- Never shrink or squeeze table columns to fit content. Keep column widths stable and handle long or growing content with expand and collapse, wrapping, or truncation with a tooltip instead.
+- If a column needs more room, widen that column rather than squeezing its neighbors; below the table's minimum width it scrolls sideways.
 - **PSAsync relevance:** Quotes list, Clients list, and the line item builder table itself.
 
 ### Modal Hierarchy
@@ -413,6 +418,18 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 - Drawer: edge-anchored, for navigation, dims only its own area.
 - Popover: anchored to trigger, small (~200px), lightweight menus only.
 - **PSAsync relevance:** your shared `Modal` component — audit whether every current use case actually needs full-modal weight vs. a lighter popover/drawer.
+
+### Confirmation Dialogs
+- Built on HeroUI's AlertDialog through the shared `ConfirmDialogProvider` (`src/components/ConfirmDialogProvider.tsx`), mounted once in the root layout.
+- Ask with the `confirmDialog()` API from `src/lib/confirm-dialog.ts`, which returns a promise of true (confirmed) or false (cancelled). Never use the browser's `window.confirm` or a one-off modal.
+- Destructive confirmations use the danger variant: the danger icon sits in a tinted pill (`bg-danger/10 text-danger`) and the confirm button is destructive.
+- Escape and a backdrop click both cancel.
+- Focus is trapped inside the dialog while it is open and returned to whatever opened it when it closes.
+
+### Role Pills
+- A role shows as a tinted pill in that role's own color (the shared `RolePill` component, `.role-pill` in `globals.css`), the same tinted pill pattern as other accent labels rather than a solid fill. Global Admin and Everyone use their fixed colors, and a role with no color falls back to neutral gray.
+- In a collapsed row, only the two highest roles show; the rest sit behind a "+N more" button that expands the pills in place, wrapping onto more lines and never widening the column.
+- Roles are changed through the "Edit Roles" button next to the pills, which opens a checklist popover (`RoleAssignControl` in `src/components/roles/RoleAssignControl.tsx`).
 
 ---
 
