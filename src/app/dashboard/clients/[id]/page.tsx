@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { useParams } from "next/navigation"
 import Link from "next/link"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { TabsBar } from "@/components/ui/tabs-bar"
@@ -153,6 +154,8 @@ function locationAddress(loc: ClientLocation | null) {
   const cityStateZip = [loc.city, loc.state, loc.zip].filter(Boolean).join(", ")
   return [loc.address, loc.address2, cityStateZip, loc.country].filter(Boolean).join(" · ") || loc.name
 }
+
+const breadcrumbItems = [{ label: "Clients", href: "/dashboard/clients" }]
 
 export default function ClientDetailPage() {
   const params = useParams()
@@ -388,16 +391,27 @@ export default function ClientDetailPage() {
   }
 
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading...</p>
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current={null} />
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </div>
+    )
   }
 
   if (!client) {
-    return <p className="text-sm text-danger">Client not found.</p>
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current="Not found" />
+        <p className="text-sm text-danger">Client not found.</p>
+      </div>
+    )
   }
 
   return (
     <div className="w-full space-y-6">
       <div>
+        <Breadcrumbs items={breadcrumbItems} current={client.name} />
         <Link href="/dashboard/clients" className="text-sm text-muted-foreground hover:text-foreground hover:underline inline-block mb-2">
           ← Back to Clients
         </Link>

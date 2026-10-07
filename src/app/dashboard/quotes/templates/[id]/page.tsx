@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import {
   LineItemBuilder,
@@ -32,6 +33,8 @@ function lineTotal(li: LineItemBuilderItem) {
 function money(n: number) {
   return `$${n.toFixed(2)}`
 }
+
+const breadcrumbItems = [{ label: "Quotes", href: "/dashboard/quotes" }]
 
 export default function TemplateDetailPage({
   params,
@@ -229,8 +232,22 @@ export default function TemplateDetailPage({
     ])
   }
 
-  if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
-  if (notFound || !template) return <p className="text-sm text-red-600">Template not found.</p>
+  if (loading) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current={null} />
+        <p className="text-sm text-zinc-500">Loading...</p>
+      </div>
+    )
+  }
+  if (notFound || !template) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current="Not found" />
+        <p className="text-sm text-red-600">Template not found.</p>
+      </div>
+    )
+  }
 
   // ─── Totals (mirrors the quote detail page, minus recurring split by
   // interval since templates don't need that level of preview detail) ────
@@ -242,9 +259,12 @@ export default function TemplateDetailPage({
 
   return (
     <div className="w-full space-y-6:">
-      <Link href="/dashboard/quotes" className="text-sm text-zinc-500 hover:underline">
-        ← Back to Quotes
-      </Link>
+      <div>
+        <Breadcrumbs items={breadcrumbItems} current={template.name.trim() || "Untitled template"} />
+        <Link href="/dashboard/quotes" className="text-sm text-zinc-500 hover:underline">
+          ← Back to Quotes
+        </Link>
+      </div>
 
       <h1 className="text-2xl font-bold">{template.name}</h1>
 

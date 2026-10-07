@@ -2,6 +2,7 @@
 
 import { useState, useEffect, use } from "react"
 import Link from "next/link"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/Modal"
@@ -156,6 +157,8 @@ function fileSizeLabel(bytes: number | null) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
+
+const breadcrumbItems = [{ label: "Sales Orders", href: "/dashboard/sales-orders" }]
 
 export default function SalesOrderDetailPage({
   params,
@@ -406,8 +409,22 @@ export default function SalesOrderDetailPage({
     loadSO()
   }
 
-  if (loading) return <p className="text-sm text-muted-foreground">Loading...</p>
-  if (notFound || !so) return <p className="text-sm text-danger">Sales Order not found.</p>
+  if (loading) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current={null} />
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      </div>
+    )
+  }
+  if (notFound || !so) {
+    return (
+      <div className="w-full">
+        <Breadcrumbs items={breadcrumbItems} current="Not found" />
+        <p className="text-sm text-danger">Sales Order not found.</p>
+      </div>
+    )
+  }
 
   const pricedItems = so.lineItems.filter((li) => !li.isTextBlock)
   const subtotal = pricedItems.reduce((sum, li) => sum + lineTotal(li), 0)
@@ -443,6 +460,7 @@ export default function SalesOrderDetailPage({
   return (
     <div className="w-full space-y-6">
       <div>
+        <Breadcrumbs items={breadcrumbItems} current={so.soNumber} />
         <Link href="/dashboard/sales-orders" className="text-sm text-muted-foreground hover:text-foreground hover:underline inline-block mb-2">
           ← Back to Sales Orders
         </Link>
