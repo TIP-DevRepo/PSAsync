@@ -1,9 +1,5 @@
 @AGENTS.md
 
-# Commits
-Always prompt the user for approval before running `git commit`, even if the task or commit message style has already been discussed.
-Commit messages: short, imperative-mood subject line (e.g. "Fix category picker not updating on add catalog item form"), matching existing repo history. No body unless the change needs explanation beyond the subject.
-
 # Verification before calling a task done
 Run `npm run lint` and `npm run build` before considering a change complete. Fix errors these surface rather than leaving them for the user to find.
 
@@ -11,19 +7,19 @@ Run `npm run lint` and `npm run build` before considering a change complete. Fix
 This repo uses npm exclusively (`package-lock.json` is the source of truth). Never introduce a `yarn.lock` or `pnpm-lock.yaml`, and don't suggest yarn/pnpm commands.
 
 # Dependency versions
-Key dependencies are newer than typical training data: Next.js 16.2.9, React 19.2.4, Prisma 7.8. Before using an API from these, check `node_modules/next/dist/docs/` (per AGENTS.md), `node_modules/prisma`, or the installed type defs rather than assuming familiar behavior — APIs have moved between major versions.
+Key dependencies are newer than typical training data: Next.js 16.2.9, React 19.2.4, Prisma 7.8. Before using an API from these, check `node_modules/next/dist/docs/` (per AGENTS.md), `node_modules/prisma`, or the installed type defs rather than assuming familiar behavior. APIs have moved between major versions.
 
 # Scope discipline
-Keep changes scoped to what was asked. Don't refactor, rename, or "clean up" unrelated code while fixing a bug or adding a feature — separate cleanup into its own explicitly-requested change.
+Keep changes scoped to what was asked. Don't refactor, rename, or "clean up" unrelated code while fixing a bug or adding a feature. Separate cleanup into its own explicitly-requested change.
 
 # Secrets and config
 `.env*` files are gitignored. Never read or write any `.env*` file (`.env`, `.env.local`, `.env.development.local`, etc.) by any means: no `Read`, `cat`, `Get-Content`, `grep`/`Select-String` over them, no `Write`/`Edit`, no shell redirection into them. Never commit them, print their contents, or hardcode values from them into source. If a task needs a new env var, tell the user in your summary which variable to add, to which file, and why. Do not add it yourself.
 
 # Branching and commits (project conventions)
-- Never work directly on `main`. All work happens on `feature/*` or `bugfix/*` branches created off `dev`, or directly on `dev` for small fixes.
+- I create and switch branches myself and name them `feature/*` or `bugfix/*`. Claude Code works on whichever branch is currently checked out and never creates or switches branches. If the checked out branch looks wrong for the task (for example `main` or `dev`), stop and ask me before making any changes.
 - Branch naming: `feature/short-description` for new features, `bugfix/short-description` for bug fixes.
-- Commits on `feature/*`, `bugfix/*`, and `dev` branches use plain, short, present-tense titles only. No version numbers, no code block formatting on the title. Example: "Add dashboard grid layout scaffold", not "v0.9.01: Add dashboard grid layout scaffold".
-- Never invent, assume, or write a version number (vX.X.XX) in any commit title or description on any branch. Version numbers are only assigned by the project owner at the moment `dev` is merged into `main`, and that decision happens outside of Claude Code entirely. If asked to prepare a merge into `main`, do not generate a version number yourself; leave that placeholder for the owner to fill in.
+- Commit titles are plain, short, and present-tense, with no code block formatting. Example: "Add dashboard grid layout scaffold".
+- Never invent, guess, or assume a version number (vX.X.XX). Use one only when my prompt gives it to you, and then the commit title starts with it, for example "v0.9.04: Short Title". Otherwise commit titles have no version number.
 - Never use em dashes or en dashes anywhere: not in code comments, not in commit messages, not in any generated text. Use a comma, colon, or period instead.
 
 # Environment variables: critical gotcha
@@ -53,3 +49,15 @@ Keep changes scoped to what was asked. Don't refactor, rename, or "clean up" unr
 
 # Deployment note
 - After any merge into `main` that includes new Prisma migration files, `npx prisma migrate deploy` must be run against the live production database. This is a manual step performed by the project owner, not something to run automatically as part of a build or deploy script.
+
+## Commits
+
+- Claude Code makes commits itself, locally only. Never create or switch branches, never push, never open pull requests, never merge, never amend or rewrite history, and never force anything. I handle all of that manually.
+- Make several small commits instead of one big one. Commit when a logical piece of work or a phase is finished and the build and lint pass for it. Never commit broken or half finished work.
+- Stage only the files that belong to each commit. Check git status before each commit and never stage .env files, .next, secrets, or stray files. A schema change and the migration folder it needs go in the same commit.
+- Title: short, imperative, plain. Do not include a version number unless my prompt gives one. If it does, the title starts with it, for example "v0.9.04: Short Title".
+- Titles match the existing repo history, for example "Fix category picker not updating on add catalog item form".
+- Description: plain text, one to four sentences, saying what changed and why in user terms. Never put the description in a code block.
+- Never use em dashes or en dashes in commit titles or descriptions.
+- Never mention Claude, Claude Code, AI, Anthropic, or any assistant in a commit. No Co-Authored-By, no "Generated with", no trailers of any kind.
+- At the end of every task, list the commits you made (short hash and title) in your report.
