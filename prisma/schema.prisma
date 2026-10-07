@@ -119,6 +119,11 @@ model User {
   loginFailedAttempts Int       @default(0)
   loginLockedUntil    DateTime?
 
+  // Set when an admin invites someone with a temporary password. Until they
+  // choose their own, getEffectiveAccess gives them no access at all and
+  // the dashboard sends them to /change-password.
+  mustChangePassword Boolean @default(false)
+
   // Which dashboard loads for this user at /dashboard — their own, or
   // the shared company Default. Null means "use the company Default,"
   // same as if they'd never picked one. Cleared automatically if that
