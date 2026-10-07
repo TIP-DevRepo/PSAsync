@@ -426,6 +426,7 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 - Destructive confirmations use the danger variant: the danger icon sits in a tinted pill (`bg-danger/10 text-danger`) and the confirm button is destructive.
 - Escape and a backdrop click both cancel.
 - Focus is trapped inside the dialog while it is open and returned to whatever opened it when it closes.
+- Input prompts use `promptDialog()` from `src/lib/prompt-dialog.ts`, never the browser's `window.prompt`.
 
 ### Role Pills
 - A role shows as a tinted pill in that role's own color (the shared `RolePill` component, `.role-pill` in `globals.css`), the same tinted pill pattern as other accent labels rather than a solid fill. Global Admin and Everyone use their fixed colors, and a role with no color falls back to neutral gray.
