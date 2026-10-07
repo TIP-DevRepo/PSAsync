@@ -10,6 +10,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 import { RoleAssignControl, RoleChecklist, type AssignableRole } from "@/components/roles/RoleAssignControl"
 import type { MenuAnchor } from "@/lib/useFixedMenu"
 
@@ -141,7 +142,25 @@ export function UsersSettingsPanel() {
     loadUsers()
   }
 
+  // Both directions change whether someone can sign in, so each asks first.
+  // Cancel, Escape, or a backdrop click resolve false and nothing is sent.
   async function setUserActive(user: User, active: boolean) {
+    const confirmed = await confirmDialog(
+      active
+        ? {
+            title: `Activate ${user.name}?`,
+            description: `${user.name} will be able to sign in again with the roles they hold.`,
+            confirmLabel: "Activate User",
+          }
+        : {
+            title: `Deactivate ${user.name}?`,
+            description: `${user.name} will lose access immediately and will not be able to sign in until you activate them again. Their data is kept.`,
+            confirmLabel: "Deactivate User",
+            variant: "danger",
+          }
+    )
+    if (!confirmed) return
+
     const res = await fetch(`/api/users/${user.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
