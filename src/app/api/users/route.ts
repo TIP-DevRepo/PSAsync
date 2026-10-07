@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
 import { hasPermission, getUserRank, getEffectiveAccess } from "@/lib/permissions"
 import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
+import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
 
 export async function GET() {
   const session = await auth()
@@ -58,7 +59,26 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { name, email, tempPassword } = body
+  const { name, email } = body
+  const tempPassword = typeof body.tempPassword === "string" ? body.tempPassword : ""
+
+  // Same rules as choosing a password on My Account, checked here and not
+  // just in the browser. The password itself is never echoed back.
+  if (!tempPassword) {
+    return NextResponse.json({ error: "Temporary password is required" }, { status: 400 })
+  }
+  if (tempPassword.length < MIN_PASSWORD_LENGTH) {
+    return NextResponse.json(
+      { error: `Temporary password must be at least ${MIN_PASSWORD_LENGTH} characters` },
+      { status: 400 }
+    )
+  }
+  if (passwordByteLength(tempPassword) > MAX_PASSWORD_BYTES) {
+    return NextResponse.json(
+      { error: `Temporary password is too long. Use ${MAX_PASSWORD_BYTES} characters or fewer.` },
+      { status: 400 }
+    )
+  }
   // Accepts roleIds (a list) or the existing single roleId field
   const requestedRoleIds = readRoleIdsFromBody(body)
   if (requestedRoleIds === null) {

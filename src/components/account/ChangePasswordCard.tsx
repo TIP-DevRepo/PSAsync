@@ -56,7 +56,9 @@ function PasswordField({
   )
 }
 
-function Requirement({ met, children }: { met: boolean; children: React.ReactNode }) {
+// One password rule with a check that lights up once it's met. Also used by
+// the invite form on Settings > Users.
+export function Requirement({ met, children }: { met: boolean; children: React.ReactNode }) {
   return (
     <li className={cn("flex items-center gap-2", met ? "text-success" : "text-muted-foreground")}>
       <Check className={cn("h-3.5 w-3.5", !met && "opacity-30")} />

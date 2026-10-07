@@ -11,6 +11,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
+import { Requirement } from "@/components/account/ChangePasswordCard"
 import { RoleAssignControl, RoleChecklist, type AssignableRole } from "@/components/roles/RoleAssignControl"
 import type { MenuAnchor } from "@/lib/useFixedMenu"
 
@@ -22,7 +24,9 @@ interface RoleOption extends AssignableRole {
 // temp password gets copy-pasted into a URL, CSV, or shell command.
 const TEMP_PASSWORD_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*()-_?"
 
-function generateTempPassword(length = 12): string {
+// Every character here is one byte, so a password of MIN_PASSWORD_LENGTH
+// always meets both the minimum and the 72 byte maximum
+function generateTempPassword(length = MIN_PASSWORD_LENGTH): string {
   const values = new Uint32Array(length)
   crypto.getRandomValues(values)
   return Array.from(values, (v) => TEMP_PASSWORD_CHARS[v % TEMP_PASSWORD_CHARS.length]).join("")
@@ -101,7 +105,14 @@ export function UsersSettingsPanel() {
     return null
   }
 
+  const tempPasswordLongEnough = newUser.tempPassword.length >= MIN_PASSWORD_LENGTH
+  // Measured in bytes, matching the API
+  const tempPasswordShortEnough =
+    newUser.tempPassword.length > 0 && passwordByteLength(newUser.tempPassword) <= MAX_PASSWORD_BYTES
+  const tempPasswordValid = tempPasswordLongEnough && tempPasswordShortEnough
+
   async function handleInvite() {
+    if (!tempPasswordValid) return
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -253,8 +264,13 @@ export function UsersSettingsPanel() {
                 Generate
               </Button>
             </div>
+            {/* Same rules the users API enforces on the server */}
+            <ul className="mt-2 space-y-1 text-xs" aria-live="polite">
+              <Requirement met={tempPasswordLongEnough}>At least {MIN_PASSWORD_LENGTH} characters</Requirement>
+              <Requirement met={tempPasswordShortEnough}>No more than {MAX_PASSWORD_BYTES} characters</Requirement>
+            </ul>
           </div>
-          <Button onClick={handleInvite}>Create User</Button>
+          <Button onClick={handleInvite} disabled={!tempPasswordValid}>Create User</Button>
         </div>
       )}
 
