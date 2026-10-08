@@ -1,21 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { RecurringInterval } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id: quoteId } = await params
 
   // Confirm the quote belongs to this company before touching it
   const quote = await prisma.quote.findUnique({
-    where: { id: quoteId, companyId: session.user.companyId },
+    where: { id: quoteId, companyId: ctx.companyId },
   })
   if (!quote) {
     return NextResponse.json({ error: "Quote not found" }, { status: 404 })
@@ -28,6 +28,12 @@ export async function POST(
   }
 
   const body = await req.json()
+
+  if (body.isRecurring && body.recurringInterval && !isEnumValue(RecurringInterval, body.recurringInterval)) {
+    return apiError(400, "Invalid recurring interval")
+  }
+  const invalid = await assertRefs(ctx, { catalogItemId: body.catalogItemId })
+  if (invalid) return invalid
 
   // Next sortOrder = current highest + 1, so new items land at the bottom
   const highest = await prisma.quoteLineItem.findFirst({
