@@ -2,12 +2,16 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { uploadFileToS3 } from "@/lib/s3"
 import { prisma } from "@/lib/prisma"
+import { hasPermission } from "@/lib/permissions"
 
 export async function POST(req: NextRequest) {
   const session = await auth()
 
   if (!session?.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+  if (!(await hasPermission(session.user.id, "settingsSections.company"))) {
+    return NextResponse.json({ error: "You don't have permission to change the company logo" }, { status: 403 })
   }
 
   const formData = await req.formData()

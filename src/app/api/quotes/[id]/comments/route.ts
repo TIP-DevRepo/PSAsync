@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { sendQuoteNotificationEmail } from "@/lib/send-quote-email"
 import { prisma } from "@/lib/prisma"
+import { escapeHtml, escapeHtmlWithBreaks } from "@/lib/html"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
@@ -76,7 +77,7 @@ export async function POST(
       id,
       clientEmail,
       `New message on Quote ${quote.quoteNumber}`,
-      `<p>${comment.authorName} sent you a message on your quote:</p><blockquote>${body.message.trim().replace(/\n/g, "<br/>")}</blockquote><p><a href="${portalLink}">View and reply</a></p>`
+      `<p>${escapeHtml(comment.authorName)} sent you a message on your quote:</p><blockquote>${escapeHtmlWithBreaks(body.message.trim())}</blockquote><p><a href="${escapeHtml(portalLink)}">View and reply</a></p>`
     ).catch((err) => console.error("Failed to send comment notification email:", err))
   }
 
