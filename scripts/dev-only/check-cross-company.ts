@@ -269,6 +269,17 @@ class Session {
   }
 }
 
+// Every refusal from the app is a JSON { error }. Next's own 404 for a path
+// that doesn't exist is an HTML page, which must never count as a refusal.
+function isJsonError(text: string): boolean {
+  try {
+    const parsed = JSON.parse(text) as { error?: unknown }
+    return !!parsed && typeof parsed.error === "string"
+  } catch {
+    return false
+  }
+}
+
 function errorText(text: string): string {
   try {
     const parsed = JSON.parse(text) as { error?: unknown }
@@ -508,7 +519,10 @@ async function main() {
         row.result = "FAIL"
         row.note = `server error: ${message}`
       } else if (res.status === attempt.expect) {
-        if (attempt.expectError && !message.includes(attempt.expectError)) {
+        if (!isJsonError(res.text)) {
+          row.result = "UNEXPECTED"
+          row.note = "not a JSON refusal from the app, the route path may be wrong"
+        } else if (attempt.expectError && !message.includes(attempt.expectError)) {
           row.result = "UNEXPECTED"
           row.note = `refused for a different reason: ${message}`
         }
