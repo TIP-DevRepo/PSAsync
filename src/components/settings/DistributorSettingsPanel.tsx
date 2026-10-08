@@ -237,9 +237,13 @@ export function DistributorSettingsPanel() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ environment: env }),
     })
-    const result = await res.json()
-    setTestResults((prev) => ({ ...prev, [key]: result }))
+    const result = await res.json().catch(() => ({}))
     setTestingKey(null)
+    if (!res.ok) {
+      toast.error(`Couldn't test ${DISTRIBUTOR_META[key].label}`, result.error)
+      return
+    }
+    setTestResults((prev) => ({ ...prev, [key]: result }))
   }
 
   async function handleSetActive(key: DistributorKey, targetEnv: Environment) {
