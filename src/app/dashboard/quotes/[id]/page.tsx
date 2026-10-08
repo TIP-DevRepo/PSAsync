@@ -266,11 +266,14 @@ export default function QuoteDetailPage({
   }
 
   async function handleReject(approvalId: string) {
-    // Same outcome as the window.prompt this replaced: an answer is sent as
-    // the reason, while a blank answer or a cancel both still reject with
-    // an empty reason
-    const reason =
-      (await promptDialog({ title: "Reason for rejecting (optional):", confirmLabel: "OK", allowEmpty: true })) || ""
+    // OK rejects, with whatever was typed (an empty reason is fine). Cancel,
+    // Escape, or a backdrop click return null and leave it pending.
+    const reason = await promptDialog({
+      title: "Reason for rejecting (optional):",
+      confirmLabel: "OK",
+      allowEmpty: true,
+    })
+    if (reason === null) return
     setDecidingId(approvalId)
     await fetch(`/api/quotes/${id}/approvals/${approvalId}/reject`, {
       method: "POST",
