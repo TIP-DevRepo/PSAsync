@@ -384,10 +384,11 @@ export function RolesPermissionsPanel() {
         ...(draft.isEveryone ? {} : { color: draft.color }),
       }),
     })
-    const data = await res.json()
+    const data = await res.json().catch(() => ({}))
     setSaving(false)
     if (!res.ok) {
       setError(data.error || "Something went wrong.")
+      toast.error("Couldn't save role", data.error)
       return
     }
     toast.success("Role updated")
