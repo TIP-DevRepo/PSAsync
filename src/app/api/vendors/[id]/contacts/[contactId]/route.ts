@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireAccess, notFound } from "@/lib/api-access"
-import { loadVendorContact, vendorContactWhere } from "@/lib/scoped-loaders"
+import { assertRefs, loadVendorContact, vendorContactWhere } from "@/lib/scoped-loaders"
 
 export async function PATCH(
   req: NextRequest,
@@ -15,6 +15,10 @@ export async function PATCH(
   if (!existing) return notFound()
 
   const body = await req.json()
+
+  // The location must be one of this vendor's
+  const invalid = await assertRefs(ctx, { vendorId: id, vendorLocationId: body.locationId })
+  if (invalid) return invalid
 
   const data: Record<string, unknown> = {}
   if (body.firstName !== undefined) data.firstName = body.firstName

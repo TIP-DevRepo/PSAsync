@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { VendorStatus, VendorType } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { loadVendor, vendorWhere } from "@/lib/scoped-loaders"
 
 export async function GET(
   req: NextRequest,
@@ -32,18 +35,22 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
   const body = await req.json()
 
-  const existing = await prisma.vendor.findUnique({ where: { id, companyId } })
+  const existing = await loadVendor(ctx, id)
   if (!existing) {
     return NextResponse.json({ error: "Vendor not found" }, { status: 404 })
+  }
+
+  if (body.type !== undefined && !isEnumValue(VendorType, body.type)) {
+    return apiError(400, "Invalid vendor type")
+  }
+  if (body.status !== undefined && !isEnumValue(VendorStatus, body.status)) {
+    return apiError(400, "Invalid status")
   }
 
   const data: Record<string, unknown> = {}
@@ -61,7 +68,7 @@ export async function PATCH(
   if (body.isVendor !== undefined) data.isVendor = body.isVendor
   if (body.isManufacturer !== undefined) data.isManufacturer = body.isManufacturer
 
-  const vendor = await prisma.vendor.update({ where: { id }, data })
+  const vendor = await prisma.vendor.update({ where: vendorWhere(ctx, id), data })
 
   return NextResponse.json(vendor)
 }
