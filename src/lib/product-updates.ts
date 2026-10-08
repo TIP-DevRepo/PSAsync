@@ -18,6 +18,41 @@ export interface ProductUpdate {
 // update appears on /updates the moment the release goes live.
 export const PRODUCT_UPDATES: ProductUpdate[] = [
   {
+    version: "v0.9.05",
+    date: "2026-10-08",
+    title: "Account Lockout, User Actions Menu, and Safer Settings",
+    sections: [
+      {
+        category: "Added",
+        items: [
+          "Account lockout: after 5 wrong password attempts, sign in is locked for 15 minutes. Global Admins can unlock a user right away from Settings > Users.",
+          "A new actions menu on each user in Settings > Users, with Unlock, Deactivate, and Activate. Deactivating or activating a user now asks for confirmation first.",
+          "Invited users now choose their own password the first time they sign in. Companies that sign in with Microsoft are not affected."
+        ],
+      },
+      {
+        category: "Improved",
+        items: [
+          "Customer quote links now share only what customers need to see.",
+          "Saved integration credentials are no longer displayed after saving. Settings now shows a Saved label, and you can replace or remove a credential.",
+          "Changes to Microsoft sign in settings are now limited to Global Admins.",
+          "Company settings and distributor connection tests now require the matching settings permission.",
+          "Pop-up input prompts now match the look of other dialogs and alerts.",
+          "Brand colors are checked when saved, and names and messages are displayed safely in quote PDFs and emails."
+        ],
+      },
+      {
+        category: "Fixed",
+        items: [
+          "Cancelling the reason prompt when rejecting a quote approval no longer rejects the quote.",
+          "Deactivated users can no longer sign in.",
+          "You can no longer deactivate your own account.",
+          "Temporary passwords for invited users now follow the same password rules as everyone else."
+        ],
+      },
+    ],
+  },
+  {
     version: "v0.9.04",
     date: "2026-10-07",
     title: "Multiple Roles, My Account, and Breadcrumbs",
