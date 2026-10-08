@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess, notFound } from "@/lib/api-access"
+import { loadVendorLocation, vendorLocationWhere } from "@/lib/scoped-loaders"
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; locationId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
-  const { locationId } = await params
+  const { id, locationId } = await params
+  const existing = await loadVendorLocation(ctx, id, locationId)
+  if (!existing) return notFound()
+
   const body = await req.json()
 
   const data: Record<string, unknown> = {}
@@ -26,7 +28,7 @@ export async function PATCH(
   if (body.notes !== undefined) data.notes = body.notes || null
   if (body.isPrimary !== undefined) data.isPrimary = body.isPrimary
 
-  const location = await prisma.vendorLocation.update({ where: { id: locationId }, data })
+  const location = await prisma.vendorLocation.update({ where: vendorLocationWhere(ctx, id, locationId), data })
 
   return NextResponse.json(location)
 }

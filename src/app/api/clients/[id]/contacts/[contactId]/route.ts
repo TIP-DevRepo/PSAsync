@@ -1,38 +1,32 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess, notFound } from "@/lib/api-access"
+import { clientContactWhere, loadClientContact } from "@/lib/scoped-loaders"
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; contactId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id, contactId } = await params
 
-  const client = await prisma.client.findUnique({
-    where: { id, companyId: session.user.companyId },
-    select: { id: true },
-  })
-  if (!client) {
-    return NextResponse.json({ error: "Client not found" }, { status: 404 })
-  }
+  const existing = await loadClientContact(ctx, id, contactId)
+  if (!existing) return notFound()
 
   const body = await req.json()
   const { firstName, lastName, title, email, phone, mobile, locationType, locationId, notes, isPrimary, tagIds } = body
 
   if (isPrimary === true) {
     await prisma.contact.updateMany({
-      where: { clientId: id, isPrimary: true },
+      where: { clientId: id, client: { companyId: ctx.companyId }, isPrimary: true },
       data: { isPrimary: false },
     })
   }
 
   const contact = await prisma.contact.update({
-    where: { id: contactId },
+    where: clientContactWhere(ctx, id, contactId),
     data: {
       firstName,
       lastName,
