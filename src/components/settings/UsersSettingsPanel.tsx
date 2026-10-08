@@ -1,9 +1,20 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
+import { Menu } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { toast } from "@/lib/toast"
-import { RoleAssignControl, type AssignableRole } from "@/components/roles/RoleAssignControl"
+import { confirmDialog } from "@/lib/confirm-dialog"
+import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
+import { Requirement } from "@/components/account/ChangePasswordCard"
+import { RoleAssignControl, RoleChecklist, type AssignableRole } from "@/components/roles/RoleAssignControl"
+import type { MenuAnchor } from "@/lib/useFixedMenu"
 
 interface RoleOption extends AssignableRole {
   isEveryone?: boolean
@@ -13,7 +24,9 @@ interface RoleOption extends AssignableRole {
 // temp password gets copy-pasted into a URL, CSV, or shell command.
 const TEMP_PASSWORD_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%&*()-_?"
 
-function generateTempPassword(length = 12): string {
+// Every character here is one byte, so a password of MIN_PASSWORD_LENGTH
+// always meets both the minimum and the 72 byte maximum
+function generateTempPassword(length = MIN_PASSWORD_LENGTH): string {
   const values = new Uint32Array(length)
   crypto.getRandomValues(values)
   return Array.from(values, (v) => TEMP_PASSWORD_CHARS[v % TEMP_PASSWORD_CHARS.length]).join("")
@@ -26,6 +39,8 @@ interface User {
   active: boolean
   // Every role the user holds, highest rank first (never Everyone)
   roles: AssignableRole[]
+  // Only sent to Global Admins, and only set while the login is locked
+  loginLockedUntil?: string | null
 }
 
 export function UsersSettingsPanel() {
@@ -35,6 +50,11 @@ export function UsersSettingsPanel() {
   // use (Global Admin is effectively infinite). Null until it loads, which
   // keeps every role and user locked rather than briefly looking editable.
   const [myRank, setMyRank] = useState<number | null>(null)
+  // Only a Global Admin sees login locks and can unlock them. The server
+  // enforces this too, this only decides whether to show the button.
+  const [isGlobalAdmin, setIsGlobalAdmin] = useState(false)
+  // The signed in user's id, so their own row can't offer Deactivate
+  const [myId, setMyId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [showInvite, setShowInvite] = useState(false)
   const [newUser, setNewUser] = useState({ name: "", email: "", tempPassword: "" })
@@ -63,6 +83,8 @@ export function UsersSettingsPanel() {
       .then((session) => {
         const access = session?.user?.access
         setMyRank(access?.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : access?.rank ?? 0)
+        setIsGlobalAdmin(!!access?.isGlobalAdmin)
+        setMyId(session?.user?.id ?? null)
       })
   }, [])
 
@@ -83,7 +105,14 @@ export function UsersSettingsPanel() {
     return null
   }
 
+  const tempPasswordLongEnough = newUser.tempPassword.length >= MIN_PASSWORD_LENGTH
+  // Measured in bytes, matching the API
+  const tempPasswordShortEnough =
+    newUser.tempPassword.length > 0 && passwordByteLength(newUser.tempPassword) <= MAX_PASSWORD_BYTES
+  const tempPasswordValid = tempPasswordLongEnough && tempPasswordShortEnough
+
   async function handleInvite() {
+    if (!tempPasswordValid) return
     const res = await fetch("/api/users", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -124,7 +153,25 @@ export function UsersSettingsPanel() {
     loadUsers()
   }
 
+  // Both directions change whether someone can sign in, so each asks first.
+  // Cancel, Escape, or a backdrop click resolve false and nothing is sent.
   async function setUserActive(user: User, active: boolean) {
+    const confirmed = await confirmDialog(
+      active
+        ? {
+            title: `Activate ${user.name}?`,
+            description: `${user.name} will be able to sign in again with the roles they hold.`,
+            confirmLabel: "Activate User",
+          }
+        : {
+            title: `Deactivate ${user.name}?`,
+            description: `${user.name} will lose access immediately and will not be able to sign in until you activate them again. Their data is kept.`,
+            confirmLabel: "Deactivate User",
+            variant: "danger",
+          }
+    )
+    if (!confirmed) return
+
     const res = await fetch(`/api/users/${user.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -135,6 +182,17 @@ export function UsersSettingsPanel() {
     } else {
       const err = await res.json().catch(() => ({}))
       toast.error("Couldn't update user", err.error)
+    }
+    loadUsers()
+  }
+
+  async function unlockUser(user: User) {
+    const res = await fetch(`/api/users/${user.id}/unlock`, { method: "POST" })
+    if (res.ok) {
+      toast.success("User unlocked", user.name)
+    } else {
+      const err = await res.json().catch(() => ({}))
+      toast.error("Couldn't unlock user", err.error)
     }
     loadUsers()
   }
@@ -206,30 +264,39 @@ export function UsersSettingsPanel() {
                 Generate
               </Button>
             </div>
+            {/* Same rules the users API enforces on the server */}
+            <ul className="mt-2 space-y-1 text-xs" aria-live="polite">
+              <Requirement met={tempPasswordLongEnough}>At least {MIN_PASSWORD_LENGTH} characters</Requirement>
+              <Requirement met={tempPasswordShortEnough}>No more than {MAX_PASSWORD_BYTES} characters</Requirement>
+            </ul>
           </div>
-          <Button onClick={handleInvite}>Create User</Button>
+          <Button onClick={handleInvite} disabled={!tempPasswordValid}>Create User</Button>
         </div>
       )}
 
       {/* Fixed table layout: column widths come from the colgroup, never from
           cell content, so expanding a row's roles only makes that row taller.
-          Roles and Status have set widths; Name and Email split the rest and
-          truncate with a tooltip. Below the min width the table scrolls
-          sideways instead of squeezing columns. */}
+          Roles, Status, and Actions have set widths; Name and Email split the
+          rest and truncate with a tooltip. Below the min width the table
+          scrolls sideways instead of squeezing columns. */}
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[49rem] table-fixed text-sm border-collapse">
+        <table className="w-full min-w-[52.5rem] table-fixed text-sm border-collapse">
           <colgroup>
             <col />
             <col />
             <col className="w-84" />
             <col className="w-28" />
+            <col className="w-14" />
           </colgroup>
           <thead>
             <tr className="border-b text-left">
               <th className="py-2 pr-3">Name</th>
               <th className="py-2 pr-3">Email</th>
               <th className="py-2 pr-3">Roles</th>
-              <th className="py-2">Status</th>
+              <th className="py-2 pr-3">Status</th>
+              <th className="py-2">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -249,21 +316,45 @@ export function UsersSettingsPanel() {
                       lockedReason={lockedReason}
                       busy={savingUserId === user.id}
                       label={`Edit roles for ${user.name}`}
+                      showEditButton={false}
                     />
                   </td>
+                  <td className="py-2 pr-3">
+                    {/* Read only. Activating, deactivating, and unlocking
+                        all live in the row's Actions menu. */}
+                    <div className="flex flex-col items-start gap-1">
+                      <span
+                        className={`rounded-full px-2 py-1 text-xs font-medium ${
+                          user.active
+                            ? "bg-green-100 text-green-700"
+                            : "bg-zinc-100 text-zinc-500"
+                        }`}
+                      >
+                        {user.active ? "Active" : "Inactive"}
+                      </span>
+                      {isGlobalAdmin && user.loginLockedUntil && (
+                        <span
+                          className="rounded-full bg-danger/10 px-2 py-1 text-xs font-medium text-danger"
+                          title={`Too many wrong passwords. Locked until ${new Date(user.loginLockedUntil).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`}
+                        >
+                          Locked
+                        </span>
+                      )}
+                    </div>
+                  </td>
                   <td className="py-2">
-                    <button
-                      onClick={() => setUserActive(user, !user.active)}
-                      disabled={!!lockedReason}
-                      title={lockedReason ? "This user is at or above your rank" : undefined}
-                      className={`rounded-full px-2 py-1 text-xs font-medium disabled:cursor-not-allowed disabled:opacity-60 ${
-                        user.active
-                          ? "bg-green-100 text-green-700"
-                          : "bg-zinc-100 text-zinc-500"
-                      }`}
-                    >
-                      {user.active ? "Active" : "Inactive"}
-                    </button>
+                    <UserActionsMenu
+                      user={user}
+                      manageReason={lockedReason ? "This user is at or above your rank" : null}
+                      isSelf={user.id === myId}
+                      canUnlock={isGlobalAdmin && !!user.loginLockedUntil}
+                      onSetActive={(active) => setUserActive(user, active)}
+                      onUnlock={() => unlockUser(user)}
+                      roles={roles}
+                      onRolesChange={(nextIds) => setUserRoles(user, nextIds)}
+                      roleDisabledReason={existingUserRoleReason}
+                      rolesBusy={savingUserId === user.id}
+                    />
                   </td>
                 </tr>
               )
@@ -272,5 +363,140 @@ export function UsersSettingsPanel() {
         </table>
       </div>
     </div>
+  )
+}
+
+// One row's Actions menu: Edit Roles, Deactivate or Activate, and (Global
+// Admins, locked users only) Unlock. Built on the same dropdown menu as the
+// top bar's user menu, which handles the keyboard, Escape, focus return,
+// and portals the menu out of the table's scroll area. Items the acting
+// user can't use stay visible, disabled, with the reason underneath.
+function UserActionsMenu({
+  user,
+  manageReason,
+  isSelf,
+  canUnlock,
+  onSetActive,
+  onUnlock,
+  roles,
+  onRolesChange,
+  roleDisabledReason,
+  rolesBusy,
+}: {
+  user: User
+  // Set when the user is at or above your rank, so you can't manage them
+  manageReason: string | null
+  isSelf: boolean
+  canUnlock: boolean
+  onSetActive: (active: boolean) => void
+  onUnlock: () => void
+  roles: AssignableRole[]
+  onRolesChange: (nextIds: string[]) => void
+  roleDisabledReason: (role: AssignableRole) => string | null
+  rolesBusy: boolean
+}) {
+  const triggerRef = useRef<HTMLButtonElement>(null)
+  const [checklistOpen, setChecklistOpen] = useState(false)
+  const [checklistAnchor, setChecklistAnchor] = useState<MenuAnchor | null>(null)
+  // The chosen item's action runs once the menu has finished closing and
+  // focus is back on the trigger, so a dialog or checklist it opens takes
+  // focus from (and later returns it to) the trigger, not the closing menu
+  const pendingAction = useRef<(() => void) | null>(null)
+
+  const activeReason = user.active && isSelf ? "You cannot deactivate your own account." : manageReason
+
+  function openChecklist() {
+    if (triggerRef.current) {
+      const rect = triggerRef.current.getBoundingClientRect()
+      setChecklistAnchor({ top: rect.top, bottom: rect.bottom, right: rect.right })
+    }
+    setChecklistOpen(true)
+  }
+
+  return (
+    <>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          if (open) setChecklistOpen(false)
+        }}
+      >
+        <DropdownMenuTrigger asChild>
+          <Button
+            ref={triggerRef}
+            variant="ghost"
+            size="icon"
+            aria-label={`Actions for ${user.name}`}
+            className="size-10 sm:size-8"
+          >
+            <Menu aria-hidden="true" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-60"
+          onCloseAutoFocus={(e) => {
+            const action = pendingAction.current
+            if (!action) return
+            pendingAction.current = null
+            e.preventDefault()
+            triggerRef.current?.focus()
+            action()
+          }}
+        >
+          <UserActionItem
+            label="Edit Roles"
+            reason={manageReason}
+            onSelect={() => (pendingAction.current = openChecklist)}
+          />
+          <UserActionItem
+            label={user.active ? "Deactivate User" : "Activate User"}
+            reason={activeReason}
+            destructive={user.active}
+            onSelect={() => (pendingAction.current = () => onSetActive(!user.active))}
+          />
+          {canUnlock && <UserActionItem label="Unlock User" reason={null} onSelect={onUnlock} />}
+        </DropdownMenuContent>
+      </DropdownMenu>
+
+      <RoleChecklist
+        open={checklistOpen}
+        anchor={checklistAnchor}
+        triggerRef={triggerRef}
+        onClose={() => setChecklistOpen(false)}
+        roles={roles}
+        selectedIds={user.roles.map((r) => r.id)}
+        onChange={onRolesChange}
+        disabledReason={roleDisabledReason}
+        busy={rolesBusy}
+        label={`Edit roles for ${user.name}`}
+        autoFocus
+      />
+    </>
+  )
+}
+
+function UserActionItem({
+  label,
+  reason,
+  destructive = false,
+  onSelect,
+}: {
+  label: string
+  reason: string | null
+  destructive?: boolean
+  onSelect: () => void
+}) {
+  return (
+    <DropdownMenuItem
+      disabled={!!reason}
+      variant={destructive ? "destructive" : "default"}
+      onSelect={onSelect}
+      className="min-h-11 py-2 sm:min-h-9"
+    >
+      <span className="flex min-w-0 flex-col">
+        <span>{label}</span>
+        {reason && <span className="text-caption text-muted-foreground">{reason}</span>}
+      </span>
+    </DropdownMenuItem>
   )
 }

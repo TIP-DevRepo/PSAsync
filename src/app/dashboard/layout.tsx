@@ -15,6 +15,12 @@ export default async function DashboardLayout({
     redirect("/login")
   }
 
+  // Still on an admin's temporary password: nothing in the app until they
+  // choose their own. Their access is already empty on the server.
+  if (session.user.access?.mustChangePassword) {
+    redirect("/change-password")
+  }
+
   const pagePermissions: PagePermissions = resolvePagePermissions(session.user.access)
 
   return (

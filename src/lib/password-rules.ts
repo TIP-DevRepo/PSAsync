@@ -7,9 +7,14 @@ export const MIN_PASSWORD_LENGTH = 12
 export const MAX_PASSWORD_BYTES = 72
 
 // Wrong current password attempts allowed on My Account before the
-// change password form locks for LOCKOUT_MINUTES
+// change password form locks for LOCKOUT_MINUTES. The login page uses the
+// same limits with its own separate counter.
 export const MAX_FAILED_ATTEMPTS = 5
 export const LOCKOUT_MINUTES = 15
+
+// Sign in error code for a locked account is this prefix plus the minutes
+// left, e.g. "locked_15". Set in src/auth.ts, read by the login page.
+export const LOGIN_LOCKED_CODE_PREFIX = "locked_"
 
 // Measures in UTF-8 bytes, not string length, because some characters
 // (accents, emoji) take more than one byte. TextEncoder works in both the

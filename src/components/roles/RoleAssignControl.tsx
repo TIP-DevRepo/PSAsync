@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useRef, useState, type RefObject } from "react"
 import { Lock } from "lucide-react"
 import { RolePill } from "@/components/roles/RolePill"
 import { useFixedMenuPosition, useCloseOnOutsideClick, useCloseOnScroll, type MenuAnchor } from "@/lib/useFixedMenu"
@@ -32,6 +32,10 @@ const COLLAPSED_PILL_COUNT = 2
 // in place (wrapping onto more lines, never widening the container). A user
 // with no assigned roles just shows Everyone. Expanded state is in memory
 // only, so a reload collapses it again.
+//
+// With showEditButton off, only the pills show. That's for rows where the
+// checklist is opened from somewhere else, like the Users table's row menu,
+// which renders RoleChecklist itself.
 export function RoleAssignControl({
   roles,
   selectedIds,
@@ -41,6 +45,7 @@ export function RoleAssignControl({
   busy = false,
   label,
   collapsible = false,
+  showEditButton = true,
 }: {
   // Every assignable role (never Everyone), highest rank first
   roles: AssignableRole[]
@@ -53,28 +58,12 @@ export function RoleAssignControl({
   // Accessible name for the edit button, e.g. "Edit roles for Jane"
   label: string
   collapsible?: boolean
+  showEditButton?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const [anchor, setAnchor] = useState<MenuAnchor | null>(null)
   const buttonRef = useRef<HTMLButtonElement>(null)
-  const { menuRef, style: menuStyle } = useFixedMenuPosition(open, anchor)
-
-  useCloseOnOutsideClick(open, [menuRef, buttonRef], () => setOpen(false))
-  useCloseOnScroll(open, () => setOpen(false))
-
-  // Escape closes the checklist and hands focus back to the button
-  useEffect(() => {
-    if (!open) return
-    function handleKey(e: KeyboardEvent) {
-      if (e.key === "Escape") {
-        setOpen(false)
-        buttonRef.current?.focus()
-      }
-    }
-    document.addEventListener("keydown", handleKey)
-    return () => document.removeEventListener("keydown", handleKey)
-  }, [open])
 
   function toggleOpen() {
     if (open) {
@@ -86,10 +75,6 @@ export function RoleAssignControl({
       setAnchor({ top: rect.top, bottom: rect.bottom, right: rect.right })
     }
     setOpen(true)
-  }
-
-  function toggleRole(roleId: string, checked: boolean) {
-    onChange(checked ? [...selectedIds, roleId] : selectedIds.filter((id) => id !== roleId))
   }
 
   const selectedSet = new Set(selectedIds)
@@ -135,55 +120,139 @@ export function RoleAssignControl({
           <span className="sr-only">{lockedReason}</span>
         </span>
       ) : (
-        <button
-          ref={buttonRef}
-          type="button"
-          onClick={toggleOpen}
-          disabled={busy}
-          aria-label={label}
-          aria-haspopup="dialog"
-          aria-expanded={open}
-          className="inline-flex h-6 items-center gap-0.5 whitespace-nowrap rounded-full border border-dashed border-border px-2 text-caption text-muted-foreground hover:bg-surface-hover hover:text-foreground disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2"
-        >
-          Edit Roles
-        </button>
+        showEditButton && (
+          <button
+            ref={buttonRef}
+            type="button"
+            onClick={toggleOpen}
+            disabled={busy}
+            aria-label={label}
+            aria-haspopup="dialog"
+            aria-expanded={open}
+            className="inline-flex h-6 items-center gap-0.5 whitespace-nowrap rounded-full border border-dashed border-border px-2 text-caption text-muted-foreground hover:bg-surface-hover hover:text-foreground disabled:opacity-60 focus-visible:outline-2 focus-visible:outline-offset-2"
+          >
+            Edit Roles
+          </button>
+        )
       )}
 
-      {open && (
-        <div
-          ref={menuRef}
-          style={menuStyle}
-          role="dialog"
-          aria-label={label}
-          className="z-50 w-64 max-h-80 overflow-y-auto rounded-md border border-border bg-popover py-1 text-sm shadow-popover"
-        >
-          {roles.length === 0 && <p className="px-3 py-2 text-muted-foreground">No roles to assign yet.</p>}
-          {roles.map((role) => {
-            const reason = disabledReason(role)
-            const isDisabled = !!reason || busy
-            return (
-              <label
-                key={role.id}
-                className={`flex items-start gap-2 px-3 py-2 ${
-                  reason ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-surface-hover"
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  className="mt-1"
-                  checked={selectedSet.has(role.id)}
-                  disabled={isDisabled}
-                  onChange={(e) => toggleRole(role.id, e.target.checked)}
-                />
-                <span className="min-w-0">
-                  <RolePill role={role} />
-                  {reason && <span className="mt-0.5 block text-caption text-muted-foreground">{reason}</span>}
-                </span>
-              </label>
-            )
-          })}
-        </div>
+      {showEditButton && (
+        <RoleChecklist
+          open={open}
+          anchor={anchor}
+          triggerRef={buttonRef}
+          onClose={() => setOpen(false)}
+          roles={roles}
+          selectedIds={selectedIds}
+          onChange={onChange}
+          disabledReason={disabledReason}
+          busy={busy}
+          label={label}
+        />
       )}
+    </div>
+  )
+}
+
+// The role checklist popover on its own, positioned with the fixed menu
+// hooks below anchor so a scrolling table never clips it. Clicking
+// outside it or scrolling closes it; Escape closes it and returns focus to
+// triggerRef. Clicks on triggerRef don't count as outside, so the trigger
+// can toggle it. autoFocus moves focus to the first role that can be
+// changed once it's visible, for triggers that sit after the popover in
+// tab order (like a row menu).
+export function RoleChecklist({
+  open,
+  anchor,
+  triggerRef,
+  onClose,
+  roles,
+  selectedIds,
+  onChange,
+  disabledReason,
+  busy = false,
+  label,
+  autoFocus = false,
+}: {
+  open: boolean
+  anchor: MenuAnchor | null
+  triggerRef: RefObject<HTMLElement | null>
+  onClose: () => void
+  // Every assignable role (never Everyone), highest rank first
+  roles: AssignableRole[]
+  selectedIds: string[]
+  onChange: (nextIds: string[]) => void
+  disabledReason: (role: AssignableRole) => string | null
+  busy?: boolean
+  label: string
+  autoFocus?: boolean
+}) {
+  const { menuRef, style: menuStyle } = useFixedMenuPosition(open, anchor)
+
+  useCloseOnOutsideClick(open, [menuRef, triggerRef], onClose)
+  useCloseOnScroll(open, onClose)
+
+  // Escape closes the checklist and hands focus back to the trigger
+  useEffect(() => {
+    if (!open) return
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        onClose()
+        triggerRef.current?.focus()
+      }
+    }
+    document.addEventListener("keydown", handleKey)
+    return () => document.removeEventListener("keydown", handleKey)
+  }, [open, onClose, triggerRef])
+
+  const isVisible = menuStyle.visibility === "visible"
+  useEffect(() => {
+    if (!open || !autoFocus || !isVisible) return
+    // preventScroll so focusing can't trigger useCloseOnScroll and shut it
+    menuRef.current?.querySelector<HTMLInputElement>("input:not(:disabled)")?.focus({ preventScroll: true })
+  }, [open, autoFocus, isVisible, menuRef])
+
+  if (!open) return null
+
+  const selectedSet = new Set(selectedIds)
+
+  function toggleRole(roleId: string, checked: boolean) {
+    onChange(checked ? [...selectedIds, roleId] : selectedIds.filter((id) => id !== roleId))
+  }
+
+  return (
+    <div
+      ref={menuRef}
+      style={menuStyle}
+      role="dialog"
+      aria-label={label}
+      className="z-50 w-64 max-h-80 overflow-y-auto rounded-md border border-border bg-popover py-1 text-sm shadow-popover"
+    >
+      {roles.length === 0 && <p className="px-3 py-2 text-muted-foreground">No roles to assign yet.</p>}
+      {roles.map((role) => {
+        const reason = disabledReason(role)
+        const isDisabled = !!reason || busy
+        return (
+          <label
+            key={role.id}
+            className={`flex items-start gap-2 px-3 py-2 ${
+              reason ? "cursor-not-allowed opacity-60" : "cursor-pointer hover:bg-surface-hover"
+            }`}
+          >
+            <input
+              type="checkbox"
+              className="mt-1"
+              checked={selectedSet.has(role.id)}
+              disabled={isDisabled}
+              onChange={(e) => toggleRole(role.id, e.target.checked)}
+            />
+            <span className="min-w-0">
+              <RolePill role={role} />
+              {reason && <span className="mt-0.5 block text-caption text-muted-foreground">{reason}</span>}
+            </span>
+          </label>
+        )
+      })}
     </div>
   )
 }

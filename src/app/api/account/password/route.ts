@@ -144,13 +144,17 @@ export async function POST(req: NextRequest) {
   const hashedPassword = await bcrypt.hash(newPassword, 10)
 
   // Saving the password and clearing the rate limit in one update, so a
-  // successful change always starts the counter over
+  // successful change always starts the counter over. Also lifts the first
+  // sign in gate for a user who was on an admin's temporary password. This
+  // route checks only the session, never a permission, so a gated user
+  // (who has none) can still reach it.
   await prisma.user.update({
     where: { id: session.user.id },
     data: {
       password: hashedPassword,
       passwordChangeFailedAttempts: 0,
       passwordChangeLockedUntil: null,
+      mustChangePassword: false,
     },
   })
 
