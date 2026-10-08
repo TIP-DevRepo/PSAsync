@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { hasPermission } from "@/lib/permissions"
+import { quoteSettingsSelect } from "@/lib/safe-selects"
 
 export async function GET() {
   const session = await auth()
@@ -30,6 +32,9 @@ export async function PATCH(req: NextRequest) {
   if (!session?.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
   }
+  if (!(await hasPermission(session.user.id, "settingsSections.quotes"))) {
+    return NextResponse.json({ error: "You don't have permission to edit quote settings" }, { status: 403 })
+  }
 
   const body = await req.json()
 
@@ -58,6 +63,7 @@ export async function PATCH(req: NextRequest) {
     where: { companyId: session.user.companyId },
     update: data,
     create: { companyId: session.user.companyId, ...data },
+    select: quoteSettingsSelect,
   })
 
   return NextResponse.json(settings)

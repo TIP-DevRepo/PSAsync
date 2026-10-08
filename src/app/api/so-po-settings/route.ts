@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission } from "@/lib/permissions"
+import { soPoSettingsSelect } from "@/lib/safe-selects"
 
 export async function GET() {
   const session = await auth()
@@ -43,6 +44,7 @@ export async function PATCH(req: NextRequest) {
     where: { companyId },
     update: data,
     create: { companyId, ...data },
+    select: soPoSettingsSelect,
   })
 
   return NextResponse.json(settings)

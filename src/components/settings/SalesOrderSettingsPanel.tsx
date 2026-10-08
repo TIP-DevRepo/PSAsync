@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
+import { toast } from "@/lib/toast"
 
 interface RoleOption {
   id: string
@@ -75,13 +76,18 @@ export function SalesOrderSettingsPanel() {
   async function handleSave() {
     setSaving(true)
     setMessage("")
-    await fetch("/api/so-po-settings", {
+    const res = await fetch("/api/so-po-settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(settings),
     })
     setSaving(false)
-    setMessage("Saved successfully.")
+    if (res.ok) {
+      setMessage("Saved successfully.")
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't save sales order settings", data.error)
+    }
   }
 
   if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
