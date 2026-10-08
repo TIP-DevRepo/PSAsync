@@ -100,6 +100,14 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
     where: { companyId: user.companyId, isEveryone: true },
     select: { permissions: true },
   })
+  if (!user || !user.active) return null
+
+  const everyone = await prisma.role.findFirst({
+    where: { companyId: user.companyId, isEveryone: true },
+    select: { permissions: true },
+  })
+
+  const assigned = user.userRoles.map((ur) => ur.role).filter((r) => !r.isEveryone)
 
   const assigned = user.userRoles.map((ur) => ur.role).filter((r) => !r.isEveryone)
 
