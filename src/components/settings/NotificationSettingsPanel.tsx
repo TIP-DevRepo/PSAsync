@@ -43,7 +43,8 @@ export function NotificationSettingsPanel() {
     if (res.ok) {
       toast.success("Notification settings saved")
     } else {
-      toast.error("Couldn't save notification settings")
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't save notification settings", data.error)
     }
   }
 

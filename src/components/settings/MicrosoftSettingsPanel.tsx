@@ -79,10 +79,17 @@ export function MicrosoftSettingsPanel() {
       body: JSON.stringify(form),
     })
     setSaving(false)
+    const data = await res.json().catch(() => ({}))
     if (res.ok) {
       toast.success("Azure credentials saved")
+      if (data.ssoDisabledByTenantChange) {
+        toast.warning(
+          "Single Sign-On was turned off",
+          "The Tenant ID changed, so SSO is off until a Global Admin turns it back on for the new tenant."
+        )
+      }
     } else {
-      toast.error("Couldn't save credentials")
+      toast.error("Couldn't save credentials", data.error)
     }
     setForm((prev) => ({ ...prev, microsoftClientSecret: "" }))
     loadCredentials()
@@ -104,13 +111,18 @@ export function MicrosoftSettingsPanel() {
       if (!confirmed) return
     }
     setTogglingSso(true)
-    await fetch("/api/microsoft-settings", {
+    const res = await fetch("/api/microsoft-settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ssoEnabled: next }),
     })
     setTogglingSso(false)
-    toast.success(next ? "SSO turned on" : "SSO turned off")
+    if (res.ok) {
+      toast.success(next ? "SSO turned on" : "SSO turned off")
+    } else {
+      const data = await res.json().catch(() => ({}))
+      toast.error(next ? "Couldn't turn on SSO" : "Couldn't turn off SSO", data.error)
+    }
     loadCredentials()
   }
 

@@ -47,7 +47,8 @@ export function CompanySettingsPanel() {
       })
       if (!res.ok) {
         setSaving(false)
-        toast.error("Couldn't upload logo")
+        const err = await res.json().catch(() => ({}))
+        toast.error("Couldn't upload logo", err.error)
         return
       }
       const json = await res.json()
@@ -64,7 +65,8 @@ export function CompanySettingsPanel() {
       })
       if (!res.ok) {
         setSaving(false)
-        toast.error("Couldn't upload secondary logo")
+        const err = await res.json().catch(() => ({}))
+        toast.error("Couldn't upload secondary logo", err.error)
         return
       }
       const json = await res.json()
@@ -85,7 +87,8 @@ export function CompanySettingsPanel() {
     if (res.ok) {
       toast.success("Company settings saved")
     } else {
-      toast.error("Couldn't save company settings")
+      const err = await res.json().catch(() => ({}))
+      toast.error("Couldn't save company settings", err.error)
     }
   }
 
