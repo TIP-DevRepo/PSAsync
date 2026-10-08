@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
+import { assertRefs, inventoryAssetWhere } from "@/lib/scoped-loaders"
 import { prisma } from "@/lib/prisma"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
 
@@ -7,17 +8,16 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
+  const userId = ctx.userId
   const body = await req.json()
   const type: "SOLD" | "LOANED" | "INTERNAL" = body.type
 
-  const asset = await prisma.inventoryAsset.findUnique({ where: { id, companyId } })
+  const asset = await prisma.inventoryAsset.findUnique({ where: inventoryAssetWhere(ctx, id) })
   if (!asset) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 })
   }
@@ -40,16 +40,21 @@ export async function POST(
     if (!contact) {
       return NextResponse.json({ error: "Contact not found for this client" }, { status: 404 })
     }
+    const invalidSite = await assertRefs(ctx, {
+      clientId: asset.ownerClientId,
+      clientLocationId: body.clientLocationId,
+    })
+    if (invalidSite) return invalidSite
     const clientLocationId = body.clientLocationId ?? contact.locationId ?? asset.clientLocationId
     if (!clientLocationId) {
       return NextResponse.json({ error: "Select which of the client's sites this is deployed at" }, { status: 400 })
     }
 
     const updated = await prisma.inventoryAsset.update({
-      where: { id },
+      where: inventoryAssetWhere(ctx, id),
       data: { deployedToContactId: contact.id, clientLocationId, locationId: null },
     })
-    await logAssetEvent(id, "CHECKED_OUT", `Checked out from stock, deployed to ${contact.firstName} ${contact.lastName}`, session.user.id)
+    await logAssetEvent(id, "CHECKED_OUT", `Checked out from stock, deployed to ${contact.firstName} ${contact.lastName}`, userId)
     return NextResponse.json(updated)
   }
 
@@ -79,6 +84,12 @@ export async function POST(
       if (body.containerId && body.contactId) {
         return NextResponse.json({ error: "Pick either a container or a contact to deploy to, not both" }, { status: 400 })
       }
+      // Only read when there's no container, and then it must be a site
+      // of the client this is sold to
+      if (!body.containerId) {
+        const invalidSite = await assertRefs(ctx, { clientId: client.id, clientLocationId: body.clientLocationId })
+        if (invalidSite) return invalidSite
+      }
 
       let locationId: string | null = null
       let clientLocationId: string | null = null
@@ -104,7 +115,7 @@ export async function POST(
       }
 
       const updated = await prisma.inventoryAsset.update({
-        where: { id },
+        where: inventoryAssetWhere(ctx, id),
         data: {
           status: "SOLD",
           ownerType: "CLIENT",
@@ -121,7 +132,7 @@ export async function POST(
         deployedToContactId
           ? `Sold and deployed to ${client.name}`
           : `Sold to ${client.name}${locationId ? "" : " (unsorted)"}`,
-        session.user.id
+        userId
       )
 
       return NextResponse.json(updated)
@@ -136,13 +147,15 @@ export async function POST(
       const contact = await prisma.contact.findUnique({ where: { id: body.contactId, clientId: client.id } })
       if (!contact) return NextResponse.json({ error: "Contact not found for this client" }, { status: 404 })
 
+      const invalidSite = await assertRefs(ctx, { clientId: client.id, clientLocationId: body.clientLocationId })
+      if (invalidSite) return invalidSite
       const clientLocationId = body.clientLocationId ?? contact.locationId ?? null
       if (!clientLocationId) {
         return NextResponse.json({ error: "Select which of the client's sites this is loaned to" }, { status: 400 })
       }
 
       const updated = await prisma.inventoryAsset.update({
-        where: { id },
+        where: inventoryAssetWhere(ctx, id),
         data: {
           status: "LOANED",
           loanedToClientId: client.id,
@@ -153,7 +166,7 @@ export async function POST(
         },
       })
 
-      await logAssetEvent(id, "CHECKED_OUT", `Loaned to ${client.name}`, session.user.id)
+      await logAssetEvent(id, "CHECKED_OUT", `Loaned to ${client.name}`, userId)
 
       return NextResponse.json(updated)
     }
@@ -164,7 +177,7 @@ export async function POST(
       if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 })
 
       const updated = await prisma.inventoryAsset.update({
-        where: { id },
+        where: inventoryAssetWhere(ctx, id),
         data: {
           status: "INTERNAL",
           assignedUserId: user.id,
@@ -173,7 +186,7 @@ export async function POST(
         },
       })
 
-      await logAssetEvent(id, "CHECKED_OUT", `Checked out internally to ${user.name}`, session.user.id)
+      await logAssetEvent(id, "CHECKED_OUT", `Checked out internally to ${user.name}`, userId)
 
       return NextResponse.json(updated)
     }

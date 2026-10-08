@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
 // Returns the Container tree for one ClientLocation (a specific physical
 // site). ?clientLocationId= is required — Containers only ever exist
 // underneath a specific site, there's no more global company-wide list.
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const clientLocationId = req.nextUrl.searchParams.get("clientLocationId")
   if (!clientLocationId) {
@@ -17,13 +16,14 @@ export async function GET(req: NextRequest) {
   }
 
   const locations = await prisma.inventoryLocation.findMany({
-    where: { clientLocationId, companyId: session.user.companyId },
+    where: { clientLocationId, companyId: ctx.companyId },
     select: { id: true, name: true, parentId: true },
     orderBy: { name: "asc" },
   })
 
-  const clientLocation = await prisma.clientLocation.findUnique({
-    where: { id: clientLocationId },
+  // A site from another company reads the same as one with no default
+  const clientLocation = await prisma.clientLocation.findFirst({
+    where: { id: clientLocationId, client: { companyId: ctx.companyId } },
     select: { defaultContainerId: true },
   })
 
