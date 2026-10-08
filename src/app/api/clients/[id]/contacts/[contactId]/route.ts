@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireAccess, notFound } from "@/lib/api-access"
-import { clientContactWhere, loadClientContact } from "@/lib/scoped-loaders"
+import { ContactLocationType } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess, notFound } from "@/lib/api-access"
+import { assertRefs, clientContactWhere, loadClientContact } from "@/lib/scoped-loaders"
 
 export async function PATCH(
   req: NextRequest,
@@ -17,6 +18,13 @@ export async function PATCH(
 
   const body = await req.json()
   const { firstName, lastName, title, email, phone, mobile, locationType, locationId, notes, isPrimary, tagIds } = body
+
+  if (locationType !== undefined && !isEnumValue(ContactLocationType, locationType)) {
+    return apiError(400, "Invalid location type")
+  }
+  // The location must be one of this client's, and tags the company's own
+  const invalid = await assertRefs(ctx, { clientId: id, clientLocationId: locationId, tagIds })
+  if (invalid) return invalid
 
   if (isPrimary === true) {
     await prisma.contact.updateMany({
