@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 
 export async function GET() {
   const session = await auth()
@@ -47,18 +49,18 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const body = await req.json()
 
   if (!body.clientId) {
     return NextResponse.json({ error: "A client is required" }, { status: 400 })
   }
+  const invalid = await assertRefs(ctx, { clientId: body.clientId })
+  if (invalid) return invalid
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const settings = await prisma.companySettings.findUnique({ where: { companyId } })
   const prefix = settings?.soPrefix ?? "SO"
@@ -71,7 +73,7 @@ export async function POST(req: NextRequest) {
     data: {
       companyId,
       clientId: body.clientId,
-      userId: session.user.id,
+      userId: ctx.userId,
       soNumber,
       clientPoNumber: body.clientPoNumber || null,
       paymentTerms: body.paymentTerms || null,

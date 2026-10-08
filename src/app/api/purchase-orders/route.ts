@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 
 export async function GET() {
   const session = await auth()
@@ -40,16 +42,14 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "purchaseOrders.create"))) {
+  const { ctx, response } = await requireAccess()
+  if (response) return response
+  if (!ctx.can("purchaseOrders.create")) {
     return NextResponse.json({ error: "You don't have permission to create Purchase Orders" }, { status: 403 })
   }
 
   const body = await req.json()
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   if (!body.vendorId) {
     return NextResponse.json({ error: "A vendor is required" }, { status: 400 })
@@ -107,6 +107,10 @@ export async function POST(req: NextRequest) {
       unitCost: li.cost,
       sortOrder: idx,
     }))
+  } else {
+    // A standalone PO can still name a Sales Order, which must be the company's
+    const invalid = await assertRefs(ctx, { salesOrderId })
+    if (invalid) return invalid
   }
 
   let shipToClientLocationId: string | null = null
@@ -144,7 +148,7 @@ export async function POST(req: NextRequest) {
       companyId,
       salesOrderId,
       vendorId: body.vendorId,
-      userId: session.user.id,
+      userId: ctx.userId,
       poNumber,
       status: "DRAFT",
       paymentType,

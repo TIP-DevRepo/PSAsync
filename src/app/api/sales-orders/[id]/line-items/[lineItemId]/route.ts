@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireAccess, notFound } from "@/lib/api-access"
-import { loadSalesOrderLineItem, salesOrderLineItemWhere } from "@/lib/scoped-loaders"
+import { RecurringInterval } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess, notFound } from "@/lib/api-access"
+import { assertRefs, loadSalesOrderLineItem, salesOrderLineItemWhere } from "@/lib/scoped-loaders"
 
 export async function PATCH(
   req: NextRequest,
@@ -15,6 +16,12 @@ export async function PATCH(
   if (!existing) return notFound()
 
   const body = await req.json()
+
+  if (body.recurringInterval && !isEnumValue(RecurringInterval, body.recurringInterval)) {
+    return apiError(400, "Invalid recurring interval")
+  }
+  const invalid = await assertRefs(ctx, { vendorId: body.vendorId })
+  if (invalid) return invalid
 
   const data: Record<string, unknown> = {}
   if (body.name !== undefined) data.name = body.name
