@@ -43,6 +43,7 @@ Keep changes scoped to what was asked. Don't refactor, rename, or "clean up" unr
 - Every new or changed route handler starts with `const { ctx, response } = await requireAccess(rule?)` from `src/lib/api-access.ts` and returns `response` if set. Use `ctx.companyId` and `ctx.userId`, never the session token's values.
 - Ids from the URL go through a scoped loader in `src/lib/scoped-loaders.ts`, never a bare id lookup. A miss returns `notFound()`. Updates and deletes use the matching `*Where` builder so the write itself is company scoped.
 - Ids that arrive in a request body (tag ids, location ids, vendor ids, etc.) must be validated against the caller's company before use.
+- Use `assertRefs(ctx, { ... })` from `src/lib/scoped-loaders.ts` for body ids: it checks them all in one query per record type, skips empty values, and returns a ready 400 (or null when valid). Add a new key there rather than writing a one off lookup.
 - Responses use explicit `select` objects. Errors use the shape `{ error, code? }`.
 
 # Design system conventions
