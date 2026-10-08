@@ -4,6 +4,7 @@ import { useState, Suspense } from "react"
 import { signIn } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
 import dynamic from "next/dynamic"
+import { LOGIN_LOCKED_CODE_PREFIX } from "@/lib/password-rules"
 
 const Lightfall = dynamic(() => import("@/components/effects/Lightfall"), { ssr: false })
 
@@ -83,7 +84,18 @@ function LoginPage() {
     })
 
     if (result?.error) {
-      setError("Invalid email or password")
+      // A locked account's code carries the minutes left (see src/auth.ts).
+      // Anything else, an unknown email included, gets the same message.
+      const lockedMinutes = result.code?.startsWith(LOGIN_LOCKED_CODE_PREFIX)
+        ? parseInt(result.code.slice(LOGIN_LOCKED_CODE_PREFIX.length), 10)
+        : NaN
+      if (lockedMinutes > 0) {
+        setError(
+          `Too many sign in attempts. Try again in ${lockedMinutes} ${lockedMinutes === 1 ? "minute" : "minutes"} or contact your administrator.`
+        )
+      } else {
+        setError("Invalid email or password")
+      }
       setLoading(false)
     } else {
       // Full navigation, not router.push: the root layout (and

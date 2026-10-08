@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 
 async function resolveActiveQuoteId(token: string) {
   const matched = await prisma.quote.findUnique({
@@ -38,7 +39,8 @@ export async function POST(
       portalComment: body.comment,
       portalCommentAt: new Date(),
     },
+    select: portalQuoteSelect,
   })
 
-  return NextResponse.json(updated)
+  return NextResponse.json(toPortalQuote(updated, false))
 }

@@ -1,5 +1,6 @@
 import { cache } from "react"
 import { prisma } from "@/lib/prisma"
+import { usesMicrosoftSso } from "@/lib/sso-account"
 
 // Shape of the permissions JSON stored on each Role. Kept loose (not every
 // field required) since it's read with optional chaining throughout —
@@ -37,6 +38,10 @@ export interface EffectiveAccess {
   permissions: RolePermissions
   // Assigned role ids, never including the Everyone role.
   roleIds: string[]
+  // True while the user is still on an admin's temporary password. Every
+  // other field is then empty (no permissions, rank 0, no roles), so every
+  // permission check refuses them until they choose their own password.
+  mustChangePassword: boolean
 }
 
 // Recursively ORs booleans and maxes numbers, so any permission key added
@@ -73,6 +78,8 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
     select: {
       active: true,
       companyId: true,
+      mustChangePassword: true,
+      company: { select: { settings: { select: { ssoEnabled: true } } } },
       userRoles: {
         select: {
           role: { select: { id: true, rank: true, isGlobalAdmin: true, isEveryone: true, permissions: true } },
@@ -81,6 +88,13 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
     },
   })
   if (!user || !user.active) return null
+
+  // Gated until they replace their temporary password. A company that has
+  // since turned SSO on is never gated, since its users can't use or change
+  // a password and would otherwise be stuck.
+  if (user.mustChangePassword && !usesMicrosoftSso(user.company.settings)) {
+    return { isGlobalAdmin: false, rank: 0, permissions: {}, roleIds: [], mustChangePassword: true }
+  }
 
   const everyone = await prisma.role.findFirst({
     where: { companyId: user.companyId, isEveryone: true },
@@ -108,6 +122,7 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
     rank,
     permissions: permissions as RolePermissions,
     roleIds: assigned.map((r) => r.id),
+    mustChangePassword: false,
   }
 })
 

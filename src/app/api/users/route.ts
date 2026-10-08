@@ -2,8 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
-import { hasPermission, getUserRank } from "@/lib/permissions"
+import { hasPermission, getUserRank, getEffectiveAccess } from "@/lib/permissions"
 import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
+import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
+import { usesMicrosoftSso } from "@/lib/sso-account"
 
 export async function GET() {
   const session = await auth()
@@ -19,6 +21,7 @@ export async function GET() {
       email: true,
       active: true,
       createdAt: true,
+      loginLockedUntil: true,
       userRoles: {
         where: { role: { isEveryone: false } },
         select: { role: { select: { id: true, name: true, rank: true, color: true, isGlobalAdmin: true } } },
@@ -27,13 +30,21 @@ export async function GET() {
     orderBy: { createdAt: "asc" },
   })
 
+  // Only a Global Admin can unlock a login, so only they are told who is
+  // locked. The attempt counter itself is never sent to anyone.
+  const access = await getEffectiveAccess(session.user.id)
+  const showLocks = !!access?.isGlobalAdmin
+  const now = Date.now()
+
   // roles is every role the user holds (highest rank first), with the rank
   // and color Manage Users needs for its pills and hierarchy locks. role is
   // the highest of them.
   return NextResponse.json(
-    users.map(({ userRoles, ...user }) => {
+    users.map(({ userRoles, loginLockedUntil, ...user }) => {
       const roles = userRoles.map((ur) => ur.role).sort((a, b) => b.rank - a.rank)
-      return { ...user, role: roles[0] ?? null, roles }
+      if (!showLocks) return { ...user, role: roles[0] ?? null, roles }
+      const lockedUntil = loginLockedUntil && loginLockedUntil.getTime() > now ? loginLockedUntil : null
+      return { ...user, role: roles[0] ?? null, roles, loginLockedUntil: lockedUntil }
     })
   )
 }
@@ -49,7 +60,26 @@ export async function POST(req: NextRequest) {
   }
 
   const body = await req.json()
-  const { name, email, tempPassword } = body
+  const { name, email } = body
+  const tempPassword = typeof body.tempPassword === "string" ? body.tempPassword : ""
+
+  // Same rules as choosing a password on My Account, checked here and not
+  // just in the browser. The password itself is never echoed back.
+  if (!tempPassword) {
+    return NextResponse.json({ error: "Temporary password is required" }, { status: 400 })
+  }
+  if (tempPassword.length < MIN_PASSWORD_LENGTH) {
+    return NextResponse.json(
+      { error: `Temporary password must be at least ${MIN_PASSWORD_LENGTH} characters` },
+      { status: 400 }
+    )
+  }
+  if (passwordByteLength(tempPassword) > MAX_PASSWORD_BYTES) {
+    return NextResponse.json(
+      { error: `Temporary password is too long. Use ${MAX_PASSWORD_BYTES} characters or fewer.` },
+      { status: 400 }
+    )
+  }
   // Accepts roleIds (a list) or the existing single roleId field
   const requestedRoleIds = readRoleIdsFromBody(body)
   if (requestedRoleIds === null) {
@@ -82,6 +112,13 @@ export async function POST(req: NextRequest) {
 
   const hashedPassword = await bcrypt.hash(tempPassword, 10)
 
+  // A company that signs in with Microsoft never uses this password, so
+  // only password companies make the new user replace it on first sign in
+  const company = await prisma.company.findUnique({
+    where: { id: session.user.companyId },
+    select: { settings: { select: { ssoEnabled: true } } },
+  })
+
   const user = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
@@ -89,6 +126,7 @@ export async function POST(req: NextRequest) {
         name,
         email,
         password: hashedPassword,
+        mustChangePassword: !usesMicrosoftSso(company?.settings),
       },
     })
     // Also sets the legacy roleId to the highest of these roles

@@ -3,6 +3,8 @@
 // component, just a plain HTML string with inline <style>, since Puppeteer
 // renders it independently of the Next.js app.
 
+import { escapeHtml, safeHexColor, safeUrlAttr } from "@/lib/html"
+
 interface PdfLineItem {
   section: string | null
   sortOrder: number
@@ -55,14 +57,14 @@ function lineTotal(li: PdfLineItem) {
   return li.unitPrice * li.quantity * (1 - li.discount / 100)
 }
 
-function escapeHtml(s: string) {
-  return s
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-}
-
 export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string {
+  // Brand colors and the logo URL go into CSS and an attribute, so they are
+  // validated rather than trusted. An invalid color falls back to the same
+  // defaults the PDF routes already use.
+  const primaryColor = safeHexColor(company.primaryColor, "#1B3A5C")
+  const accentColor = safeHexColor(company.accentColor, "#2E86AB")
+  const logoSrc = safeUrlAttr(company.logoUrl)
+
   const countedItems = quote.lineItems.filter(
     (li) => !li.isTextBlock && (!li.isOptional || li.optionalSelected)
   )
@@ -168,7 +170,7 @@ export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string 
       return `
         <table class="items">
           <thead>
-            <tr><th colspan="3" class="section-head" style="background:${company.accentColor}">${
+            <tr><th colspan="3" class="section-head" style="background:${accentColor}">${
         sectionKey === NO_SECTION ? "Items" : escapeHtml(sectionKey)
       }</th></tr>
           </thead>
@@ -195,7 +197,7 @@ export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string 
 <style>
   * { box-sizing: border-box; }
   body { font-family: Arial, Helvetica, sans-serif; color: #1a1a1a; margin: 0; padding: 0; font-size: 12px; }
-  .header { background: ${company.primaryColor}; color: #fff; padding: 24px 32px; display: flex; justify-content: space-between; align-items: center; }
+  .header { background: ${primaryColor}; color: #fff; padding: 24px 32px; display: flex; justify-content: space-between; align-items: center; }
   .header img { height: 40px; }
   .header .company-name { font-size: 16px; font-weight: bold; }
   .body { padding: 24px 32px; }
@@ -220,7 +222,7 @@ export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string 
 <body>
   <div class="header">
     <div style="display:flex; align-items:center; gap:10px;">
-      ${company.logoUrl ? `<img src="${company.logoUrl}" />` : ""}
+      ${logoSrc ? `<img src="${logoSrc}" />` : ""}
       <span class="company-name">${escapeHtml(company.name)}</span>
     </div>
   </div>

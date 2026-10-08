@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteEvent } from "@/lib/notify"
 import { resolveClientQuoteId } from "@/lib/portal-quote"
+import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
 
 export async function POST(
@@ -33,11 +34,12 @@ export async function POST(
       declinedAt: new Date(),
       declineReason: body.reason || null,
     },
+    select: portalQuoteSelect,
   })
 
   notifyQuoteEvent(quote.id, "QUOTE_LOST").catch((err) =>
     console.error("notifyQuoteEvent failed:", err)
   )
 
-  return NextResponse.json(updated)
+  return NextResponse.json(toPortalQuote(updated, false))
 }

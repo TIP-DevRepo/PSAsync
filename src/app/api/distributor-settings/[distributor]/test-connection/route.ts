@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { hasPermission } from "@/lib/permissions"
 import { getAdapter } from "@/lib/distributors/registry"
 import { DistributorKey } from "@/lib/distributors/types"
 
@@ -20,6 +21,9 @@ export async function POST(
   const session = await auth()
   if (!session?.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+  if (!(await hasPermission(session.user.id, "settingsSections.integrations"))) {
+    return NextResponse.json({ error: "You don't have permission to test distributor connections" }, { status: 403 })
   }
 
   const { distributor } = await params

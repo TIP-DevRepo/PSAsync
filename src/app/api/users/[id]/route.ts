@@ -31,6 +31,12 @@ export async function PATCH(
     return NextResponse.json({ error: "Invalid active value" }, { status: 400 })
   }
 
+  // Deactivating yourself would sign you out with no way back in, so it's
+  // refused outright, before any of the rank rules below
+  if (id === session.user.id && active === false) {
+    return NextResponse.json({ error: "You cannot deactivate your own account." }, { status: 403 })
+  }
+
   const targetUser = await prisma.user.findUnique({
     where: { id, companyId },
     select: {

@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { hasPermission } from "@/lib/permissions"
+import { notificationSettingsSelect } from "@/lib/safe-selects"
 
 export async function GET() {
   const session = await auth()
@@ -23,6 +25,9 @@ export async function PATCH(req: NextRequest) {
   if (!session?.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
   }
+  if (!(await hasPermission(session.user.id, "settingsSections.notifications"))) {
+    return NextResponse.json({ error: "You don't have permission to edit notification settings" }, { status: 403 })
+  }
 
   const body = await req.json()
 
@@ -37,6 +42,7 @@ export async function PATCH(req: NextRequest) {
       emailDefaultCc: body.emailDefaultCc || null,
       emailSignature: body.emailSignature || null,
     },
+    select: notificationSettingsSelect,
   })
 
   return NextResponse.json(settings)

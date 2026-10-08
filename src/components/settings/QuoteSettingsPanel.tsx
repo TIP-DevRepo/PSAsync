@@ -65,7 +65,8 @@ export function QuoteSettingsPanel() {
     if (res.ok) {
       toast.success("Quote settings saved")
     } else {
-      toast.error("Couldn't save quote settings")
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't save quote settings", data.error)
     }
   }
 

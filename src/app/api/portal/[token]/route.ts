@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteEvent } from "@/lib/notify"
 import { resolvePortalToken } from "@/lib/portal-quote"
+import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
 
 export async function GET(
@@ -17,20 +18,7 @@ export async function GET(
 
   const quote = await prisma.quote.findUnique({
     where: { id: activeId },
-    include: {
-      client: { select: { name: true } },
-      contact: { select: { firstName: true, lastName: true } },
-      user: { select: { name: true, email: true } },
-      company: {
-        select: {
-          name: true,
-          logoUrl: true,
-          secondaryLogoUrl: true,
-          settings: { select: { primaryColor: true, accentColor: true } },
-        },
-      },
-      lineItems: { orderBy: { sortOrder: "asc" } },
-    },
+    select: portalQuoteSelect,
   })
 
   if (!quote) {
@@ -41,7 +29,7 @@ export async function GET(
   // internal preview — viewing a draft internally must never mark it
   // "viewed" or auto-expire it the way a real client visit would
   if (isInternal) {
-    return NextResponse.json({ ...quote, isInternalPreview: true })
+    return NextResponse.json(toPortalQuote(quote, true))
   }
 
   // Auto-expire if past the expiry date and still in an open state
@@ -52,7 +40,7 @@ export async function GET(
 
   if (isExpired && quote.status !== "EXPIRED") {
     await prisma.quote.update({
-      where: { id: quote.id },
+      where: { id: activeId },
       data: { status: "EXPIRED" },
     })
     quote.status = "EXPIRED"
@@ -61,15 +49,15 @@ export async function GET(
     // Only fires on this SENT -> VIEWED transition, not on every subsequent
     // reload of the portal page.
     await prisma.quote.update({
-      where: { id: quote.id },
+      where: { id: activeId },
       data: { status: "VIEWED", viewedAt: quote.viewedAt ?? new Date() },
     })
     quote.status = "VIEWED"
     quote.viewedAt = quote.viewedAt ?? new Date()
-    notifyQuoteEvent(quote.id, "QUOTE_VIEWED").catch((err) =>
+    notifyQuoteEvent(activeId, "QUOTE_VIEWED").catch((err) =>
       console.error("notifyQuoteEvent failed:", err)
     )
   }
 
-  return NextResponse.json({ ...quote, isInternalPreview: false })
+  return NextResponse.json(toPortalQuote(quote, false))
 }

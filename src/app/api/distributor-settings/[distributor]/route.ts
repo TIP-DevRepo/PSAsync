@@ -1,8 +1,23 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { hasPermission } from "@/lib/permissions"
+import {
+  DISTRIBUTOR_SECRET_FIELDS,
+  distributorIntegrationSafeSelect,
+  loadDistributorSecretPresence,
+  NO_DISTRIBUTOR_SECRETS,
+} from "@/lib/safe-selects"
 
 const VALID_DISTRIBUTORS = ["INGRAM_MICRO", "TD_SYNNEX", "DH", "AMAZON_BUSINESS"]
+
+// Fields that can be explicitly emptied with clearFields. Secrets need
+// this because a blank secret in a save now means "keep what's stored".
+const CLEARABLE_FIELDS = ["clientId", ...DISTRIBUTOR_SECRET_FIELDS] as const
+
+function columnFor(prefix: "sandbox" | "production", field: string) {
+  return `${prefix}${field.charAt(0).toUpperCase()}${field.slice(1)}`
+}
 
 export async function PATCH(
   req: NextRequest,
@@ -11,6 +26,9 @@ export async function PATCH(
   const session = await auth()
   if (!session?.user) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+  }
+  if (!(await hasPermission(session.user.id, "settingsSections.integrations"))) {
+    return NextResponse.json({ error: "You don't have permission to change distributor settings" }, { status: 403 })
   }
 
   const { distributor } = await params
@@ -30,16 +48,27 @@ export async function PATCH(
     priority: Number(body.priority) || 0,
   }
 
-  if (body.environment === "SANDBOX") {
-    data.sandboxApiKey = body.apiKey || null
-    data.sandboxClientId = body.clientId || null
-    data.sandboxClientSecret = body.clientSecret || null
-    data.sandboxPartnerId = body.partnerId || null
-  } else if (body.environment === "PRODUCTION") {
-    data.productionApiKey = body.apiKey || null
-    data.productionClientId = body.clientId || null
-    data.productionClientSecret = body.clientSecret || null
-    data.productionPartnerId = body.partnerId || null
+  if (body.environment === "SANDBOX" || body.environment === "PRODUCTION") {
+    const prefix = body.environment === "SANDBOX" ? "sandbox" : "production"
+
+    // The Client ID is shown in the form, so a blank one is a deliberate
+    // clear, same as before
+    if (body.clientId !== undefined) data[columnFor(prefix, "clientId")] = body.clientId || null
+
+    // Secrets are never sent to the browser, so the form can't send the
+    // stored value back. Omitted or blank means keep the stored value,
+    // only a non-empty value replaces it.
+    for (const field of DISTRIBUTOR_SECRET_FIELDS) {
+      const value = body[field]
+      if (typeof value === "string" && value !== "") data[columnFor(prefix, field)] = value
+    }
+
+    // Explicitly removing a stored value, e.g. clearFields: ["clientSecret"]
+    if (Array.isArray(body.clearFields)) {
+      for (const field of body.clearFields) {
+        if ((CLEARABLE_FIELDS as readonly string[]).includes(field)) data[columnFor(prefix, field)] = null
+      }
+    }
   }
 
   if (body.activeEnvironment === "SANDBOX" || body.activeEnvironment === "PRODUCTION") {
@@ -62,7 +91,10 @@ export async function PATCH(
       activeEnvironment: (body.activeEnvironment ?? "SANDBOX") as "SANDBOX" | "PRODUCTION",
       ...data,
     },
+    select: distributorIntegrationSafeSelect,
   })
 
-  return NextResponse.json(record)
+  const presence = await loadDistributorSecretPresence(companyId)
+
+  return NextResponse.json({ ...record, ...(presence.get(distributor) ?? NO_DISTRIBUTOR_SECRETS) })
 }

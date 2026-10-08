@@ -2,6 +2,7 @@ import { PrismaClient } from "@/generated/prisma"
 import { PrismaPg } from "@prisma/adapter-pg"
 import { Pool } from "pg"
 import { sendQuoteNotificationEmail, sendCompanyNotificationEmail } from "@/lib/send-quote-email"
+import { escapeHtml, escapeHtmlWithBreaks } from "@/lib/html"
 
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -51,7 +52,7 @@ export async function notifyQuoteComment(quoteId: string, authorName: string, me
       quoteId,
       quote.user.email,
       `New message on Quote ${displayNumber} from ${authorName}`,
-      `<p>Hi ${quote.user.name},</p><p>${authorName} sent a message on Quote ${displayNumber}:</p><blockquote>${message.replace(/\n/g, "<br/>")}</blockquote><p><a href="${process.env.NEXTAUTH_URL ?? ""}${link}">View and reply</a></p>`
+      `<p>Hi ${escapeHtml(quote.user.name)},</p><p>${escapeHtml(authorName)} sent a message on Quote ${escapeHtml(displayNumber)}:</p><blockquote>${escapeHtmlWithBreaks(message)}</blockquote><p><a href="${escapeHtml(`${process.env.NEXTAUTH_URL ?? ""}${link}`)}">View and reply</a></p>`
     )
   } catch (err) {
     console.error("Failed to send comment notification email:", err)
@@ -93,7 +94,7 @@ export async function notifyQuoteEvent(quoteId: string, event: NotifyEvent) {
       quoteId,
       quote.user.email,
       `Quote ${displayNumber} ${subjectVerb}`,
-      `<p>Hi ${quote.user.name},</p><p>${message}.</p><p><a href="${process.env.NEXTAUTH_URL ?? ""}${link}">View the quote</a></p>`
+      `<p>Hi ${escapeHtml(quote.user.name)},</p><p>${escapeHtml(message)}.</p><p><a href="${escapeHtml(`${process.env.NEXTAUTH_URL ?? ""}${link}`)}">View the quote</a></p>`
     )
   } catch (err) {
     console.error("Failed to send notification email:", err)
@@ -178,7 +179,7 @@ export async function notifySalesOrderStatusChange(salesOrderId: string, status:
         salesOrder.companyId,
         user.email,
         `${salesOrder.soNumber} — ${label}`,
-        `<p>Hi ${user.name},</p><p>${message}.</p><p><a href="${process.env.NEXTAUTH_URL ?? ""}${link}">View the Sales Order</a></p>`,
+        `<p>Hi ${escapeHtml(user.name)},</p><p>${escapeHtml(message)}.</p><p><a href="${escapeHtml(`${process.env.NEXTAUTH_URL ?? ""}${link}`)}">View the Sales Order</a></p>`,
         userId
       )
     } catch (err) {
