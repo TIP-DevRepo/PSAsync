@@ -48,7 +48,6 @@ interface LineItem {
 }
 
 interface PortalQuote {
-  id: string
   quoteNumber: string
   version: number
   status: string
@@ -67,10 +66,9 @@ interface PortalQuote {
   expiresAt: string | null
   taxRate: number
   declineReason: string | null
-  portalComment: string | null
   client: { name: string }
   contact: { firstName: string; lastName: string } | null
-  user: { name: string; email: string }
+  user: { name: string }
   company: {
     name: string
     logoUrl: string | null

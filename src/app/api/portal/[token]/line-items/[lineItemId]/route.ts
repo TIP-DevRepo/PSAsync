@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { resolveClientQuoteId } from "@/lib/portal-quote"
 import { prisma } from "@/lib/prisma"
+import { portalLineItemSelect } from "@/lib/portal-public"
 import { withDeadlockRetry } from "@/lib/withDeadlockRetry"
 
 export async function PATCH(
@@ -70,13 +71,14 @@ export async function PATCH(
           where: { quoteId: quote.id, choiceGroup: lineItem.choiceGroup, id: { not: lineItemId } },
           data: { optionalSelected: false },
         }),
-        prisma.quoteLineItem.update({ where: { id: lineItemId }, data }),
+        prisma.quoteLineItem.update({ where: { id: lineItemId }, data, select: portalLineItemSelect }),
       ])
       return result
     }
     return prisma.quoteLineItem.update({
       where: { id: lineItemId },
       data,
+      select: portalLineItemSelect,
     })
   })
 

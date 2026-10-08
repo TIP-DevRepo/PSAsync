@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteEvent } from "@/lib/notify"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
 import { resolveClientQuoteId } from "@/lib/portal-quote"
+import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
 
 export async function POST(
@@ -58,6 +59,7 @@ export async function POST(
       shipCountry: body.shipCountry !== undefined ? body.shipCountry || null : quote.shipCountry,
       shipContactName: body.shipContactName !== undefined ? body.shipContactName || null : quote.shipContactName,
     },
+    select: portalQuoteSelect,
   })
 
   notifyQuoteEvent(quote.id, "QUOTE_APPROVED").catch((err) =>
@@ -70,5 +72,5 @@ export async function POST(
     console.error("createSalesOrderFromAcceptedQuote failed:", err)
   }
 
-  return NextResponse.json(updated)
+  return NextResponse.json(toPortalQuote(updated, false))
 }
