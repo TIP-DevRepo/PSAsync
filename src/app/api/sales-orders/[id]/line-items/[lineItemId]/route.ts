@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess, notFound } from "@/lib/api-access"
+import { loadSalesOrderLineItem, salesOrderLineItemWhere } from "@/lib/scoped-loaders"
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
-  const { lineItemId } = await params
+  const { id, lineItemId } = await params
+  const existing = await loadSalesOrderLineItem(ctx, id, lineItemId)
+  if (!existing) return notFound()
+
   const body = await req.json()
 
   const data: Record<string, unknown> = {}
@@ -33,7 +35,7 @@ export async function PATCH(
   if (body.sortOrder !== undefined) data.sortOrder = Number(body.sortOrder)
 
   const lineItem = await prisma.sOLineItem.update({
-    where: { id: lineItemId },
+    where: salesOrderLineItemWhere(ctx, id, lineItemId),
     data,
     include: { vendor: { select: { id: true, name: true } } },
   })
@@ -45,28 +47,29 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
-  const { lineItemId } = await params
+  const { id, lineItemId } = await params
 
-  const existing = await prisma.sOLineItem.findUnique({ where: { id: lineItemId } })
-  if (!existing) {
-    return NextResponse.json({ error: "Line item not found" }, { status: 404 })
-  }
+  const existing = await loadSalesOrderLineItem(ctx, id, lineItemId)
+  if (!existing) return notFound()
 
   // Deleting a bundle header shouldn't take its contents with it — unbundle
   // the children first so they survive as regular top-level items.
   if (existing.isBundleHeader && existing.bundleName) {
     await prisma.sOLineItem.updateMany({
-      where: { salesOrderId: existing.salesOrderId, bundleName: existing.bundleName, isBundleHeader: false },
+      where: {
+        salesOrderId: existing.salesOrderId,
+        salesOrder: { companyId: ctx.companyId },
+        bundleName: existing.bundleName,
+        isBundleHeader: false,
+      },
       data: { bundleName: null },
     })
   }
 
-  await prisma.sOLineItem.delete({ where: { id: lineItemId } })
+  await prisma.sOLineItem.delete({ where: salesOrderLineItemWhere(ctx, id, lineItemId) })
 
   return NextResponse.json({ deleted: true })
 }
