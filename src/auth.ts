@@ -166,13 +166,23 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
     },
     async session({ session, token }) {
       if (token) {
-        session.user.id = token.id as string
-        session.user.companyId = token.companyId as string
         // Runs server side for every auth() call and /api/auth/session
         // fetch. getEffectiveAccess is cached per request, so a page that
         // calls auth() several times only queries once. Null for a
-        // deactivated or deleted account, which strips all access.
-        session.user.access = await getEffectiveAccess(token.id as string)
+        // deactivated or deleted account.
+        const access = await getEffectiveAccess(token.id as string)
+
+        // A deactivated or deleted account is treated as signed out, so
+        // every check on session?.user refuses it. user is set to null
+        // rather than removed, because auth() fills a missing user back in
+        // from the raw token.
+        if (!access) {
+          return { ...session, user: null } as unknown as typeof session
+        }
+
+        session.user.id = token.id as string
+        session.user.companyId = token.companyId as string
+        session.user.access = access
       }
       return session
     },

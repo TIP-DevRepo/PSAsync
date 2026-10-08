@@ -1,25 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess, notFound } from "@/lib/api-access"
+import { clientLocationWhere, loadClientLocation } from "@/lib/scoped-loaders"
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; locationId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id, locationId } = await params
 
-  const client = await prisma.client.findUnique({
-    where: { id, companyId: session.user.companyId },
-    select: { id: true },
-  })
-  if (!client) {
-    return NextResponse.json({ error: "Client not found" }, { status: 404 })
-  }
+  const existing = await loadClientLocation(ctx, id, locationId)
+  if (!existing) return notFound()
 
   const body = await req.json()
   const { name, address, address2, city, state, zip, country, phone, notes, isPrimary, billingContactId, shippingContactId } = body
@@ -28,13 +22,13 @@ export async function PATCH(
   // currently holds that flag — only one primary per client.
   if (isPrimary === true) {
     await prisma.clientLocation.updateMany({
-      where: { clientId: id, isPrimary: true },
+      where: { clientId: id, client: { companyId: ctx.companyId }, isPrimary: true },
       data: { isPrimary: false },
     })
   }
 
   const location = await prisma.clientLocation.update({
-    where: { id: locationId },
+    where: clientLocationWhere(ctx, id, locationId),
     data: {
       name,
       address: address || null,

@@ -1,20 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess, notFound } from "@/lib/api-access"
+import { loadSalesOrder } from "@/lib/scoped-loaders"
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
+  const order = await loadSalesOrder(ctx, id)
+  if (!order) return notFound()
 
   const comments = await prisma.sOComment.findMany({
-    where: { salesOrderId: id },
+    where: { salesOrderId: order.id, salesOrder: { companyId: ctx.companyId } },
     orderBy: { createdAt: "asc" },
   })
 
@@ -25,12 +26,13 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
+  const order = await loadSalesOrder(ctx, id)
+  if (!order) return notFound()
+
   const body = await req.json()
 
   if (!body.message || !body.message.trim()) {
@@ -39,9 +41,9 @@ export async function POST(
 
   const comment = await prisma.sOComment.create({
     data: {
-      salesOrderId: id,
-      authorUserId: session.user.id,
-      authorName: session.user.name ?? "Unknown",
+      salesOrderId: order.id,
+      authorUserId: ctx.userId,
+      authorName: ctx.userName ?? "Unknown",
       message: body.message.trim(),
     },
   })

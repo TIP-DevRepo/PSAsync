@@ -39,6 +39,12 @@ Keep changes scoped to what was asked. Don't refactor, rename, or "clean up" unr
 - API routes under `src/app/api/`, following Next.js App Router conventions (`route.ts` with GET/POST/PATCH/DELETE exports, params as a Promise in dynamic segments).
 - Shared components in `src/components/`, organized by feature area (`src/components/inventory/`, `src/components/clients/`, etc).
 
+# API routes
+- Every new or changed route handler starts with `const { ctx, response } = await requireAccess(rule?)` from `src/lib/api-access.ts` and returns `response` if set. Use `ctx.companyId` and `ctx.userId`, never the session token's values.
+- Ids from the URL go through a scoped loader in `src/lib/scoped-loaders.ts`, never a bare id lookup. A miss returns `notFound()`. Updates and deletes use the matching `*Where` builder so the write itself is company scoped.
+- Ids that arrive in a request body (tag ids, location ids, vendor ids, etc.) must be validated against the caller's company before use.
+- Responses use explicit `select` objects. Errors use the shape `{ error, code? }`.
+
 # Design system conventions
 - Use the tinted pill pattern for accent colored badges and status labels: `bg-brand-secondary-500/10 text-brand-secondary-500` style. Avoid hardcoding solid colors with manual dark mode overrides.
 - Use existing `brand-primary`/`brand-secondary` CSS variable tokens for theming, never hardcoded hex colors, so everything respects each company's brand colors and both light and dark mode.

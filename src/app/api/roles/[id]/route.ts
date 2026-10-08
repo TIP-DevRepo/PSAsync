@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma"
 import { hasPermission, getUserRank, type RolePermissions } from "@/lib/permissions"
 import { syncLegacyRoleId } from "@/lib/user-roles"
 import { readRoleColor } from "@/lib/role-colors"
+import { validateRolePermissions, findPermissionEscalations } from "@/lib/role-permission-rules"
 
 export async function PATCH(
   req: NextRequest,
@@ -53,6 +54,30 @@ export async function PATCH(
     return NextResponse.json({ error: "Color must be a hex value like #3B82F6" }, { status: 400 })
   }
 
+  // Only the known permission structure is stored, and nobody but a Global
+  // Admin can use a role (including Everyone) to hand out access they don't
+  // hold themselves
+  let permissions: RolePermissions | undefined
+  if (body.permissions !== undefined) {
+    const validated = validateRolePermissions(body.permissions)
+    if (validated.error !== undefined) {
+      return NextResponse.json({ error: validated.error }, { status: 400 })
+    }
+    permissions = validated.permissions
+
+    const actorAccess = session.user.access
+    if (!actorAccess) {
+      return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
+    }
+    const refused = findPermissionEscalations(actorAccess, existing.permissions, permissions)
+    if (refused.length > 0) {
+      return NextResponse.json(
+        { error: `You can't grant permissions you don't have yourself: ${refused.join(", ")}` },
+        { status: 403 }
+      )
+    }
+  }
+
   // The Everyone role's name and color are fixed (it is always "Everyone"
   // in neutral gray), only its permissions can change. An unchanged name
   // sent back by the panel is fine, only an actual change is rejected.
@@ -70,8 +95,8 @@ export async function PATCH(
   // If this edit would remove Settings > Users access from this role, make
   // sure at least one OTHER role in the company still has it — otherwise
   // nobody could ever manage roles/users again
-  if (body.permissions !== undefined) {
-    const willHaveUsersAccess = !!body.permissions?.settingsSections?.users
+  if (permissions !== undefined) {
+    const willHaveUsersAccess = !!permissions.settingsSections?.users
     const hadUsersAccess = !!(existing.permissions as RolePermissions)?.settingsSections?.users
     if (hadUsersAccess && !willHaveUsersAccess) {
       const otherRolesWithAccess = await prisma.role.findMany({
@@ -92,7 +117,7 @@ export async function PATCH(
   const data: Record<string, unknown> = {}
   if (body.name !== undefined && !existing.isEveryone) data.name = body.name.trim()
   if (color !== undefined && !existing.isEveryone) data.color = color
-  if (body.permissions !== undefined) data.permissions = body.permissions
+  if (permissions !== undefined) data.permissions = permissions
 
   const role = await prisma.role.update({ where: { id }, data })
 
