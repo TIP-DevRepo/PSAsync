@@ -18,6 +18,32 @@ export interface ProductUpdate {
 // update appears on /updates the moment the release goes live.
 export const PRODUCT_UPDATES: ProductUpdate[] = [
   {
+    version: "v0.9.06",
+    date: "2026-10-09",
+    title: "Stronger Protection for Your Company's Data",
+    sections: [
+      {
+        category: "Improved",
+        items: [
+          "Records are now checked more carefully, so each company only ever sees and changes its own data.",
+          "When you pick a client, vendor, location, contact, or other linked record on a form, the app now confirms the choice is valid before saving.",
+          "Deactivated users are now signed out the next time they open a page or take an action.",
+          "When editing a role, you can now only turn on permissions you hold yourself.",
+          "Role saves that are refused now explain why.",
+          "Invalid values entered in forms and settings now show a clear message instead of an error.",
+          "Sales order notification rules are checked when saved."
+        ],
+      },
+      {
+        category: "Fixed",
+        items: [
+          "Quote settings now only accept a whole number of days for the default quote expiry.",
+          "A quote created with a template that no longer exists now shows a clear message."
+        ],
+      },
+    ],
+  },
+  {
     version: "v0.9.05",
     date: "2026-10-08",
     title: "Account Lockout, User Actions Menu, and Safer Settings",

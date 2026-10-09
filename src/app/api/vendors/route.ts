@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { VendorStatus, VendorType } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
 
 export async function GET() {
   const session = await auth()
@@ -28,16 +30,21 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const body = await req.json()
 
+  if (body.type && !isEnumValue(VendorType, body.type)) {
+    return apiError(400, "Invalid vendor type")
+  }
+  if (body.status && !isEnumValue(VendorStatus, body.status)) {
+    return apiError(400, "Invalid status")
+  }
+
   const vendor = await prisma.vendor.create({
     data: {
-      companyId: session.user.companyId,
+      companyId: ctx.companyId,
       name: body.name,
       type: body.type || "SUPPLIER",
       status: body.status || "ACTIVE",

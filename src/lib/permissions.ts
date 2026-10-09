@@ -28,6 +28,10 @@ export interface RolePermissions {
 // server side (hasPermission, getUserRank) and client side (exposed as
 // session.user.access by the session callback in src/auth.ts).
 export interface EffectiveAccess {
+  userId: string
+  // Read from the user's database row, never from the login token, so API
+  // routes scope by the company the user actually belongs to right now.
+  companyId: string
   isGlobalAdmin: boolean
   // Highest rank among the user's assigned roles, Number.MAX_SAFE_INTEGER
   // for Global Admin, 0 when they hold no assigned role (same as a user
@@ -93,7 +97,15 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
   // since turned SSO on is never gated, since its users can't use or change
   // a password and would otherwise be stuck.
   if (user.mustChangePassword && !usesMicrosoftSso(user.company.settings)) {
-    return { isGlobalAdmin: false, rank: 0, permissions: {}, roleIds: [], mustChangePassword: true }
+    return {
+      userId,
+      companyId: user.companyId,
+      isGlobalAdmin: false,
+      rank: 0,
+      permissions: {},
+      roleIds: [],
+      mustChangePassword: true,
+    }
   }
 
   const everyone = await prisma.role.findFirst({
@@ -118,6 +130,8 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
   else if (assigned.length > 0) rank = Math.max(...assigned.map((r) => r.rank))
 
   return {
+    userId,
+    companyId: user.companyId,
     isGlobalAdmin,
     rank,
     permissions: permissions as RolePermissions,
@@ -130,7 +144,13 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
 // hasPermission(userId, "settingsSections.users"). True if any role the user
 // holds (including Everyone) allows it, or if they hold Global Admin.
 export async function hasPermission(userId: string, path: string): Promise<boolean> {
-  const access = await getEffectiveAccess(userId)
+  return checkAccess(await getEffectiveAccess(userId), path)
+}
+
+// The pure check behind hasPermission and requireAccess's ctx.can, so the
+// Global Admin bypass lives in exactly one place. Null access (a missing or
+// deactivated user) is always refused.
+export function checkAccess(access: EffectiveAccess | null | undefined, path: string): boolean {
   if (!access) return false
   if (access.isGlobalAdmin) return true
 

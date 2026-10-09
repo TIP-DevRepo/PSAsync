@@ -1,22 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
+import { assertRefs, loadClient } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
 
-  const client = await prisma.client.findUnique({
-    where: { id, companyId: session.user.companyId },
-    select: { id: true },
-  })
+  const client = await loadClient(ctx, id)
   if (!client) {
     return NextResponse.json({ error: "Client not found" }, { status: 404 })
   }
@@ -27,6 +23,10 @@ export async function POST(
   if (!name || !name.trim()) {
     return NextResponse.json({ error: "Location name is required" }, { status: 400 })
   }
+
+  // Billing and shipping contacts must be contacts of this same client
+  const invalid = await assertRefs(ctx, { clientId: id, contactId: [billingContactId, shippingContactId] })
+  if (invalid) return invalid
 
   // Only one location can be primary at a time — unset any existing
   // primary before creating this one, same enforcement pattern a

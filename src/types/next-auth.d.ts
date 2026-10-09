@@ -7,8 +7,9 @@ declare module "next-auth" {
       id: string
       companyId: string
       // Resolved fresh from the database on every request by the session
-      // callback in src/auth.ts, never cached in the login token. Null for a
-      // deactivated or deleted user.
+      // callback in src/auth.ts, never cached in the login token. For a
+      // deactivated or deleted user the callback sets session.user itself to
+      // null, so they read as signed out.
       access: EffectiveAccess | null
     } & DefaultSession["user"]
   }

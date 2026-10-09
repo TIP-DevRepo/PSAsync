@@ -1,18 +1,28 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { ContactLocationType } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess, notFound } from "@/lib/api-access"
+import { assertRefs, loadClient } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
+  const client = await loadClient(ctx, id)
+  if (!client) return notFound()
+
   const body = await req.json()
+
+  if (body.locationType && !isEnumValue(ContactLocationType, body.locationType)) {
+    return apiError(400, "Invalid location type")
+  }
+  // The location must be one of this client's, and tags the company's own
+  const invalid = await assertRefs(ctx, { clientId: id, clientLocationId: body.locationId, tagIds: body.tagIds })
+  if (invalid) return invalid
 
   // Only one contact can be primary at a time
   if (body.isPrimary) {

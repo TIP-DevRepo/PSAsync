@@ -3,6 +3,8 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission } from "@/lib/permissions"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
+import { requireAccess } from "@/lib/api-access"
+import { assertRefs, inventoryAssetWhere } from "@/lib/scoped-loaders"
 
 interface ContainerNode { id: string; name: string; parentId: string | null }
 
@@ -72,20 +74,18 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
-  if (!(await hasPermission(session.user.id, "pages.inventory"))) {
+  if (!ctx.can("pages.inventory")) {
     return NextResponse.json({ error: "You don't have access to Inventory" }, { status: 403 })
   }
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
 
-  const asset = await prisma.inventoryAsset.findUnique({ where: { id, companyId } })
+  const asset = await prisma.inventoryAsset.findUnique({ where: inventoryAssetWhere(ctx, id) })
   if (!asset) {
     return NextResponse.json({ error: "Asset not found" }, { status: 404 })
   }
@@ -108,8 +108,14 @@ export async function PATCH(
     }
   }
 
+  const customFieldValues: { customFieldId?: string; value?: string }[] = Array.isArray(body.customFieldValues)
+    ? body.customFieldValues
+    : []
+  const invalidFields = await assertRefs(ctx, { customFieldId: customFieldValues.map((v) => v?.customFieldId) })
+  if (invalidFields) return invalidFields
+
   const updated = await prisma.inventoryAsset.update({
-    where: { id },
+    where: inventoryAssetWhere(ctx, id),
     data: {
       serialNumber,
       warrantyType: body.warrantyType?.trim() || null,
@@ -123,7 +129,7 @@ export async function PATCH(
   })
 
   if (Array.isArray(body.customFieldValues)) {
-    for (const v of body.customFieldValues as { customFieldId?: string; value?: string }[]) {
+    for (const v of customFieldValues) {
       if (!v?.customFieldId) continue
       const trimmed = (v.value ?? "").trim()
       if (trimmed) {
@@ -138,7 +144,7 @@ export async function PATCH(
     }
   }
 
-  await logAssetEvent(id, "FIELD_UPDATED", "Edited asset details", session.user.id)
+  await logAssetEvent(id, "FIELD_UPDATED", "Edited asset details", ctx.userId)
 
   return NextResponse.json(updated)
 }

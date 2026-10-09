@@ -1,27 +1,33 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { RecurringInterval } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id: templateId } = await params
 
   // Confirm the template belongs to this company before touching it
   const template = await prisma.quoteTemplate.findUnique({
-    where: { id: templateId, companyId: session.user.companyId },
+    where: { id: templateId, companyId: ctx.companyId },
   })
   if (!template) {
     return NextResponse.json({ error: "Template not found" }, { status: 404 })
   }
 
   const body = await req.json()
+
+  if (body.isRecurring && body.recurringInterval && !isEnumValue(RecurringInterval, body.recurringInterval)) {
+    return apiError(400, "Invalid recurring interval")
+  }
+  const invalid = await assertRefs(ctx, { catalogItemId: body.catalogItemId })
+  if (invalid) return invalid
 
   // Next sortOrder = current highest + 1, so new items land at the bottom
   const highest = await prisma.quoteTemplateLineItem.findFirst({

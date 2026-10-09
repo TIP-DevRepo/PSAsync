@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { apiError, requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 
 export async function GET() {
   const session = await auth()
@@ -81,10 +83,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const body = await req.json()
 
@@ -92,7 +92,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A client is required" }, { status: 400 })
   }
 
-  const companyId = session.user.companyId
+  // The contact must belong to the quote's client. userId is the Assigned
+  // Rep picked on the New Quote form, and has to be an active user here.
+  const invalid = await assertRefs(ctx, { clientId: body.clientId, contactId: body.contactId, userId: body.userId })
+  if (invalid) return invalid
+
+  const companyId = ctx.companyId
 
   // Pull default terms/expiry from Company Settings
   const settings = await prisma.companySettings.findUnique({
@@ -135,6 +140,9 @@ export async function POST(req: NextRequest) {
       where: { id: body.templateId, companyId },
       include: { lineItems: true },
     })
+    if (!template) {
+      return apiError(400, "Invalid template", "INVALID_REFERENCE")
+    }
 
     if (template) {
       templateTerms = template.terms
@@ -185,7 +193,7 @@ export async function POST(req: NextRequest) {
       companyId,
       clientId: body.clientId,
       contactId: body.contactId || null,
-      userId: body.userId || session.user.id,
+      userId: body.userId || ctx.userId,
       quoteNumber,
       templateId: body.templateId || null,
       title: body.title || null,

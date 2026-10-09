@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 import {
   MIN_PASSWORD_LENGTH,
@@ -23,13 +23,13 @@ function lockedResponse(lockedUntil: Date) {
 // the session, never from the request body, and no password or hash is ever
 // logged or echoed back in a response.
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  // The forced password change screen posts here, so a user still on a
+  // temporary password must get through
+  const { ctx, response } = await requireAccess({ allowPasswordGate: true })
+  if (response) return response
 
   const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
+    where: { id: ctx.userId },
     select: {
       password: true,
       active: true,
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
   // so a reset can't wipe out a wrong attempt counted in the meantime.
   if (lockedUntil) {
     await prisma.user.updateMany({
-      where: { id: session.user.id, passwordChangeLockedUntil: lockedUntil },
+      where: { id: ctx.userId, passwordChangeLockedUntil: lockedUntil },
       data: { passwordChangeFailedAttempts: 0, passwordChangeLockedUntil: null },
     })
   }
@@ -89,7 +89,7 @@ export async function POST(req: NextRequest) {
   const currentMatches = await bcrypt.compare(currentPassword, user.password)
   if (!currentMatches) {
     const { passwordChangeFailedAttempts: attempts } = await prisma.user.update({
-      where: { id: session.user.id },
+      where: { id: ctx.userId },
       data: { passwordChangeFailedAttempts: { increment: 1 } },
       select: { passwordChangeFailedAttempts: true },
     })
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
     if (attempts >= MAX_FAILED_ATTEMPTS) {
       const newLock = new Date(Date.now() + LOCKOUT_MINUTES * 60_000)
       await prisma.user.update({
-        where: { id: session.user.id },
+        where: { id: ctx.userId },
         data: { passwordChangeFailedAttempts: 0, passwordChangeLockedUntil: newLock },
       })
       return lockedResponse(newLock)
@@ -146,10 +146,10 @@ export async function POST(req: NextRequest) {
   // Saving the password and clearing the rate limit in one update, so a
   // successful change always starts the counter over. Also lifts the first
   // sign in gate for a user who was on an admin's temporary password. This
-  // route checks only the session, never a permission, so a gated user
-  // (who has none) can still reach it.
+  // route requires no permission and passes allowPasswordGate, so a gated
+  // user (who has none) can still reach it.
   await prisma.user.update({
-    where: { id: session.user.id },
+    where: { id: ctx.userId },
     data: {
       password: hashedPassword,
       passwordChangeFailedAttempts: 0,

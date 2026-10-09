@@ -4,8 +4,9 @@ import { prisma } from "@/lib/prisma"
 import { buildLocationPathOptions } from "@/lib/inventory/locationPaths"
 import { generateAssetTag } from "@/lib/inventory/generateAssetTag"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
-import { hasPermission } from "@/lib/permissions"
 import type { InventoryRemovedReason } from "@/generated/prisma"
+import { requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 
 const VALID_STATUSES = ["IN_STOCK", "INTERNAL", "LOANED", "SOLD", "PENDING_OFFBOARD", "REMOVED"] as const
 
@@ -70,16 +71,14 @@ const VALID_REMOVED_REASONS = ["BROKEN_SCRAPPED", "LOST", "DONATED", "RETURNED_T
 //               no location tracking at all
 //   REMOVED  -> same Owner/Location flow as IN_STOCK, plus removedReason
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
-  if (!(await hasPermission(session.user.id, "pages.inventory"))) {
+  if (!ctx.can("pages.inventory")) {
     return NextResponse.json({ error: "You don't have access to Inventory" }, { status: 403 })
   }
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
   const { catalogItemId, status } = body
   const serialNumber = typeof body.serialNumber === "string" ? body.serialNumber.trim() : ""
@@ -134,6 +133,8 @@ export async function POST(req: NextRequest) {
     if (!body.loanExpectedReturnDate) {
       return NextResponse.json({ error: "Expected return date is required" }, { status: 400 })
     }
+    const invalidSite = await assertRefs(ctx, { clientId: loanClient.id, clientLocationId: body.clientLocationId })
+    if (invalidSite) return invalidSite
     const resolvedSite = body.clientLocationId ?? contact.locationId ?? null
     if (!resolvedSite) {
       return NextResponse.json({ error: "Select which of the client's sites this is loaned to" }, { status: 400 })
@@ -175,6 +176,8 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ error: "Contact not found for this client" }, { status: 404 })
       }
       deployedToContactId = contact.id
+      const invalidSite = await assertRefs(ctx, { clientId: client.id, clientLocationId: body.clientLocationId })
+      if (invalidSite) return invalidSite
       const resolvedSite = body.clientLocationId ?? contact.locationId ?? null
       if (!resolvedSite) {
         return NextResponse.json({ error: "Select which of the client's sites this is deployed at" }, { status: 400 })
@@ -235,6 +238,8 @@ export async function POST(req: NextRequest) {
   const customFieldValues: { customFieldId: string; value: string }[] = Array.isArray(body.customFieldValues)
     ? body.customFieldValues.filter((v: { customFieldId?: string; value?: string }) => v?.customFieldId && v.value?.trim())
     : []
+  const invalidFields = await assertRefs(ctx, { customFieldId: customFieldValues.map((v) => v.customFieldId) })
+  if (invalidFields) return invalidFields
 
   try {
     const assetTag = await generateAssetTag(companyId, tagClientId)
@@ -267,7 +272,7 @@ export async function POST(req: NextRequest) {
       },
     })
 
-    await logAssetEvent(asset.id, "CREATED", "Manually added to inventory", session.user.id)
+    await logAssetEvent(asset.id, "CREATED", "Manually added to inventory", ctx.userId)
 
     return NextResponse.json(asset)
   } catch (err) {

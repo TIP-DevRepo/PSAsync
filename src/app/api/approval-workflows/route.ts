@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { ApprovalTriggerType } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 
 export async function GET() {
   const session = await auth()
@@ -19,11 +21,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.approvalWorkflows"))) {
+  const { ctx, response } = await requireAccess()
+  if (response) return response
+  if (!ctx.can("settingsSections.approvalWorkflows")) {
     return NextResponse.json({ error: "You don't have permission to create approval workflows" }, { status: 403 })
   }
 
@@ -32,16 +32,21 @@ export async function POST(req: NextRequest) {
   if (!body.name || !body.triggerType || !body.requiredRoleId) {
     return NextResponse.json({ error: "Name, trigger type, and required role are all required" }, { status: 400 })
   }
-
-  // Confirm the role belongs to this company before linking a workflow to it
-  const role = await prisma.role.findUnique({ where: { id: body.requiredRoleId } })
-  if (!role || role.companyId !== session.user.companyId) {
-    return NextResponse.json({ error: "Invalid role" }, { status: 400 })
+  if (!isEnumValue(ApprovalTriggerType, body.triggerType)) {
+    return apiError(400, "Invalid trigger type")
   }
+  if (body.thresholdValue != null && !Number.isFinite(Number(body.thresholdValue))) {
+    return apiError(400, "Invalid threshold")
+  }
+
+  // Confirm the role and trigger user belong to this company before
+  // linking a workflow to them
+  const invalid = await assertRefs(ctx, { roleId: body.requiredRoleId, userId: body.triggerUserId })
+  if (invalid) return invalid
 
   const workflow = await prisma.approvalWorkflow.create({
     data: {
-      companyId: session.user.companyId,
+      companyId: ctx.companyId,
       name: body.name,
       triggerType: body.triggerType,
       thresholdValue: body.thresholdValue != null ? Number(body.thresholdValue) : null,

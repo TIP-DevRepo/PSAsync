@@ -1,26 +1,26 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
+import { assertRefs, loadVendor } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
-  const vendor = await prisma.vendor.findUnique({
-    where: { id, companyId: session.user.companyId },
-    select: { id: true },
-  })
+  const vendor = await loadVendor(ctx, id)
   if (!vendor) {
     return NextResponse.json({ error: "Vendor not found" }, { status: 404 })
   }
 
   const body = await req.json()
+
+  // The location must be one of this vendor's
+  const invalid = await assertRefs(ctx, { vendorId: id, vendorLocationId: body.locationId })
+  if (invalid) return invalid
 
   const contact = await prisma.vendorContact.create({
     data: {

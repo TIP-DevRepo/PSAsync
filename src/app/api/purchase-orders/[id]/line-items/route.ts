@@ -1,27 +1,26 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
+import { assertRefs, loadPurchaseOrder } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
 
-  const po = await prisma.purchaseOrder.findUnique({
-    where: { id, companyId: session.user.companyId },
-    select: { id: true },
-  })
+  const po = await loadPurchaseOrder(ctx, id)
   if (!po) {
     return NextResponse.json({ error: "Purchase Order not found" }, { status: 404 })
   }
 
   const body = await req.json()
+
+  const invalid = await assertRefs(ctx, { catalogItemId: body.catalogItemId })
+  if (invalid) return invalid
   const siblingCount = await prisma.pOLineItem.count({ where: { purchaseOrderId: id } })
 
   const lineItem = await prisma.pOLineItem.create({

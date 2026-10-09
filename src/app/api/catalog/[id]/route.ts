@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { hasPermission } from "@/lib/permissions"
+import { ItemType } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { assertRefs, catalogItemWhere } from "@/lib/scoped-loaders"
 
 export async function GET(
   req: NextRequest,
@@ -72,16 +75,14 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
   const body = await req.json()
 
   const existing = await prisma.catalogItem.findUnique({
-    where: { id, companyId: session.user.companyId },
+    where: catalogItemWhere(ctx, id),
   })
   if (!existing) {
     return NextResponse.json({ error: "Item not found" }, { status: 404 })
@@ -92,11 +93,17 @@ export async function PATCH(
   }
 
   const category = await prisma.category.findUnique({
-    where: { id: body.categoryId, companyId: session.user.companyId },
+    where: { id: body.categoryId, companyId: ctx.companyId },
   })
   if (!category) {
     return NextResponse.json({ error: "Category not found" }, { status: 404 })
   }
+
+  if (body.type !== undefined && !isEnumValue(ItemType, body.type)) {
+    return apiError(400, "Invalid item type")
+  }
+  const invalid = await assertRefs(ctx, { vendorId: body.vendorId, manufacturerId: body.manufacturerId })
+  if (invalid) return invalid
 
   const newValues = {
     name: body.name,
@@ -126,7 +133,7 @@ export async function PATCH(
   const vendorNameMap = new Map<string, string>()
   if (vendorIdsToResolve.length > 0) {
     const vendorRows = await prisma.vendor.findMany({
-      where: { id: { in: vendorIdsToResolve } },
+      where: { id: { in: vendorIdsToResolve }, companyId: ctx.companyId },
       select: { id: true, name: true },
     })
     vendorRows.forEach((v) => vendorNameMap.set(v.id, v.name))
@@ -153,7 +160,7 @@ export async function PATCH(
   }
 
   const item = await prisma.catalogItem.update({
-    where: { id, companyId: session.user.companyId },
+    where: catalogItemWhere(ctx, id),
     data: newValues,
   })
 
@@ -161,7 +168,7 @@ export async function PATCH(
     await prisma.catalogItemChangeLog.createMany({
       data: logEntries.map((e) => ({
         catalogItemId: id,
-        changedByUserId: session.user.id,
+        changedByUserId: ctx.userId,
         fieldName: e.fieldName,
         oldValue: e.oldValue,
         newValue: e.newValue,
