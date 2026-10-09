@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { ClientStatus } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { assertRefs, clientWhere, loadClient } from "@/lib/scoped-loaders"
 
 export async function GET(
   req: NextRequest,
@@ -39,20 +42,15 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
 
   // Verify this client actually belongs to the caller's company before
   // updating anything — id alone isn't enough to scope a Prisma update,
   // so this doubles as the ownership check the GET route already does.
-  const existing = await prisma.client.findUnique({
-    where: { id, companyId: session.user.companyId },
-    select: { id: true },
-  })
+  const existing = await loadClient(ctx, id)
   if (!existing) {
     return NextResponse.json({ error: "Client not found" }, { status: 404 })
   }
@@ -77,6 +75,17 @@ export async function PATCH(
   if (name !== undefined && !name.trim()) {
     return NextResponse.json({ error: "Client name can't be blank" }, { status: 400 })
   }
+  if (status !== undefined && !isEnumValue(ClientStatus, status)) {
+    return apiError(400, "Invalid status")
+  }
+
+  // Main billing and shipping must be locations of this same client
+  const invalid = await assertRefs(ctx, {
+    industryId,
+    clientId: id,
+    clientLocationId: [mainBillingLocationId, mainShippingLocationId],
+  })
+  if (invalid) return invalid
 
   // Only one client per company can be marked as "your own company" at a
   // time. If this update is turning isInternal on, clear it from whichever
@@ -84,13 +93,13 @@ export async function PATCH(
   // records at once.
   if (isInternal === true) {
     await prisma.client.updateMany({
-      where: { companyId: session.user.companyId, isInternal: true, id: { not: id } },
+      where: { companyId: ctx.companyId, isInternal: true, id: { not: id } },
       data: { isInternal: false },
     })
   }
 
   const client = await prisma.client.update({
-    where: { id },
+    where: clientWhere(ctx, id),
     data: {
       name,
       prefix: prefix !== undefined ? (prefix.trim() ? prefix.trim().toUpperCase() : null) : undefined,

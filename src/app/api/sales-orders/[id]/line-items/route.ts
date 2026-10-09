@@ -1,27 +1,30 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { RecurringInterval } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { assertRefs, loadSalesOrder } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
 
-  const so = await prisma.salesOrder.findUnique({
-    where: { id, companyId: session.user.companyId },
-    select: { id: true },
-  })
+  const so = await loadSalesOrder(ctx, id)
   if (!so) {
     return NextResponse.json({ error: "Sales Order not found" }, { status: 404 })
   }
 
   const body = await req.json()
+
+  if (body.recurringInterval && !isEnumValue(RecurringInterval, body.recurringInterval)) {
+    return apiError(400, "Invalid recurring interval")
+  }
+  const invalid = await assertRefs(ctx, { catalogItemId: body.catalogItemId, vendorId: body.vendorId })
+  if (invalid) return invalid
 
   // Sort order is scoped to whatever group this item lands in — the
   // top-level list, or a specific bundle's children — so a new item

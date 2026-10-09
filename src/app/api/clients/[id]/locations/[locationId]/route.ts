@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireAccess, notFound } from "@/lib/api-access"
-import { clientLocationWhere, loadClientLocation } from "@/lib/scoped-loaders"
+import { assertRefs, clientLocationWhere, loadClientLocation } from "@/lib/scoped-loaders"
 
 export async function PATCH(
   req: NextRequest,
@@ -17,6 +17,10 @@ export async function PATCH(
 
   const body = await req.json()
   const { name, address, address2, city, state, zip, country, phone, notes, isPrimary, billingContactId, shippingContactId } = body
+
+  // Billing and shipping contacts must be contacts of this same client
+  const invalid = await assertRefs(ctx, { clientId: id, contactId: [billingContactId, shippingContactId] })
+  if (invalid) return invalid
 
   // Setting this location as primary means unsetting whichever one
   // currently holds that flag — only one primary per client.

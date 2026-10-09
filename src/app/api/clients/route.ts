@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { ClientStatus } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 
 export async function GET() {
   const session = await auth()
@@ -30,26 +33,30 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const body = await req.json()
+
+  if (body.status && !isEnumValue(ClientStatus, body.status)) {
+    return apiError(400, "Invalid status")
+  }
+  const invalid = await assertRefs(ctx, { industryId: body.industryId })
+  if (invalid) return invalid
 
   // Only one client per company can be marked as "your own company" at a
   // time — same rule PATCH enforces, so a client created as internal
   // doesn't end up alongside an existing one.
   if (body.isInternal === true) {
     await prisma.client.updateMany({
-      where: { companyId: session.user.companyId, isInternal: true },
+      where: { companyId: ctx.companyId, isInternal: true },
       data: { isInternal: false },
     })
   }
 
   const client = await prisma.client.create({
     data: {
-      companyId: session.user.companyId,
+      companyId: ctx.companyId,
       name: body.name,
       prefix: body.prefix?.trim() ? body.prefix.trim().toUpperCase() : null,
       email: body.email || null,

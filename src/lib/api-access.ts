@@ -13,6 +13,13 @@ export function apiError(status: number, error: string, code?: string) {
   return NextResponse.json(body, { status })
 }
 
+// True when value is one of an enum's values, e.g. a Prisma generated enum
+// like ClientStatus, so a bad value from a request body gets a 400 instead
+// of failing in the database
+export function isEnumValue<T extends string>(values: Record<string, T>, value: unknown): value is T {
+  return typeof value === "string" && (Object.values(values) as string[]).includes(value)
+}
+
 // Used for every record that's missing or belongs to another company, so a
 // response never reveals that an id exists somewhere else
 export function notFound() {

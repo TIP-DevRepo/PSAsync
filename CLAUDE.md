@@ -43,7 +43,16 @@ Keep changes scoped to what was asked. Don't refactor, rename, or "clean up" unr
 - Every new or changed route handler starts with `const { ctx, response } = await requireAccess(rule?)` from `src/lib/api-access.ts` and returns `response` if set. Use `ctx.companyId` and `ctx.userId`, never the session token's values.
 - Ids from the URL go through a scoped loader in `src/lib/scoped-loaders.ts`, never a bare id lookup. A miss returns `notFound()`. Updates and deletes use the matching `*Where` builder so the write itself is company scoped.
 - Ids that arrive in a request body (tag ids, location ids, vendor ids, etc.) must be validated against the caller's company before use.
+- Use `assertRefs(ctx, { ... })` from `src/lib/scoped-loaders.ts` for body ids: it checks them all in one query per record type, skips empty values, and returns a ready 400 (or null when valid). Add a new key there rather than writing a one off lookup.
 - Responses use explicit `select` objects. Errors use the shape `{ error, code? }`.
+
+# Dev-only test tooling
+- `scripts/dev-only/create-test-companies.ts` creates or tops up two throwaway companies (Test Company B and C) with a Global Admin each and sample data for every company scoped route. Each run prints new admin passwords once, never saved anywhere.
+- `scripts/dev-only/check-cross-company.ts` signs in as both admins against the local dev server, runs positive controls, then tries to read and change the other company's records and prints a PASS/FAIL table.
+- Both refuse to run unless `DB_NAME` is exactly `psasync_dev`, `NODE_ENV` is not production, and `--yes` is passed (see `scripts/dev-only/lib/guard.ts`). They load only `.env.development.local`, never `.env`.
+- Run from the repo root: `npx tsx scripts/dev-only/create-test-companies.ts --yes`, then start `npm run dev` and run `npx tsx scripts/dev-only/check-cross-company.ts --yes` with `TEST_ADMIN_B_PASSWORD` and `TEST_ADMIN_C_PASSWORD` set in the shell.
+- Nobody, including Claude Code, runs these against the live database. Claude Code only lints, typechecks, and builds them, and never runs them.
+- New attempts go in the `ATTEMPTS` list at the top of the check script.
 
 # Design system conventions
 - Use the tinted pill pattern for accent colored badges and status labels: `bg-brand-secondary-500/10 text-brand-secondary-500` style. Avoid hardcoding solid colors with manual dark mode overrides.

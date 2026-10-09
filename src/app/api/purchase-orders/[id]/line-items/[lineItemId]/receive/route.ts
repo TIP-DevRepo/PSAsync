@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 import { prisma } from "@/lib/prisma"
 import { generateAssetTag } from "@/lib/inventory/generateAssetTag"
 
@@ -7,13 +8,12 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id: poId, lineItemId } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
+  const userId = ctx.userId
 
   const lineItem = await prisma.pOLineItem.findUnique({
     where: { id: lineItemId },
@@ -86,6 +86,12 @@ export async function POST(
               { status: 400 }
             )
           }
+          // Must be a location of the client this purchase order ships to
+          const invalidSite = await assertRefs(ctx, {
+            clientId: po.shipToClientId,
+            clientLocationId: body.clientLocationId,
+          })
+          if (invalidSite) return invalidSite
           clientLocationId = body.clientLocationId
           await prisma.purchaseOrder.update({
             where: { id: po.id },
@@ -149,7 +155,7 @@ export async function POST(
             assetId: asset.id,
             eventType: "CREATED",
             description: `Created by receiving Purchase Order ${po.poNumber}`,
-            performedByUserId: session.user.id,
+            performedByUserId: userId,
           },
         })
 
@@ -191,7 +197,7 @@ export async function POST(
             eventType: "RECEIVED",
             quantityChange: quantity,
             description: `Received via Purchase Order ${po.poNumber}`,
-            performedByUserId: session.user.id,
+            performedByUserId: userId,
           },
         })
       }

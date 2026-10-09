@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { withDeadlockRetry } from "@/lib/withDeadlockRetry"
+import { RecurringInterval } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
 
 // Confirms the line item exists and belongs to a quote owned by this company
 async function getOwnedLineItem(lineItemId: string, companyId: string) {
@@ -20,13 +22,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { lineItemId } = await params
-  const existing = await getOwnedLineItem(lineItemId, session.user.companyId)
+  const existing = await getOwnedLineItem(lineItemId, ctx.companyId)
   if (!existing) {
     return NextResponse.json({ error: "Line item not found" }, { status: 404 })
   }
@@ -35,6 +35,15 @@ export async function PATCH(
   }
 
   const body = await req.json()
+
+  // Same rules as the writes below: turning recurring on falls back to
+  // MONTHLY, and an interval sent on its own is written as is
+  const interval = body.recurringInterval
+  const writesInterval =
+    body.isRecurring !== undefined ? Boolean(body.isRecurring) && !!interval : interval !== undefined && interval !== null
+  if (writesInterval && !isEnumValue(RecurringInterval, interval)) {
+    return apiError(400, "Invalid recurring interval")
+  }
 
   // Only update fields that were actually sent, so partial saves (e.g. one
   // field losing focus) don't clobber the rest of the row

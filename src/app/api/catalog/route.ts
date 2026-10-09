@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { ItemType } from "@/generated/prisma"
+import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { assertRefs } from "@/lib/scoped-loaders"
 
 export async function GET() {
   const session = await auth()
@@ -36,10 +39,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const body = await req.json()
 
@@ -48,15 +49,21 @@ export async function POST(req: NextRequest) {
   }
 
   const category = await prisma.category.findUnique({
-    where: { id: body.categoryId, companyId: session.user.companyId },
+    where: { id: body.categoryId, companyId: ctx.companyId },
   })
   if (!category) {
     return NextResponse.json({ error: "Category not found" }, { status: 404 })
   }
 
+  if (body.type && !isEnumValue(ItemType, body.type)) {
+    return apiError(400, "Invalid item type")
+  }
+  const invalid = await assertRefs(ctx, { vendorId: body.vendorId, manufacturerId: body.manufacturerId })
+  if (invalid) return invalid
+
   const item = await prisma.catalogItem.create({
     data: {
-      companyId: session.user.companyId,
+      companyId: ctx.companyId,
       vendorId: body.vendorId || null,
       vendorSku: body.vendorSku || null,
       manufacturerId: body.manufacturerId || null,
