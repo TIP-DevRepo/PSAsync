@@ -1,20 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission, getEffectiveAccess } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
 
 // A specific Entra directory id. The shared endpoints (common,
 // organizations, consumers) would accept accounts from any directory.
 const TENANT_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
+// Any active user, since the Microsoft panel works out whether a user can
+// connect their own mailbox from these. The client secret itself is never
+// returned, only whether one is saved.
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const settings = await prisma.companySettings.findUnique({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
   })
 
   return NextResponse.json({
@@ -26,17 +26,14 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "settingsSections.integrations"))) {
-    return NextResponse.json({ error: "You don't have permission to configure Microsoft integration" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.integrations",
+    message: "You do not have permission to configure Microsoft integration",
+  })
+  if (response) return response
 
   const body = await req.json()
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const current = await prisma.companySettings.findUnique({
     where: { companyId },
@@ -63,8 +60,7 @@ export async function PATCH(req: NextRequest) {
   // These fields decide which Microsoft directory can sign in as this
   // company's users, so changing any of them is Global Admin only
   if (Object.keys(data).length > 0) {
-    const access = await getEffectiveAccess(session.user.id)
-    if (!access?.isGlobalAdmin) {
+    if (!ctx.access.isGlobalAdmin) {
       return NextResponse.json(
         { error: "Only a Global Admin can change the Microsoft app credentials or Single Sign-On" },
         { status: 403 }

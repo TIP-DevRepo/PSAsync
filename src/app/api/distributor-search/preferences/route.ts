@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
+// Any active user, for their own preferred distributor list
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
+    where: { id: ctx.userId },
     select: { preferredDistributors: true },
   })
 
@@ -17,16 +16,14 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const body = await req.json()
   const distributors: string[] = Array.isArray(body.distributors) ? body.distributors : []
 
   await prisma.user.update({
-    where: { id: session.user.id },
+    where: { id: ctx.userId },
     data: { preferredDistributors: distributors },
   })
 

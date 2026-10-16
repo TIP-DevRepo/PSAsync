@@ -1,18 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
 import { isHexColor } from "@/lib/html"
 
+// Any active user: the name, logos, and brand colors
 export async function GET() {
-  const session = await auth()
-
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const company = await prisma.company.findUnique({
-    where: { id: session.user.companyId },
+    where: { id: ctx.companyId },
     include: { settings: true },
   })
 
@@ -30,15 +27,11 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await auth()
-
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "settingsSections.company"))) {
-    return NextResponse.json({ error: "You don't have permission to edit company settings" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.company",
+    message: "You do not have permission to edit company settings",
+  })
+  if (response) return response
 
   const body = await req.json()
   const { name, primaryColor, accentColor } = body
@@ -53,15 +46,15 @@ export async function PATCH(req: NextRequest) {
   }
 
   await prisma.company.update({
-    where: { id: session.user.companyId },
+    where: { id: ctx.companyId },
     data: { name },
   })
 
   await prisma.companySettings.upsert({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     update: { primaryColor, accentColor },
     create: {
-      companyId: session.user.companyId,
+      companyId: ctx.companyId,
       primaryColor,
       accentColor,
     },
