@@ -39,6 +39,7 @@ function LoginPage() {
     token_exchange_failed: "Microsoft sign-in failed. Please try again.",
     could_not_read_profile: "Couldn't read your Microsoft profile. Please try again.",
     no_email_on_account: "Your Microsoft account doesn't have an email address PSAsync can use.",
+    wrong_tenant: "That Microsoft account belongs to a different organization. Sign in with your company's Microsoft account.",
   }
 
   async function handleEmailContinue(e: React.FormEvent) {

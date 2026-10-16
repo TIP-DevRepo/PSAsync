@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireAccess } from "@/lib/api-access"
-
-// A specific Entra directory id. The shared endpoints (common,
-// organizations, consumers) would accept accounts from any directory.
-const TENANT_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+import { TENANT_GUID } from "@/lib/sso-tenant"
 
 // Any active user, since the Microsoft panel works out whether a user can
 // connect their own mailbox from these. The client secret itself is never
