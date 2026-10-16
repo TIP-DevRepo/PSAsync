@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { CategoryPicker } from "@/components/categories/CategoryPicker"
+import { useAccess } from "@/components/AccessProvider"
 
 export interface CatalogItemOption {
   id: string
@@ -11,7 +12,8 @@ export interface CatalogItemOption {
   categoryId: string
   categoryRef: { name: string; parent: { name: string } | null }
   isSerialized: boolean
-  cost: number
+  // Left out by the catalog API for users who can't see cost
+  cost?: number
 }
 
 const SELECT_CLASS =
@@ -35,6 +37,9 @@ export function CatalogItemPicker({
   value: CatalogItemOption | null
   onChange: (item: CatalogItemOption) => void
 }) {
+  const { can } = useAccess()
+  // Creating an item goes through POST /api/catalog, which needs the Catalog page
+  const canCreateItem = can("pages.catalog")
   const [items, setItems] = useState<CatalogItemOption[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
@@ -131,7 +136,9 @@ export function CatalogItemPicker({
               <p className="font-medium text-foreground">{value.name}</p>
               <p className="text-xs text-muted-foreground">{categoryPath(value)}</p>
               {value.description && <p className="mt-1 text-xs text-muted-foreground">{value.description}</p>}
-              <p className="mt-1 text-xs text-muted-foreground">Cost: ${value.cost.toFixed(2)}</p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Cost: {typeof value.cost === "number" ? `$${value.cost.toFixed(2)}` : "-"}
+              </p>
             </div>
             <Button size="sm" variant="outline" onClick={() => setPicking(true)}>
               Change
@@ -166,9 +173,11 @@ export function CatalogItemPicker({
                   </button>
                 ))}
               </div>
-              <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-                + Create new Catalog Item
-              </Button>
+              {canCreateItem && (
+                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+                  + Create new Catalog Item
+                </Button>
+              )}
             </>
           )}
 

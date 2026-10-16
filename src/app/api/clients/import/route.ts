@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
 const VALID_STATUSES = ["ACTIVE", "PROSPECT", "INACTIVE", "LOST"]
 
@@ -16,12 +16,13 @@ function normalizeDomain(website: string): string {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "clients.create",
+    message: "You do not have permission to create clients",
+  })
+  if (response) return response
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
   const rows: Record<string, string>[] = body.rows ?? []
 

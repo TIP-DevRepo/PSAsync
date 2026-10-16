@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to edit inventory",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
 
   const asset = await prisma.inventoryAsset.findUnique({ where: { id, companyId } })
@@ -47,7 +48,7 @@ export async function POST(
         clientLocationId: container.clientLocationId,
       },
     })
-    await logAssetEvent(id, "RETURNED", "Returned to stock from internal checkout", session.user.id)
+    await logAssetEvent(id, "RETURNED", "Returned to stock from internal checkout", ctx.userId)
     return NextResponse.json(updated)
   }
 
@@ -64,7 +65,7 @@ export async function POST(
         loanExpectedReturnDate: null,
       },
     })
-    await logAssetEvent(id, "RETURNED", "Loan returned, pending offboard", session.user.id)
+    await logAssetEvent(id, "RETURNED", "Loan returned, pending offboard", ctx.userId)
     return NextResponse.json(updated)
   }
 
@@ -86,7 +87,7 @@ export async function POST(
         deployedToContactId: null,
       },
     })
-    await logAssetEvent(id, "RETURNED", "Returned, held in stock for client", session.user.id)
+    await logAssetEvent(id, "RETURNED", "Returned, held in stock for client", ctx.userId)
     return NextResponse.json(updated)
   }
 
@@ -106,7 +107,7 @@ export async function POST(
     id,
     "RETURNED",
     `Returned for ${reason === "DISPOSAL" ? "disposal" : "refund"}, pending offboard`,
-    session.user.id
+    ctx.userId
   )
   return NextResponse.json(updated)
 }

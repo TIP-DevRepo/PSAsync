@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
 import { ItemType } from "@/generated/prisma"
 import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
 import { assertRefs, catalogItemWhere } from "@/lib/scoped-loaders"
@@ -10,15 +8,16 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "catalog",
+    message: "You do not have permission to view the catalog",
+  })
+  if (response) return response
 
   const { id } = await params
 
   const item = await prisma.catalogItem.findUnique({
-    where: { id, companyId: session.user.companyId },
+    where: { id, companyId: ctx.companyId },
     include: {
       categoryRef: { include: { parent: true } },
     },
@@ -75,7 +74,10 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    page: "catalog",
+    message: "You do not have permission to edit the catalog",
+  })
   if (response) return response
 
   const { id } = await params
@@ -183,17 +185,14 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "catalog.delete"))) {
-    return NextResponse.json({ error: "You don't have permission to delete catalog items" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "catalog.delete",
+    message: "You do not have permission to delete catalog items",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const item = await prisma.catalogItem.findUnique({
     where: { id, companyId },

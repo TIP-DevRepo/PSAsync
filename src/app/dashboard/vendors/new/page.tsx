@@ -5,8 +5,16 @@ import { useRouter } from "next/navigation"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { formatPhoneInput } from "@/lib/phone"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 export default function NewVendorPage() {
+  const { can } = useAccess()
+  if (!can("pages.vendors")) return <NoAccess />
+  return <NewVendorPageContent />
+}
+
+function NewVendorPageContent() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")

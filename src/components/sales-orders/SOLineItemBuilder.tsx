@@ -39,7 +39,8 @@ export interface SOCatalogOption {
   vendorSku: string | null
   manufacturerSku: string | null
   msrp: number
-  cost: number
+  // Left out by the catalog API for users who can't see cost
+  cost?: number
   taxable: boolean
   vendorId: string | null
   vendor: { id: string; name: string } | null

@@ -10,6 +10,8 @@ import { confirmDialog } from "@/lib/confirm-dialog"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { Package, FileClock } from "lucide-react"
 import { CategoryPicker } from "@/components/categories/CategoryPicker"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 const UNIT_OPTIONS = [
   { value: "each", label: "Each" },
@@ -109,6 +111,12 @@ function money(n: number) {
 const breadcrumbItems = [{ label: "Catalog", href: "/dashboard/catalog" }]
 
 export default function CatalogItemDetailPage() {
+  const { can } = useAccess()
+  if (!can("pages.catalog")) return <NoAccess />
+  return <CatalogItemDetailPageContent />
+}
+
+function CatalogItemDetailPageContent() {
   const params = useParams()
   const id = params.id as string
   const router = useRouter()

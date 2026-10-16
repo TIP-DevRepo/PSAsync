@@ -6,8 +6,17 @@ import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { Combobox } from "@/components/ui/combobox"
 import { formatPhoneInput } from "@/lib/phone"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 export default function NewClientPage() {
+  const { can } = useAccess()
+  // clients.create also covers adding an industry inline below
+  if (!can("pages.clients") || !can("clients.create")) return <NoAccess />
+  return <NewClientPageContent />
+}
+
+function NewClientPageContent() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")

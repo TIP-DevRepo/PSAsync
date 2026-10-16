@@ -41,8 +41,10 @@ export interface DistributorOffer {
   distributorKey: DistributorKey
   distributorLabel: string
   sku: string
-  price: number
-  cost: number
+  // Both are the company's dealer pricing, so the search API leaves them
+  // out for users who can't see cost
+  price?: number
+  cost?: number
   availability: number
   // false when this distributor genuinely doesn't carry the part — a real
   // "Not Found," not just zero stock

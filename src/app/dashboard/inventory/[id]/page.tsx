@@ -16,6 +16,8 @@ import { RemoveAssetModal } from "@/components/inventory/RemoveAssetModal"
 import { RedeployModal } from "@/components/inventory/RedeployModal"
 import { AssetAdditionalDetailsFields, additionalDetailsToBody, type AdditionalDetailsValue } from "@/components/inventory/AssetAdditionalDetailsFields"
 import { plainStatusLabel, computeStatusLabel, statusBadgeClass } from "@/lib/inventory/statusLabel"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface AssetEvent {
   id: string
@@ -124,6 +126,12 @@ function returnClientFor(asset: AssetDetail) {
 const breadcrumbItems = [{ label: "Inventory", href: "/dashboard/inventory" }]
 
 export default function InventoryAssetDetailPage() {
+  const { can } = useAccess()
+  if (!can("pages.inventory")) return <NoAccess />
+  return <InventoryAssetDetailPageContent />
+}
+
+function InventoryAssetDetailPageContent() {
   const params = useParams()
   const id = params.id as string
   const router = useRouter()
@@ -318,7 +326,7 @@ export default function InventoryAssetDetailPage() {
               {asset.status === "PENDING_OFFBOARD" && (
                 <Button size="sm" onClick={() => setOpenModal("offboard")}>Finish Offboarding</Button>
               )}
-              {asset.status !== "REMOVED" && (
+              {canDelete && asset.status !== "REMOVED" && (
                 <Button size="sm" variant="destructive" onClick={() => setOpenModal("remove")}>Remove</Button>
               )}
               {canDelete && ["IN_STOCK", "REMOVED"].includes(asset.status) && (

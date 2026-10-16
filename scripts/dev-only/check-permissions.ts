@@ -1,14 +1,14 @@
 // DEV ONLY. Proves the permission checks inside one company against the
 // locally running dev server: signs in as Test Admin B (Global Admin), Test
-// Rep B (only the Rep role), and Test Everyone B (only the Everyone role,
-// with no permissions), all made by create-test-companies.ts, plus a Test
-// Sender B user this script sets up itself, and checks every attempt in the
-// ATTEMPTS list below.
+// Rep B (only the Rep role), Test Clerk B (only the Clerk role), and Test
+// Everyone B (only the Everyone role, with no permissions), all made by
+// create-test-companies.ts, plus a Test Sender B user this script sets up
+// itself, and checks every attempt in the ATTEMPTS list below.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and only
 // talks to a server on this machine. Run from the repo root, with the dev
 // server running and the passwords set in the shell (never in a file):
-//   TEST_ADMIN_B_PASSWORD=... TEST_REP_B_PASSWORD=... TEST_EVERYONE_B_PASSWORD=... npx tsx scripts/dev-only/check-permissions.ts --yes
+//   TEST_ADMIN_B_PASSWORD=... TEST_REP_B_PASSWORD=... TEST_EVERYONE_B_PASSWORD=... TEST_CLERK_B_PASSWORD=... npx tsx scripts/dev-only/check-permissions.ts --yes
 // Optional: --base-url http://localhost:3000 (the default)
 //
 // Order of work: guard, safety checks, sign in, every positive control (if
@@ -55,7 +55,8 @@ enforceDevGuard("check-permissions")
 // branch, add entries here.
 //
 //   actor        who makes the request: admin (Test Admin B, Global Admin),
-//                rep (Test Rep B), everyone (Test Everyone B), or sender
+//                rep (Test Rep B), clerk (Test Clerk B), everyone (Test
+//                Everyone B), or sender
 //                (Test Sender B: pages.quotes, quotes.sendEmail, and
 //                quotes.viewAllUsersQuotes, made by this script, with a
 //                mailbox of its own)
@@ -75,7 +76,7 @@ enforceDevGuard("check-permissions")
 //   sharedMode   runs with Quote Settings set to send every quote from Test
 //                Admin B's mailbox ("admin") or Test Sender B's ("sender")
 
-type Actor = "admin" | "rep" | "everyone" | "sender"
+type Actor = "admin" | "rep" | "clerk" | "everyone" | "sender"
 
 interface AttemptContext {
   b: SampleIds
@@ -127,6 +128,144 @@ function sendOptions(json: unknown): SendOptionsJson {
   return json as SendOptionsJson
 }
 
+// Every guarded route for clients, catalog, vendors, company settings lists,
+// and inventory. Test Everyone B and Test Rep B hold none of these
+// permissions, so each one is refused for both with a 403 before any record
+// is looked up. clerk marks the ones Test Clerk B is refused too (settings,
+// deletes, and Remove). Writes carry a body that would change data if the
+// check were missing, so the snapshot catches a leak.
+interface Guarded {
+  name: string
+  method: Method
+  path: (c: AttemptContext) => string
+  body?: (c: AttemptContext) => unknown
+  expectError: string
+  clerk?: true
+}
+
+const GUARDED: Guarded[] = [
+  // Clients and contacts
+  { name: "Create a client", method: "POST", path: () => "/api/clients", body: () => ({ name: "Should Not Exist" }), expectError: "create clients" },
+  { name: "Import clients", method: "POST", path: () => "/api/clients/import", body: () => ({ rows: [{ name: "Should Not Exist" }] }), expectError: "create clients" },
+  { name: "Edit a client", method: "PATCH", path: (c) => `/api/clients/${c.b.clientId}`, body: () => ({ name: "Changed" }), expectError: "edit clients" },
+  { name: "Add a client contact", method: "POST", path: (c) => `/api/clients/${c.b.clientId}/contacts`, body: () => ({ firstName: "Should", lastName: "Not Exist" }), expectError: "edit clients" },
+  { name: "Edit a client contact", method: "PATCH", path: (c) => `/api/clients/${c.b.clientId}/contacts/${c.b.contactId}`, body: () => ({ firstName: "Changed" }), expectError: "edit clients" },
+  { name: "Add a client location", method: "POST", path: (c) => `/api/clients/${c.b.clientId}/locations`, body: () => ({ name: "Should Not Exist" }), expectError: "edit clients" },
+  { name: "Edit a client location", method: "PATCH", path: (c) => `/api/clients/${c.b.clientId}/locations/${c.b.clientLocationId}`, body: () => ({ name: "Changed" }), expectError: "edit clients" },
+  { name: "Client assets", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/assets`, expectError: "view inventory" },
+  { name: "Onboard a client for inventory", method: "POST", path: (c) => `/api/clients/${c.b.clientId}/onboard-inventory`, body: () => ({ prefix: "NOPE" }), expectError: "onboard clients for inventory" },
+  { name: "Set a site's default container", method: "PATCH", path: (c) => `/api/client-locations/${c.b.clientLocationId}/default-container`, body: (c) => ({ containerId: c.fx.containerId }), expectError: "edit inventory" },
+
+  // Catalog
+  { name: "Create a catalog item", method: "POST", path: () => "/api/catalog", body: (c) => ({ name: "Should Not Exist", categoryId: c.b.categoryId }), expectError: "edit the catalog" },
+  { name: "Open a catalog item", method: "GET", path: (c) => `/api/catalog/${c.b.catalogItemId}`, expectError: "view the catalog" },
+  { name: "Edit a catalog item", method: "PATCH", path: (c) => `/api/catalog/${c.b.catalogItemId}`, body: (c) => ({ name: "Changed", categoryId: c.b.categoryId }), expectError: "edit the catalog" },
+  { name: "Delete a catalog item", method: "DELETE", path: (c) => `/api/catalog/${c.b.catalogItemId}`, expectError: "delete catalog items", clerk: true },
+  { name: "Catalog change log", method: "GET", path: (c) => `/api/catalog/${c.b.catalogItemId}/change-log`, expectError: "view the catalog" },
+  { name: "Catalog order history", method: "GET", path: (c) => `/api/catalog/${c.b.catalogItemId}/order-history`, expectError: "view the catalog" },
+
+  // Vendors
+  { name: "Create a vendor", method: "POST", path: () => "/api/vendors", body: () => ({ name: "Should Not Exist" }), expectError: "edit vendors" },
+  { name: "Open a vendor", method: "GET", path: (c) => `/api/vendors/${c.b.vendorId}`, expectError: "view vendors" },
+  { name: "Edit a vendor", method: "PATCH", path: (c) => `/api/vendors/${c.b.vendorId}`, body: () => ({ name: "Changed" }), expectError: "edit vendors" },
+  { name: "Vendor attachments", method: "GET", path: (c) => `/api/vendors/${c.b.vendorId}/attachments`, expectError: "view vendors" },
+  { name: "Upload a vendor attachment", method: "POST", path: (c) => `/api/vendors/${c.b.vendorId}/attachments`, expectError: "edit vendors" },
+  { name: "Delete a vendor attachment", method: "DELETE", path: (c) => `/api/vendors/${c.b.vendorId}/attachments/${c.b.vendorAttachmentId}`, expectError: "edit vendors" },
+  { name: "Add a vendor contact", method: "POST", path: (c) => `/api/vendors/${c.b.vendorId}/contacts`, body: () => ({ firstName: "Should", lastName: "Not Exist" }), expectError: "edit vendors" },
+  { name: "Edit a vendor contact", method: "PATCH", path: (c) => `/api/vendors/${c.b.vendorId}/contacts/${c.b.vendorContactId}`, body: () => ({ firstName: "Changed" }), expectError: "edit vendors" },
+  { name: "Add a vendor location", method: "POST", path: (c) => `/api/vendors/${c.b.vendorId}/locations`, body: () => ({ name: "Should Not Exist" }), expectError: "edit vendors" },
+  { name: "Edit a vendor location", method: "PATCH", path: (c) => `/api/vendors/${c.b.vendorId}/locations/${c.b.vendorLocationId}`, body: () => ({ name: "Changed" }), expectError: "edit vendors" },
+  { name: "Upload a vendor logo", method: "POST", path: (c) => `/api/vendors/${c.b.vendorId}/logo`, expectError: "edit vendors" },
+  { name: "Remove a vendor logo", method: "DELETE", path: (c) => `/api/vendors/${c.b.vendorId}/logo`, expectError: "edit vendors" },
+  { name: "Vendor purchase orders", method: "GET", path: (c) => `/api/vendors/${c.b.vendorId}/purchase-orders`, expectError: "view vendors" },
+
+  // Categories, industries, contact tags, custom fields (Company settings)
+  { name: "Create a category", method: "POST", path: () => "/api/categories", body: () => ({ name: "Should Not Exist" }), expectError: "manage company settings", clerk: true },
+  { name: "Edit a category", method: "PATCH", path: (c) => `/api/categories/${c.b.categoryId}`, body: () => ({ name: "Changed" }), expectError: "manage company settings", clerk: true },
+  { name: "Delete a category", method: "DELETE", path: (c) => `/api/categories/${c.b.categoryId}`, expectError: "manage company settings", clerk: true },
+  { name: "A category's custom fields", method: "GET", path: (c) => `/api/categories/${c.b.categoryId}/custom-fields`, expectError: "manage company settings", clerk: true },
+  { name: "Add a custom field", method: "POST", path: (c) => `/api/categories/${c.b.categoryId}/custom-fields`, body: () => ({ name: "Should Not Exist" }), expectError: "manage company settings", clerk: true },
+  { name: "Edit a custom field", method: "PATCH", path: (c) => `/api/inventory-custom-fields/${c.b.customFieldId}`, body: () => ({ name: "Changed" }), expectError: "manage company settings", clerk: true },
+  { name: "Delete a custom field", method: "DELETE", path: (c) => `/api/inventory-custom-fields/${c.b.customFieldId}`, expectError: "manage company settings", clerk: true },
+  { name: "Add an industry", method: "POST", path: () => "/api/industries", body: () => ({ name: "Should Not Exist" }), expectError: "add industries" },
+  { name: "Delete an industry", method: "DELETE", path: (c) => `/api/industries/${c.b.industryId}`, expectError: "manage company settings", clerk: true },
+  { name: "Create a contact tag", method: "POST", path: () => "/api/contact-tags", body: () => ({ name: "Should Not Exist" }), expectError: "manage company settings", clerk: true },
+  { name: "Edit a contact tag", method: "PATCH", path: (c) => `/api/contact-tags/${c.b.contactTagId}`, body: () => ({ name: "Changed" }), expectError: "manage company settings", clerk: true },
+  { name: "Delete a contact tag", method: "DELETE", path: (c) => `/api/contact-tags/${c.b.contactTagId}`, expectError: "manage company settings", clerk: true },
+
+  // Inventory
+  { name: "List inventory assets", method: "GET", path: () => "/api/inventory-assets", expectError: "view inventory" },
+  { name: "Add an inventory asset", method: "POST", path: () => "/api/inventory-assets", body: (c) => ({ catalogItemId: c.b.catalogItemId, serialNumber: "SHOULD-NOT-EXIST" }), expectError: "edit inventory" },
+  { name: "Open an inventory asset", method: "GET", path: (c) => `/api/inventory-assets/${c.b.assetId}`, expectError: "view inventory" },
+  { name: "Edit an inventory asset", method: "PATCH", path: (c) => `/api/inventory-assets/${c.b.assetId}`, body: () => ({ notes: "Changed" }), expectError: "edit inventory" },
+  { name: "Delete an inventory asset", method: "DELETE", path: (c) => `/api/inventory-assets/${c.b.assetId}`, expectError: "delete inventory assets", clerk: true },
+  { name: "Asset attachments", method: "GET", path: (c) => `/api/inventory-assets/${c.b.assetId}/attachments`, expectError: "view inventory" },
+  { name: "Upload an asset attachment", method: "POST", path: (c) => `/api/inventory-assets/${c.b.assetId}/attachments`, expectError: "edit inventory" },
+  { name: "Delete an asset attachment", method: "DELETE", path: (c) => `/api/inventory-assets/${c.b.assetId}/attachments/${c.b.assetAttachmentId}`, expectError: "edit inventory" },
+  { name: "Check out an asset", method: "POST", path: (c) => `/api/inventory-assets/${c.b.assetId}/checkout`, body: (c) => ({ status: "INTERNAL", assignedUserId: c.b.adminId }), expectError: "edit inventory" },
+  { name: "Return an asset", method: "POST", path: (c) => `/api/inventory-assets/${c.b.assetId}/return`, body: () => ({}), expectError: "edit inventory" },
+  { name: "Redeploy an asset", method: "POST", path: (c) => `/api/inventory-assets/${c.b.assetId}/redeploy`, body: () => ({}), expectError: "edit inventory" },
+  { name: "Offboard an asset", method: "POST", path: (c) => `/api/inventory-assets/${c.b.assetId}/offboard`, body: () => ({}), expectError: "edit inventory" },
+  { name: "Remove an asset", method: "POST", path: (c) => `/api/inventory-assets/${c.b.assetId}/remove`, body: () => ({ reason: "LOST" }), expectError: "remove inventory assets", clerk: true },
+  { name: "A site's containers", method: "GET", path: (c) => `/api/inventory-locations?clientLocationId=${c.b.clientLocationId}`, expectError: "view inventory" },
+  { name: "Add a container", method: "POST", path: () => "/api/inventory-locations", body: (c) => ({ clientLocationId: c.b.clientLocationId, name: "Should Not Exist" }), expectError: "edit inventory" },
+  { name: "Rename a container", method: "PATCH", path: (c) => `/api/inventory-locations/${c.fx.containerId}`, body: () => ({ name: "Changed" }), expectError: "edit inventory" },
+  { name: "Delete a container", method: "DELETE", path: (c) => `/api/inventory-locations/${c.fx.containerId}`, expectError: "edit inventory" },
+  { name: "Own company containers", method: "GET", path: () => "/api/inventory-locations/own-company", expectError: "view inventory" },
+  { name: "List inventory stock", method: "GET", path: () => "/api/inventory-stock", expectError: "view inventory" },
+  { name: "Add inventory stock", method: "POST", path: () => "/api/inventory-stock", body: (c) => ({ catalogItemId: c.fx.stockItemId, clientLocationId: c.b.clientLocationId, locationId: c.fx.containerId, quantity: 1 }), expectError: "edit inventory" },
+  { name: "Adjust inventory stock", method: "PATCH", path: (c) => `/api/inventory-stock/${c.fx.stockId}/adjust`, body: () => ({ delta: 1 }), expectError: "edit inventory" },
+  { name: "Delete inventory stock", method: "DELETE", path: (c) => `/api/inventory-stock/${c.fx.stockId}`, expectError: "delete inventory stock", clerk: true },
+]
+
+const refusedFor =
+  (actor: Actor) =>
+  (g: Guarded): Attempt => ({ ...g, actor, kind: "refused", expect: 403 })
+
+// Picker routes other pages' forms read, open to any active user
+const PICKERS: { name: string; path: string; contains: (c: AttemptContext) => string[] }[] = [
+  { name: "Client picker", path: "/api/clients", contains: (c) => [c.b.clientId] },
+  { name: "Client detail picker", path: "/api/clients/CLIENT", contains: (c) => [c.b.clientId, c.b.contactId] },
+  { name: "Contact search", path: "/api/contacts/search?q=Sample", contains: (c) => [c.b.contactId] },
+  { name: "Category picker", path: "/api/categories", contains: (c) => [c.b.categoryId] },
+  { name: "Industry picker", path: "/api/industries", contains: (c) => [c.b.industryId] },
+  { name: "Contact tag picker", path: "/api/contact-tags", contains: (c) => [c.b.contactTagId] },
+  { name: "Custom field list", path: "/api/inventory-custom-fields", contains: (c) => [c.b.customFieldId] },
+  { name: "Vendor picker", path: "/api/vendors", contains: (c) => [c.b.vendorId] },
+]
+
+const pickerFor =
+  (actor: Actor) =>
+  (p: (typeof PICKERS)[number]): Attempt => ({
+    name: p.name,
+    actor,
+    kind: "allowed",
+    method: "GET",
+    path: (c) => p.path.replace("CLIENT", c.b.clientId),
+    expect: 200,
+    contains: p.contains,
+  })
+
+// The catalog picker list, with cost only for users who can see it
+const catalogList = (actor: Actor, kind: Attempt["kind"], withCost: boolean): Attempt => ({
+  name: withCost ? "Catalog picker list, with cost" : "Catalog picker list, without cost",
+  actor,
+  kind,
+  method: "GET",
+  path: () => "/api/catalog",
+  expect: 200,
+  contains: (c) => (withCost ? [c.b.catalogItemId, '"cost"'] : [c.b.catalogItemId]),
+  notContains: () => (withCost ? [] : ['"cost"']),
+})
+
+// Distributor offers carry no dealer price or cost for users who can't see cost
+function offersWithoutPricing(json: unknown): string | null {
+  const products = (json as { products?: { offers?: Record<string, unknown>[] }[] }).products
+  if (!Array.isArray(products)) return "no products list in the response"
+  const priced = products.flatMap((p) => p.offers ?? []).filter((o) => "price" in o || "cost" in o)
+  return priced.length > 0 ? `${priced.length} offers still include price or cost` : null
+}
+
 const ATTEMPTS: Attempt[] = [
   // ── Positive controls: Global Admin B ──
   { name: "List quotes shows everyone's", actor: "admin", kind: "control", method: "GET", path: () => "/api/quotes", expect: 200, contains: (c) => [c.b.quoteId, c.fx.repQuoteId] },
@@ -163,6 +302,9 @@ const ATTEMPTS: Attempt[] = [
       return null
     },
   },
+  catalogList("admin", "control", true),
+  { name: "Catalog order history shows everyone's sales orders", actor: "admin", kind: "control", method: "GET", path: (c) => `/api/catalog/${c.b.catalogItemId}/order-history`, expect: 200, contains: (c) => [c.b.salesOrderId, c.fx.clerkSalesOrderId] },
+  { name: "Vendor purchase orders shows everyone's", actor: "admin", kind: "control", method: "GET", path: (c) => `/api/vendors/${c.b.vendorId}/purchase-orders`, expect: 200, contains: (c) => [c.b.purchaseOrderId, c.fx.clerkPurchaseOrderId] },
 
   // ── Positive controls: Test Rep B (pages.quotes, quotes.create, quotes.edit) ──
   { name: "List quotes shows only own", actor: "rep", kind: "control", method: "GET", path: () => "/api/quotes", expect: 200, contains: (c) => [c.fx.repQuoteId], notContains: (c) => [c.b.quoteId] },
@@ -237,6 +379,90 @@ const ATTEMPTS: Attempt[] = [
     expect: 200,
     check: (json) => (Array.isArray(json) && json.length === 0 ? null : "expected an empty list"),
   },
+
+  // ── Positive controls: Test Clerk B (Clients, Vendors, Catalog, and
+  // Inventory pages, clients.create, clients.edit) ──
+  // Edits send the sample record's current values, so nothing really
+  // changes. A create that would add a record is sent incomplete instead:
+  // the 400 it gets comes after the permission check, which shows it passed.
+  { name: "Open a client", actor: "clerk", kind: "control", method: "GET", path: (c) => `/api/clients/${c.b.clientId}`, expect: 200, contains: (c) => [c.b.clientId] },
+  {
+    name: "Edit a client (same values)",
+    actor: "clerk",
+    kind: "control",
+    method: "PATCH",
+    path: (c) => `/api/clients/${c.b.clientId}`,
+    body: (c) => ({ name: c.names.client, industryId: c.b.industryId, mainBillingLocationId: c.b.clientLocationId, mainShippingLocationId: c.b.clientLocationId }),
+    expect: 200,
+    contains: (c) => [c.b.clientId],
+  },
+  {
+    name: "Edit a client contact (same values)",
+    actor: "clerk",
+    kind: "control",
+    method: "PATCH",
+    path: (c) => `/api/clients/${c.b.clientId}/contacts/${c.b.contactId}`,
+    body: (c) => ({ firstName: c.names.contactFirstName, lastName: c.names.contactLastName, email: c.names.contactEmail, locationId: c.b.clientLocationId, isPrimary: true }),
+    expect: 200,
+    contains: (c) => [c.b.contactId],
+  },
+  {
+    name: "Edit a client location (same values)",
+    actor: "clerk",
+    kind: "control",
+    method: "PATCH",
+    path: (c) => `/api/clients/${c.b.clientId}/locations/${c.b.clientLocationId}`,
+    body: (c) => ({
+      name: c.names.clientLocation,
+      address: c.names.clientLocationAddress,
+      city: c.names.clientLocationCity,
+      isPrimary: true,
+      billingContactId: c.b.contactId,
+      shippingContactId: c.b.contactId,
+    }),
+    expect: 200,
+    contains: (c) => [c.b.clientLocationId],
+  },
+  { name: "Import clients (empty, past the permission check)", actor: "clerk", kind: "control", method: "POST", path: () => "/api/clients/import", body: () => ({ rows: [] }), expect: 400, contains: () => ["No rows to import"] },
+  // Allowed by clients.create or clients.edit, for the client forms. The
+  // existing name comes back as is, so nothing is added.
+  { name: "Add an existing industry inline", actor: "clerk", kind: "control", method: "POST", path: () => "/api/industries", body: (c) => ({ name: c.names.industry }), expect: 200, contains: (c) => [c.b.industryId] },
+  { name: "Client assets", actor: "clerk", kind: "control", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/assets`, expect: 200, contains: () => ["["] },
+  catalogList("clerk", "control", true),
+  { name: "Open a catalog item", actor: "clerk", kind: "control", method: "GET", path: (c) => `/api/catalog/${c.b.catalogItemId}`, expect: 200, contains: (c) => [c.b.catalogItemId, '"cost"'] },
+  { name: "Catalog change log", actor: "clerk", kind: "control", method: "GET", path: (c) => `/api/catalog/${c.b.catalogItemId}/change-log`, expect: 200, contains: () => ["["] },
+  {
+    name: "Catalog order history shows only own sales orders",
+    actor: "clerk",
+    kind: "control",
+    method: "GET",
+    path: (c) => `/api/catalog/${c.b.catalogItemId}/order-history`,
+    expect: 200,
+    contains: (c) => [c.fx.clerkSalesOrderId],
+    notContains: (c) => [c.b.salesOrderId],
+  },
+  { name: "Create a catalog item (no category, past the permission check)", actor: "clerk", kind: "control", method: "POST", path: () => "/api/catalog", body: () => ({ name: "Should Not Exist" }), expect: 400, contains: () => ["Category is required"] },
+  { name: "Open a vendor", actor: "clerk", kind: "control", method: "GET", path: (c) => `/api/vendors/${c.b.vendorId}`, expect: 200, contains: (c) => [c.b.vendorId] },
+  { name: "Edit a vendor (same name)", actor: "clerk", kind: "control", method: "PATCH", path: (c) => `/api/vendors/${c.b.vendorId}`, body: (c) => ({ name: c.names.vendor }), expect: 200, contains: (c) => [c.b.vendorId] },
+  { name: "Vendor attachments", actor: "clerk", kind: "control", method: "GET", path: (c) => `/api/vendors/${c.b.vendorId}/attachments`, expect: 200, contains: (c) => [c.b.vendorAttachmentId] },
+  {
+    name: "Vendor purchase orders shows only own",
+    actor: "clerk",
+    kind: "control",
+    method: "GET",
+    path: (c) => `/api/vendors/${c.b.vendorId}/purchase-orders`,
+    expect: 200,
+    contains: (c) => [c.fx.clerkPurchaseOrderId],
+    notContains: (c) => [c.b.purchaseOrderId, c.b.purchaseOrder2Id],
+  },
+  { name: "List inventory assets", actor: "clerk", kind: "control", method: "GET", path: () => "/api/inventory-assets", expect: 200, contains: (c) => [c.b.assetId] },
+  { name: "Open an inventory asset", actor: "clerk", kind: "control", method: "GET", path: (c) => `/api/inventory-assets/${c.b.assetId}`, expect: 200, contains: (c) => [c.b.assetId] },
+  { name: "Asset attachments", actor: "clerk", kind: "control", method: "GET", path: (c) => `/api/inventory-assets/${c.b.assetId}/attachments`, expect: 200, contains: (c) => [c.b.assetAttachmentId] },
+  { name: "A site's containers", actor: "clerk", kind: "control", method: "GET", path: (c) => `/api/inventory-locations?clientLocationId=${c.b.clientLocationId}`, expect: 200, contains: (c) => [c.fx.containerId] },
+  { name: "Rename a container (same name)", actor: "clerk", kind: "control", method: "PATCH", path: (c) => `/api/inventory-locations/${c.fx.containerId}`, body: (c) => ({ name: c.names.container }), expect: 200, contains: (c) => [c.fx.containerId] },
+  { name: "Own company containers", actor: "clerk", kind: "control", method: "GET", path: () => "/api/inventory-locations/own-company", expect: 200, contains: () => ["["] },
+  { name: "List inventory stock", actor: "clerk", kind: "control", method: "GET", path: () => "/api/inventory-stock", expect: 200, contains: (c) => [c.fx.stockId] },
+  { name: "Adjust inventory stock by zero (past the permission check)", actor: "clerk", kind: "control", method: "PATCH", path: (c) => `/api/inventory-stock/${c.fx.stockId}/adjust`, body: () => ({ delta: 0 }), expect: 400, contains: () => ["non-zero"] },
 
   // ── Test Everyone B: no permissions, refused everywhere ──
   { name: "List quotes", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/quotes", expect: 403, expectError: "permission" },
@@ -330,6 +556,30 @@ const ATTEMPTS: Attempt[] = [
   { name: "Send to too many recipients", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/send-email`, body: () => sendBody({ to: Array.from({ length: 26 }, (_, i) => `nobody${i}@example.test`).join(", ") }), expect: 400, expectError: "at most" },
   { name: "Send with no message", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/send-email`, body: () => sendBody({ message: "" }), expect: 400, expectError: "required" },
 
+  // ── Clients, catalog, vendors, company settings lists, and inventory ──
+  // Test Everyone B and Test Rep B: refused every guarded route, allowed the open pickers
+  ...GUARDED.map(refusedFor("everyone")),
+  ...PICKERS.map(pickerFor("everyone")),
+  catalogList("everyone", "allowed", false),
+  ...GUARDED.map(refusedFor("rep")),
+  ...PICKERS.map(pickerFor("rep")),
+  // quotes.edit is enough to see cost
+  catalogList("rep", "allowed", true),
+  // Test Clerk B: refused settings, deletes, and Remove (no inventory.delete)
+  ...GUARDED.filter((g) => g.clerk).map(refusedFor("clerk")),
+  // Test Sender B can't see cost (pages.quotes without quotes.edit)
+  catalogList("sender", "allowed", false),
+  {
+    name: "Distributor search, without dealer pricing",
+    actor: "sender",
+    kind: "allowed",
+    method: "GET",
+    path: () => "/api/distributor-search?q=test",
+    expect: 200,
+    contains: () => ["products"],
+    check: (json) => offersWithoutPricing(json),
+  },
+
   // ── Shared sender mode (Quote Settings sends from Test Admin B's mailbox) ──
   {
     name: "Send options in shared mode: shared mailbox for everyone",
@@ -394,6 +644,29 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
       select: { quoteSendFromMode: true, quoteSendFromConnectionId: true, updatedAt: true },
     }),
     roles: prisma.role.findMany({ where: { companyId: b }, ...byId }),
+    clients: prisma.client.findMany({
+      where: { companyId: b },
+      ...byId,
+      include: { contacts: { ...byId, include: { tags: true } }, locations: byId },
+    }),
+    vendors: prisma.vendor.findMany({
+      where: { companyId: b },
+      ...byId,
+      include: { contacts: byId, locations: byId },
+    }),
+    vendorAttachments: prisma.vendorAttachment.findMany({ where: { vendor: { companyId: b } }, ...byId }),
+    catalogItems: prisma.catalogItem.findMany({ where: { companyId: b }, ...byId }),
+    catalogChangeLogs: prisma.catalogItemChangeLog.count({ where: { catalogItem: { companyId: b } } }),
+    categories: prisma.category.findMany({ where: { companyId: b }, ...byId }),
+    customFields: prisma.inventoryCustomField.findMany({ where: { companyId: b }, ...byId }),
+    industries: prisma.industry.findMany({ where: { companyId: b }, ...byId }),
+    contactTags: prisma.contactTag.findMany({ where: { companyId: b }, ...byId }),
+    inventoryAssets: prisma.inventoryAsset.findMany({ where: { companyId: b }, ...byId }),
+    assetAttachments: prisma.inventoryAssetAttachment.findMany({ where: { asset: { companyId: b } }, ...byId }),
+    assetEvents: prisma.inventoryAssetEvent.count({ where: { asset: { companyId: b } } }),
+    containers: prisma.inventoryLocation.findMany({ where: { companyId: b }, ...byId }),
+    stock: prisma.inventoryStock.findMany({ where: { companyId: b }, ...byId }),
+    stockEvents: prisma.inventoryStockEvent.count({ where: { stock: { companyId: b } } }),
     users: prisma.user.findMany({ where: { companyId: b }, ...byId, select: { id: true, active: true, roleId: true } }),
     notifications: prisma.notification.count({ where: { companyId: b } }),
   }
@@ -588,11 +861,13 @@ async function main() {
     admin: process.env.TEST_ADMIN_B_PASSWORD,
     rep: process.env.TEST_REP_B_PASSWORD,
     everyone: process.env.TEST_EVERYONE_B_PASSWORD,
+    clerk: process.env.TEST_CLERK_B_PASSWORD,
   }
   const missing = [
     !passwords.admin && "TEST_ADMIN_B_PASSWORD",
     !passwords.rep && "TEST_REP_B_PASSWORD",
     !passwords.everyone && "TEST_EVERYONE_B_PASSWORD",
+    !passwords.clerk && "TEST_CLERK_B_PASSWORD",
   ].filter(Boolean)
   if (missing.length > 0) {
     throw new HarnessBroken(`Set ${missing.join(", ")} in your shell (the passwords create-test-companies printed).`)
@@ -663,16 +938,18 @@ async function main() {
     const sessions: Record<Actor, Session> = {
       admin: new Session("Test Admin B", baseUrl),
       rep: new Session("Test Rep B", baseUrl),
+      clerk: new Session("Test Clerk B", baseUrl),
       everyone: new Session("Test Everyone B", baseUrl),
       sender: new Session("Test Sender B", baseUrl),
     }
     await sessions.admin.signIn(names.adminEmail, passwords.admin as string)
     await sessions.rep.signIn(names.repEmail, passwords.rep as string)
     await sessions.everyone.signIn(names.everyoneEmail, passwords.everyone as string)
+    await sessions.clerk.signIn(names.clerkEmail, passwords.clerk as string)
     await sessions.sender.signIn(sender.email, sender.password)
-    console.log(`Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Everyone B, and Test Sender B.`)
+    console.log(`Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, and Test Sender B.`)
 
-    const ACTOR_LABEL: Record<Actor, string> = { admin: "Admin B", rep: "Rep B", everyone: "Everyone B", sender: "Sender B" }
+    const ACTOR_LABEL: Record<Actor, string> = { admin: "Admin B", rep: "Rep B", clerk: "Clerk B", everyone: "Everyone B", sender: "Sender B" }
     const label = (a: Attempt) => `[${a.kind === "control" ? "control " : ""}${ACTOR_LABEL[a.actor]}] ${a.name}`
 
     // Positive controls first: if any fails, the refusals below would prove nothing

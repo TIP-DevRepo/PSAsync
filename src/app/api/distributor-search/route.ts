@@ -1,14 +1,24 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireAccess } from "@/lib/api-access"
+import { canSeeCost, requireAccess } from "@/lib/api-access"
 import { getAdapter } from "@/lib/distributors/registry"
 import {
   DistributorKey,
   DISTRIBUTOR_LABELS,
+  DistributorOffer,
   DistributorProductGroup,
   DistributorSearchResult,
 } from "@/lib/distributors/types"
 import { generateMockResults, generateMockOffer } from "@/lib/distributors/mock-data"
+
+// An offer without the dealer price and cost, for users who can't see cost.
+// Availability and SKU are kept.
+function withoutPricing(offer: DistributorOffer): DistributorOffer {
+  const rest: DistributorOffer = { ...offer }
+  delete rest.price
+  delete rest.cost
+  return rest
+}
 
 // Shared by every line item picker: quotes, catalog, sales orders, and
 // purchase orders
@@ -227,5 +237,9 @@ export async function GET(req: NextRequest) {
       ? "Live results from connected distributors, mixed with mock data for distributors still pending API approval."
       : "These are mock results — real distributor pricing/availability will replace this once your distributors approve API access."
 
-  return NextResponse.json({ products, message })
+  const visible = canSeeCost(ctx)
+    ? products
+    : products.map((p) => ({ ...p, offers: p.offers.map(withoutPricing) }))
+
+  return NextResponse.json({ products: visible, message })
 }

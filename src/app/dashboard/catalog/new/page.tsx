@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { CategoryPicker } from "@/components/categories/CategoryPicker"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 const UNIT_OPTIONS = [
   { value: "each", label: "Each" },
@@ -23,6 +25,12 @@ interface VendorOption {
 }
 
 export default function NewCatalogItemPage() {
+  const { can } = useAccess()
+  if (!can("pages.catalog")) return <NoAccess />
+  return <NewCatalogItemPageContent />
+}
+
+function NewCatalogItemPageContent() {
   const router = useRouter()
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")

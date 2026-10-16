@@ -117,7 +117,8 @@ export interface CatalogOption {
   vendorSku: string | null
   manufacturerSku: string | null
   msrp: number
-  cost: number
+  // Left out by the catalog API for users who can't see cost
+  cost?: number
   taxable: boolean
   active: boolean
 }
@@ -1612,7 +1613,7 @@ function AddLineItemModal({
                         )}
                         <div className="mt-1 flex items-center gap-3">
                           <span className="text-lg font-bold">
-                            {selected ? money(selected.price) : "—"}
+                            {selected ? (typeof selected.price === "number" ? money(selected.price) : "-") : "—"}
                           </span>
                           {selected && (
                             <span
@@ -1670,7 +1671,9 @@ function AddLineItemModal({
                                 : "hover:border-zinc-400"
                             }`}
                           >
-                            <span className="text-sm font-semibold">{money(offer.price)}</span>
+                            <span className="text-sm font-semibold">
+                              {typeof offer.price === "number" ? money(offer.price) : "-"}
+                            </span>
                             <span className="text-xs text-zinc-500">{offer.distributorLabel}</span>
                             {isSelected ? (
                               <span className="absolute -bottom-1.5 -right-1.5 rounded-full bg-green-500 p-0.5 text-white">

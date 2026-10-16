@@ -11,6 +11,8 @@ import { Modal } from "@/components/Modal"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
 import { RotateCcw, Upload, X } from "lucide-react"
 import { formatPhoneInput, formatPhoneDisplay } from "@/lib/phone"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface VendorContact {
   id: string
@@ -126,6 +128,12 @@ function locationAddress(loc: VendorLocation | null) {
 const breadcrumbItems = [{ label: "Vendors", href: "/dashboard/vendors" }]
 
 export default function VendorDetailPage() {
+  const { can } = useAccess()
+  if (!can("pages.vendors")) return <NoAccess />
+  return <VendorDetailPageContent />
+}
+
+function VendorDetailPageContent() {
   const params = useParams()
   const id = params.id as string
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 import { buildLocationPathOptions } from "@/lib/inventory/locationPaths"
 
 // Flat list of every Container across every one of our own company's
@@ -8,12 +8,13 @@ import { buildLocationPathOptions } from "@/lib/inventory/locationPaths"
 // stock something at our own warehouse — Checkout, Offboard, and PO
 // Receiving when shipping to ourselves rather than a client.
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: ["pages.inventory", "purchaseOrders.edit"],
+    message: "You do not have permission to view inventory",
+  })
+  if (response) return response
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const internalClient = await prisma.client.findFirst({
     where: { companyId, isInternal: true },
