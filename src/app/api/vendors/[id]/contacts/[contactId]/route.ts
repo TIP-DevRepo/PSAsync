@@ -7,7 +7,10 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; contactId: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    page: "vendors",
+    message: "You do not have permission to edit vendors",
+  })
   if (response) return response
 
   const { id, contactId } = await params

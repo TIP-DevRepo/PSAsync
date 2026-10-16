@@ -1,17 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { VendorStatus, VendorType } from "@/generated/prisma"
 import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
 
+// Open to any active user: catalog, sales order, purchase order, and
+// inventory forms pick vendors from this list
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const vendors = await prisma.vendor.findMany({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     select: {
       id: true,
       name: true,
@@ -30,7 +29,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    page: "vendors",
+    message: "You do not have permission to edit vendors",
+  })
   if (response) return response
 
   const body = await req.json()
