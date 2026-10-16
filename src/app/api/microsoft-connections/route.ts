@@ -1,15 +1,18 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
+// Everyone sees their own mailboxes. Integrations and Quote Settings
+// (which picks the shared sender) see every mailbox in the company. Never
+// returns tokens.
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
+
+  const seesAll = ctx.can("settingsSections.integrations") || ctx.can("settingsSections.quotes")
 
   const connections = await prisma.microsoftConnection.findMany({
-    where: { companyId: session.user.companyId },
+    where: seesAll ? { companyId: ctx.companyId } : { companyId: ctx.companyId, connectedByUserId: ctx.userId },
     select: {
       id: true,
       label: true,
