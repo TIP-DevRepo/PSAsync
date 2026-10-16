@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
 // Manual quantity adjustment for a pooled InventoryStock row. PO
 // receiving is the only other thing that changes quantity today; this
@@ -10,13 +10,14 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to edit inventory",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
   const delta = Number(body.delta)
 
@@ -47,7 +48,7 @@ export async function PATCH(
         eventType: "ADJUSTED",
         quantityChange: delta,
         description,
-        performedByUserId: session.user.id,
+        performedByUserId: ctx.userId,
       },
     }),
   ])

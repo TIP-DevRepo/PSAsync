@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
 
 const VALID_REASONS = ["BROKEN_SCRAPPED", "LOST", "DONATED", "RETURNED_TO_VENDOR", "OTHER"]
@@ -9,13 +9,15 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    permission: "inventory.delete",
+    message: "You do not have permission to remove inventory assets",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
 
   if (!VALID_REASONS.includes(body.reason)) {
@@ -37,7 +39,7 @@ export async function POST(
     data: { status: "REMOVED", removedReason: body.reason },
   })
 
-  await logAssetEvent(id, "STATUS_CHANGED", `Removed: ${body.reason.replace(/_/g, " ").toLowerCase()}`, session.user.id)
+  await logAssetEvent(id, "STATUS_CHANGED", `Removed: ${body.reason.replace(/_/g, " ").toLowerCase()}`, ctx.userId)
 
   return NextResponse.json(updated)
 }

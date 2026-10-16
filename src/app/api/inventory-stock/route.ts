@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 import { buildLocationPathOptions } from "@/lib/inventory/locationPaths"
-import { hasPermission } from "@/lib/permissions"
 
 // Flat, company-wide list of every InventoryStock (pooled, non-serialized
 // quantity) row for the Inventory list page's Stock tab.
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to view inventory",
+  })
+  if (response) return response
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const stocks = await prisma.inventoryStock.findMany({
     where: { companyId },
@@ -45,16 +45,13 @@ export async function GET() {
 // owner/client field of its own — ownership is implicit in which
 // container it's placed in — so only the container needs validating here.
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to edit inventory",
+  })
+  if (response) return response
 
-  if (!(await hasPermission(session.user.id, "pages.inventory"))) {
-    return NextResponse.json({ error: "You don't have access to Inventory" }, { status: 403 })
-  }
-
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
   const { catalogItemId, clientLocationId, locationId } = body
   const quantity = Math.round(Number(body.quantity))
@@ -97,7 +94,7 @@ export async function POST(req: NextRequest) {
       eventType: "RECEIVED",
       quantityChange: quantity,
       description: "Manually added to inventory",
-      performedByUserId: session.user.id,
+      performedByUserId: ctx.userId,
     },
   })
 

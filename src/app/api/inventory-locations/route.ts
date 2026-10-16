@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { requireAccess } from "@/lib/api-access"
 
 // Returns the Container tree for one ClientLocation (a specific physical
 // site). ?clientLocationId= is required — Containers only ever exist
 // underneath a specific site, there's no more global company-wide list.
+// Also read by purchase order receiving, so purchaseOrders.edit is enough
 export async function GET(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: ["pages.inventory", "purchaseOrders.edit"],
+    message: "You do not have permission to view inventory",
+  })
   if (response) return response
 
   const clientLocationId = req.nextUrl.searchParams.get("clientLocationId")
@@ -31,12 +34,13 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to edit inventory",
+  })
+  if (response) return response
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
   const name = (body.name ?? "").trim()
   const parentId = body.parentId || null

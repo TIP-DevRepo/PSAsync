@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to edit inventory",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
 
   const asset = await prisma.inventoryAsset.findUnique({ where: { id, companyId } })
@@ -56,7 +57,7 @@ export async function POST(
     id,
     "STATUS_CHANGED",
     wasClientOwned ? "Offboarded, ownership transferred back to company" : "Offboarded",
-    session.user.id
+    ctx.userId
   )
 
   return NextResponse.json(updated)
