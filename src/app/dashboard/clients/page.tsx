@@ -10,6 +10,8 @@ import { ExportButton } from "@/components/import-export/ExportButton"
 import { DownloadTemplateButton } from "@/components/import-export/DownloadTemplateButton"
 import { CLIENT_IMPORT_FIELDS, CLIENT_EXPORT_HEADERS, clientToExportRow } from "@/lib/import-export/clientsConfig"
 import { formatPhoneDisplay } from "@/lib/phone"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface Client {
   id: string
@@ -88,7 +90,15 @@ function SortableHeader({
 }
 
 export default function ClientsListPage() {
+  const { can } = useAccess()
+  if (!can("pages.clients")) return <NoAccess />
+  return <ClientsListPageContent />
+}
+
+function ClientsListPageContent() {
   const router = useRouter()
+  const { can } = useAccess()
+  const canCreate = can("clients.create")
   const [clients, setClients] = useState<Client[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
@@ -160,19 +170,25 @@ export default function ClientsListPage() {
       <div className="flex items-center justify-between">
         <h1 className="text-display font-semibold tracking-tight text-foreground">Clients</h1>
         <div className="flex items-center gap-2">
-          <DownloadTemplateButton filename="client-import-template.csv" headers={CLIENT_EXPORT_HEADERS} />
+          {canCreate && (
+            <DownloadTemplateButton filename="client-import-template.csv" headers={CLIENT_EXPORT_HEADERS} />
+          )}
           <ExportButton
             filename="clients-export.csv"
             headers={CLIENT_EXPORT_HEADERS}
             visibleRows={sorted.map(clientToExportRow)}
             allRows={clients.map(clientToExportRow)}
           />
-          <Button variant="outline" onClick={() => setShowImportModal(true)}>
-            Import
-          </Button>
-          <Link href="/dashboard/clients/new">
-            <Button>Add Client</Button>
-          </Link>
+          {canCreate && (
+            <>
+              <Button variant="outline" onClick={() => setShowImportModal(true)}>
+                Import
+              </Button>
+              <Link href="/dashboard/clients/new">
+                <Button>Add Client</Button>
+              </Link>
+            </>
+          )}
         </div>
       </div>
 

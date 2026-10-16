@@ -13,6 +13,8 @@ import { ContainersModal } from "@/components/inventory/ContainersModal"
 import { Ticket, Target, Package, FileText, KeyRound, FolderOpen, Radar, Settings2, Boxes, Phone, Wrench, CheckCircle2 } from "lucide-react"
 import { ClientAssetsPanel } from "@/components/clients/ClientAssetsPanel"
 import { formatPhoneInput, formatPhoneDisplay } from "@/lib/phone"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface ContactTag {
   id: string
@@ -158,8 +160,21 @@ function locationAddress(loc: ClientLocation | null) {
 const breadcrumbItems = [{ label: "Clients", href: "/dashboard/clients" }]
 
 export default function ClientDetailPage() {
+  const { can } = useAccess()
+  if (!can("pages.clients")) return <NoAccess />
+  return <ClientDetailPageContent />
+}
+
+function ClientDetailPageContent() {
   const params = useParams()
   const id = params.id as string
+
+  const { can } = useAccess()
+  const canEdit = can("clients.edit")
+  const canUseInventory = can("pages.inventory")
+  // Same any-of rule as POST /api/industries
+  const canCreateIndustry = can("settingsSections.company") || can("clients.create") || canEdit
+  const tabs = canUseInventory ? CLIENT_TABS : CLIENT_TABS.filter((t) => t.key !== "assets")
 
   const [client, setClient] = useState<ClientDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -419,7 +434,7 @@ export default function ClientDetailPage() {
         <p className="text-sm text-muted-foreground">{client.industryRef?.name ?? "No industry set"}</p>
       </div>
 
-      <TabsBar tabs={CLIENT_TABS} activeTab={activeTab} onChange={setActiveTab} ariaLabel="Client sections" />
+      <TabsBar tabs={tabs} activeTab={activeTab} onChange={setActiveTab} ariaLabel="Client sections" />
 
       <div role="tabpanel" id={`tabpanel-${activeTab}`} aria-labelledby={`tab-${activeTab}`}>
         {activeTab === "details" && (
@@ -431,7 +446,7 @@ export default function ClientDetailPage() {
                   <Button onClick={handleSaveDetails}>Save</Button>
                 </>
               ) : (
-                <Button variant="outline" onClick={startEditingDetails}>Edit</Button>
+                canEdit && <Button variant="outline" onClick={startEditingDetails}>Edit</Button>
               )}
             </div>
 
@@ -500,17 +515,21 @@ export default function ClientDetailPage() {
                       options={industries.map((i) => ({ id: i.id, label: i.name }))}
                       value={detailsDraft.industryId}
                       onChange={(id) => setDetailsDraft({ ...detailsDraft, industryId: id })}
-                      onCreate={async (label) => {
-                        const res = await fetch("/api/industries", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ name: label }),
-                        })
-                        const created = await res.json()
-                        setIndustries((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
-                        return { id: created.id, label: created.name }
-                      }}
-                      placeholder="Search or create an industry..."
+                      onCreate={
+                        canCreateIndustry
+                          ? async (label) => {
+                              const res = await fetch("/api/industries", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ name: label }),
+                              })
+                              const created = await res.json()
+                              setIndustries((prev) => [...prev, created].sort((a, b) => a.name.localeCompare(b.name)))
+                              return { id: created.id, label: created.name }
+                            }
+                          : undefined
+                      }
+                      placeholder={canCreateIndustry ? "Search or create an industry..." : "Search industries..."}
                       emptyLabel="No industry selected"
                     />
                   </div>
@@ -662,11 +681,13 @@ export default function ClientDetailPage() {
 
         {activeTab === "locations" && (
           <div className="space-y-4">
-            <div className="flex justify-end">
-              <Button onClick={() => setShowAddLocation(!showAddLocation)}>
-                {showAddLocation ? "Cancel" : "Add Location"}
-              </Button>
-            </div>
+            {canEdit && (
+              <div className="flex justify-end">
+                <Button onClick={() => setShowAddLocation(!showAddLocation)}>
+                  {showAddLocation ? "Cancel" : "Add Location"}
+                </Button>
+              </div>
+            )}
 
             {showAddLocation && (
               <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
@@ -767,7 +788,7 @@ export default function ClientDetailPage() {
                       </p>
                       <p className="text-muted-foreground">{locationAddress(loc)}</p>
                     </button>
-                    {client.inventoryOnboarded && (
+                    {client.inventoryOnboarded && canUseInventory && (
                       <Button size="sm" variant="outline" onClick={() => setManagingContainersFor(loc)}>
                         Containers
                       </Button>
@@ -792,9 +813,11 @@ export default function ClientDetailPage() {
                 onChange={(e) => setContactSearch(e.target.value)}
                 className="w-64 rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               />
-              <Button onClick={() => setShowAddContact(!showAddContact)}>
-                {showAddContact ? "Cancel" : "Add Contact"}
-              </Button>
+              {canEdit && (
+                <Button onClick={() => setShowAddContact(!showAddContact)}>
+                  {showAddContact ? "Cancel" : "Add Contact"}
+                </Button>
+              )}
             </div>
 
             {showAddContact && (
@@ -995,7 +1018,7 @@ export default function ClientDetailPage() {
           </div>
         )}
 
-        {activeTab === "assets" && <ClientAssetsPanel clientId={id} />}
+        {activeTab === "assets" && canUseInventory && <ClientAssetsPanel clientId={id} />}
 
         {activeTab === "contracts" && (
           <PlaceholderPanel
@@ -1051,9 +1074,11 @@ export default function ClientDetailPage() {
                     <p className="text-sm text-muted-foreground">
                       Lets you build a Container tree (shelves, racks, slots) under this client&apos;s locations, so hardware shipped or stocked there can be tracked precisely.
                     </p>
-                    <Button size="sm" onClick={handleOnboardInventoryClick} disabled={onboardingInventory}>
-                      {onboardingInventory ? "Onboarding..." : "Onboard Inventory Client"}
-                    </Button>
+                    {canUseInventory && (
+                      <Button size="sm" onClick={handleOnboardInventoryClick} disabled={onboardingInventory}>
+                        {onboardingInventory ? "Onboarding..." : "Onboard Inventory Client"}
+                      </Button>
+                    )}
                   </>
                 )}
               </div>
@@ -1090,6 +1115,7 @@ export default function ClientDetailPage() {
         <LocationDetailModal
           location={viewingLocation}
           contacts={client.contacts}
+          canEdit={canEdit}
           onClose={() => setViewingLocation(null)}
           onSave={handleSaveLocation}
         />
@@ -1100,6 +1126,7 @@ export default function ClientDetailPage() {
           contact={viewingContact}
           locations={client.locations}
           contactTags={contactTags}
+          canEdit={canEdit}
           onClose={() => setViewingContact(null)}
           onSave={handleSaveContact}
         />
@@ -1151,11 +1178,13 @@ export default function ClientDetailPage() {
 function LocationDetailModal({
   location,
   contacts,
+  canEdit,
   onClose,
   onSave,
 }: {
   location: ClientLocation
   contacts: Contact[]
+  canEdit: boolean
   onClose: () => void
   onSave: (locationId: string, data: Record<string, unknown>) => void
 }) {
@@ -1179,7 +1208,7 @@ function LocationDetailModal({
     <Modal maxWidth="md" onClose={onClose}>
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-foreground">{location.name}</h2>
-        {!editing && <Button variant="outline" size="sm" onClick={() => setEditing(true)}>Edit</Button>}
+        {!editing && canEdit && <Button variant="outline" size="sm" onClick={() => setEditing(true)}>Edit</Button>}
       </div>
 
       {!editing ? (
@@ -1315,11 +1344,13 @@ function ContactDetailModal({
   locations,
   contactTags,
   onClose,
+  canEdit,
   onSave,
 }: {
   contact: Contact
   locations: ClientLocation[]
   contactTags: ContactTag[]
+  canEdit: boolean
   onClose: () => void
   onSave: (contactId: string, data: Record<string, unknown>) => void
 }) {
@@ -1344,7 +1375,7 @@ function ContactDetailModal({
     <Modal maxWidth="md" onClose={onClose}>
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold text-foreground">{contact.firstName} {contact.lastName}</h2>
-        {!editing && <Button variant="outline" size="sm" onClick={() => setEditing(true)}>Edit</Button>}
+        {!editing && canEdit && <Button variant="outline" size="sm" onClick={() => setEditing(true)}>Edit</Button>}
       </div>
 
       {!editing ? (
