@@ -1,24 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
-import { hasPermission, getUserRank } from "@/lib/permissions"
+import { getUserRank } from "@/lib/permissions"
 import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "settingsSections.users"))) {
-    return NextResponse.json({ error: "You don't have permission to edit users" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.users",
+    message: "You do not have permission to edit users",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
   const { active } = body
   // roleIds replaces the user's full set of roles. The existing single role
@@ -33,7 +30,7 @@ export async function PATCH(
 
   // Deactivating yourself would sign you out with no way back in, so it's
   // refused outright, before any of the rank rules below
-  if (id === session.user.id && active === false) {
+  if (id === ctx.userId && active === false) {
     return NextResponse.json({ error: "You cannot deactivate your own account." }, { status: 403 })
   }
 
@@ -56,7 +53,7 @@ export async function PATCH(
   // user whose highest role is below your own highest role, and you can't
   // hand out a role at or above your own rank either, otherwise this would
   // let someone edit their way around the same protection.
-  const actorRank = await getUserRank(session.user.id)
+  const actorRank = await getUserRank(ctx.userId)
   const targetRanks = targetUser.userRoles.map((ur) => ur.role.rank)
   const targetRank = targetRanks.length > 0 ? Math.max(...targetRanks) : 0
 
