@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, use } from "react"
 import Link from "next/link"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
-import { Button as HeroButton } from "@heroui/react"
+import { Button as HeroButton, Label, ListBox, Select } from "@heroui/react"
 import {
   LineItemBuilder,
   type LineItemBuilderItem,
@@ -983,6 +983,25 @@ export default function QuoteDetailPage({
 }
 
 // ─── Send Quote Modal ───────────────────────────────────────────────────
+interface SenderOption {
+  connectionId: string
+  email: string
+  ownerName: string | null
+  isShared: boolean
+}
+
+interface SendOptions {
+  defaultConnectionId: string | null
+  defaultError: string | null
+  canChooseSender: boolean
+  options: SenderOption[]
+}
+
+function senderLabel(o: SenderOption) {
+  const who = o.ownerName ? `${o.ownerName}, ${o.email}` : o.email
+  return o.isShared ? `${who} (shared)` : who
+}
+
 function SendQuoteModal({
   quoteId,
   defaultTo,
@@ -1014,6 +1033,9 @@ function SendQuoteModal({
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
   const [pendingApprovalMessage, setPendingApprovalMessage] = useState("")
+  const [senderOptions, setSenderOptions] = useState<SendOptions | null>(null)
+  const [senderLoadFailed, setSenderLoadFailed] = useState(false)
+  const [senderId, setSenderId] = useState<string | null>(null)
 
   useEffect(() => {
     fetch("/api/quote-settings")
@@ -1022,6 +1044,24 @@ function SendQuoteModal({
         if (json.quoteDefaultCc) setCc(json.quoteDefaultCc)
       })
   }, [])
+
+  // Who the email goes out from. If this fails the dialog still works and
+  // the server picks the default sender on Send.
+  useEffect(() => {
+    fetch(`/api/quotes/${quoteId}/send-options`)
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || "Please try again.")
+        setSenderOptions(data)
+        setSenderId(data.defaultConnectionId ?? null)
+      })
+      .catch((err: Error) => {
+        setSenderLoadFailed(true)
+        toast.error("Couldn't load sending mailboxes", err.message)
+      })
+  }, [quoteId])
+
+  const defaultSender = senderOptions?.options.find((o) => o.connectionId === senderOptions.defaultConnectionId)
 
   async function handleSend() {
     if (!to.trim() || !subject.trim() || !message.trim()) {
@@ -1036,7 +1076,16 @@ function SendQuoteModal({
     const res = await fetch(`/api/quotes/${quoteId}/send-email`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, cc: cc || null, subject, message, includePdf }),
+      body: JSON.stringify({
+        to,
+        cc: cc || null,
+        subject,
+        message,
+        includePdf,
+        // Only someone allowed to choose sends a pick, anyone else always
+        // sends from their default
+        ...(senderOptions?.canChooseSender && senderId ? { sendAsConnectionId: senderId } : {}),
+      }),
     })
     const data = await res.json()
     setSending(false)
@@ -1073,6 +1122,49 @@ function SendQuoteModal({
               {error}
             </div>
           )}
+
+          <div>
+            {senderOptions?.canChooseSender ? (
+              <Select
+                value={senderId}
+                onChange={(key) => setSenderId(key === null ? null : String(key))}
+                placeholder="Choose a mailbox"
+                fullWidth
+              >
+                <Label className="block text-sm font-medium mb-1 text-foreground">From</Label>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {senderOptions.options.map((o) => (
+                      <ListBox.Item key={o.connectionId} id={o.connectionId} textValue={senderLabel(o)}>
+                        {senderLabel(o)}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+            ) : (
+              <>
+                <p className="block text-sm font-medium mb-1 text-foreground">From</p>
+                <p className="text-sm text-muted-foreground">
+                  {senderOptions === null && !senderLoadFailed
+                    ? "Loading..."
+                    : defaultSender
+                      ? `Sending from ${defaultSender.email}`
+                      : senderLoadFailed
+                        ? "Your default mailbox"
+                        : "No mailbox available"}
+                </p>
+              </>
+            )}
+            {senderOptions?.defaultError && !senderId && (
+              <p className="mt-1 text-xs text-danger">{senderOptions.defaultError}</p>
+            )}
+          </div>
 
           <div>
             <label className="block text-sm font-medium mb-1 text-foreground">To</label>
