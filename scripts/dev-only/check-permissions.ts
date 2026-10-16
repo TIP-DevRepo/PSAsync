@@ -23,9 +23,15 @@
 // placeholder tokens, and every send-email attempt is one that must be
 // refused before any mail would go out. The success path of the sender
 // rules is checked through send-options instead.
+//
+// The last step, checkHeldEmailApproval, holds an email for approval and
+// approves it. With no Microsoft credentials the held email can't be sent,
+// which is exactly the failed send it checks: the approval stands, the
+// quote returns to DRAFT with the email kept, and nothing is sent twice.
+// Everything it changes is put back afterwards.
 
 import bcrypt from "bcryptjs"
-import type { PrismaClient } from "@/generated/prisma"
+import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard } from "./lib/guard"
 import {
   BCRYPT_COST,
@@ -442,6 +448,98 @@ async function ensureSenderFixture(prisma: PrismaClient, b: SampleIds) {
   return { email: n.senderEmail, password, mailboxId: mailbox.id }
 }
 
+// A held email whose send fails must not strand the quote. Runs as Test
+// Admin B on its own sample quote, using the sample approval workflow
+// switched on for the duration, and puts everything back at the end.
+async function checkHeldEmailApproval(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const quoteId = ctx.b.quoteId
+  const workflowId = ctx.b.workflowId
+  const label = (name: string) => `[Admin B] Held email: ${name}`
+  const row = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+
+  const workflow = await prisma.approvalWorkflow.findUniqueOrThrow({ where: { id: workflowId } })
+  try {
+    // Every send of this company's quotes now needs approval
+    await prisma.approvalWorkflow.update({
+      where: { id: workflowId },
+      data: { active: true, triggerType: "TOTAL_THRESHOLD", thresholdValue: 0, triggerUserId: null },
+    })
+
+    const send = await admin.request("POST", `/api/quotes/${quoteId}/send-email`, { json: sendBody() })
+    const heldQuote = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { status: true, pendingEmailPayload: true } })
+    const heldOk = send.status === 200 && send.text.includes('"pendingApproval":true') && heldQuote.status === "PENDING_APPROVAL"
+    row("send is held for approval", "200, PENDING_APPROVAL", `${send.status}, ${heldQuote.status}`, heldOk ? null : errorText(send.text))
+    if (!heldOk) return
+
+    const approval = await prisma.quoteApproval.findFirst({ where: { quoteId, workflowId, status: "PENDING" }, select: { id: true } })
+    if (!approval) {
+      row("approval was requested", "a pending approval", "none", "no pending approval was created")
+      return
+    }
+
+    // The send can't succeed (no Microsoft credentials), so this is the failed send path
+    const approve = await admin.request("POST", `/api/quotes/${quoteId}/approvals/${approval.id}/approve`)
+    const after = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { status: true, pendingEmailPayload: true } })
+    const decided = await prisma.quoteApproval.findUniqueOrThrow({ where: { id: approval.id }, select: { status: true } })
+    const kept = after.pendingEmailPayload as { lastSendError?: string } | null
+    let warning = ""
+    try {
+      warning = (JSON.parse(approve.text) as { warning?: string }).warning ?? ""
+    } catch {
+      // not JSON, reported below
+    }
+    const problem =
+      approve.status !== 200
+        ? `approve returned ${approve.status}: ${errorText(approve.text)}`
+        : !warning
+          ? "no warning in the response"
+          : decided.status !== "APPROVED"
+            ? `approval is ${decided.status}`
+            : after.status !== "DRAFT"
+              ? `quote is ${after.status}`
+              : !kept?.lastSendError
+                ? "the held email was not kept"
+                : null
+    row("failed send keeps the approval and the email", "200 with warning, APPROVED, DRAFT", `${approve.status}, ${decided.status}, ${after.status}`, problem)
+
+    const again = await admin.request("POST", `/api/quotes/${quoteId}/approvals/${approval.id}/approve`)
+    const unchanged = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { status: true } })
+    row(
+      "approving again is refused",
+      '400 "already been decided"',
+      String(again.status),
+      again.status === 400 && errorText(again.text).includes("already been decided") && unchanged.status === "DRAFT"
+        ? null
+        : `got ${again.status} (${errorText(again.text)}), quote is ${unchanged.status}`
+    )
+
+    // The owner sending it again counts the approval already granted: it is
+    // not held a second time (and still can't go out without credentials)
+    const resend = await admin.request("POST", `/api/quotes/${quoteId}/send-email`, { json: sendBody() })
+    const resent = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { status: true } })
+    const pendingAgain = await prisma.quoteApproval.count({ where: { quoteId, status: "PENDING" } })
+    row(
+      "owner resend is not held again",
+      "400 (no credentials), DRAFT, no new approval",
+      `${resend.status}, ${resent.status}, ${pendingAgain} pending`,
+      resend.status === 400 && resent.status === "DRAFT" && pendingAgain === 0 ? null : errorText(resend.text)
+    )
+  } finally {
+    await prisma.approvalWorkflow.update({
+      where: { id: workflowId },
+      data: {
+        active: workflow.active,
+        triggerType: workflow.triggerType,
+        thresholdValue: workflow.thresholdValue,
+        triggerUserId: workflow.triggerUserId,
+      },
+    })
+    await prisma.quoteApproval.deleteMany({ where: { quoteId } })
+    await prisma.quote.update({ where: { id: quoteId }, data: { status: "DRAFT", pendingEmailPayload: Prisma.JsonNull } })
+  }
+}
+
 function expectedText(a: Attempt) {
   if (a.location) return `${a.expect} to ${a.location}`
   return `${a.expect}${a.expectError ? ` "${a.expectError}"` : ""}`
@@ -624,6 +722,10 @@ async function main() {
     await runAttempts(ATTEMPTS.filter((a) => a.sharedMode === "admin"))
     await setSenderMode("SPECIFIC", sender.mailboxId)
     await runAttempts(ATTEMPTS.filter((a) => a.sharedMode === "sender"))
+
+    // Approval of a held email whose send fails
+    await setSenderMode("CREATOR", null)
+    await checkHeldEmailApproval(prisma, sessions.admin, ctx, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
