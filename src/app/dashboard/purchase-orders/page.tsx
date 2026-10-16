@@ -6,6 +6,8 @@ import { ArrowUp, ArrowDown, ArrowUpDown, Trash2 } from "lucide-react"
 import Link from "next/link"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { toast } from "@/lib/toast"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface PurchaseOrder {
   id: string
@@ -99,6 +101,15 @@ function SortableHeader({
 }
 
 export default function PurchaseOrdersPage() {
+  const { can } = useAccess()
+  if (!can("pages.purchaseOrders")) return <NoAccess />
+  return <PurchaseOrdersList />
+}
+
+function PurchaseOrdersList() {
+  const { can } = useAccess()
+  const canDelete = can("purchaseOrders.delete")
+  const canCreate = can("purchaseOrders.create")
   const router = useRouter()
   const [orders, setOrders] = useState<PurchaseOrder[]>([])
   const [loading, setLoading] = useState(true)
@@ -107,20 +118,13 @@ export default function PurchaseOrdersPage() {
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
   const [density, setDensity] = useState<Density>("default")
-  const [canDelete, setCanDelete] = useState(false)
 
   useEffect(() => {
     fetch("/api/purchase-orders")
       .then((res) => res.json())
       .then((json) => {
-        setOrders(json)
+        setOrders(Array.isArray(json) ? json : [])
         setLoading(false)
-      })
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then((session) => {
-        const access = session?.user?.access
-        setCanDelete(!!access?.isGlobalAdmin || !!access?.permissions?.purchaseOrders?.delete)
       })
   }, [])
 
@@ -179,11 +183,13 @@ export default function PurchaseOrdersPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-display font-semibold tracking-tight text-foreground">Purchase Orders</h1>
-        <Link href="/dashboard/purchase-orders/new">
-          <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity">
-            + New Purchase Order
-          </button>
-        </Link>
+        {canCreate && (
+          <Link href="/dashboard/purchase-orders/new">
+            <button className="rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 transition-opacity">
+              + New Purchase Order
+            </button>
+          </Link>
+        )}
       </div>
 
       <div className="flex items-center justify-between gap-3">

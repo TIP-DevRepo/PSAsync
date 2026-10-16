@@ -70,6 +70,9 @@ interface POLineItemBuilderProps {
   items: POLineItemBuilderItem[]
   catalog: POCatalogOption[]
   locked?: boolean
+  // False hides the Received checkbox and Receive buttons, for users who
+  // can't edit the purchase order
+  canReceive?: boolean
   shipToClient: boolean
   receivingClientLocationId: string | null
   receivingClientLocationName: string | null
@@ -88,6 +91,7 @@ export function POLineItemBuilder({
   items,
   catalog,
   locked = false,
+  canReceive = true,
   shipToClient,
   receivingClientLocationId,
   receivingClientLocationName,
@@ -170,6 +174,9 @@ export function POLineItemBuilder({
   function renderReceivedCell(li: POLineItemBuilderItem) {
     if (li.received) {
       return <span className="text-xs font-medium text-success">✓ Received</span>
+    }
+    if (!canReceive) {
+      return <span className="text-xs text-muted-foreground">—</span>
     }
     if (!isInventoryTracked(li)) {
       return (
@@ -255,7 +262,7 @@ export function POLineItemBuilder({
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         {!locked && <Button size="sm" variant="outline" onClick={openAdd}>+ Add Line Item</Button>}
-        {!locked && anyUnreceived && (
+        {!locked && canReceive && anyUnreceived && (
           <Button size="sm" onClick={handleReceiveAll}>Receive All</Button>
         )}
       </div>

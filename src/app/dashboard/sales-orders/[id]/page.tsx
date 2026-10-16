@@ -12,6 +12,8 @@ import { TabsBar } from "@/components/ui/tabs-bar"
 import { SOLineItemBuilder, type SOCatalogOption, type SOVendorOption, type SOLineItemBuilderItem } from "@/components/sales-orders/SOLineItemBuilder"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
 import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface SOLineItem {
@@ -167,7 +169,26 @@ export default function SalesOrderDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  const { can } = useAccess()
+  if (!can("pages.salesOrders")) {
+    return (
+      <div className="w-full space-y-4">
+        <Breadcrumbs items={breadcrumbItems} current="No access" />
+        <NoAccess />
+      </div>
+    )
+  }
+  return <SalesOrderDetail params={params} />
+}
+
+function SalesOrderDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  // For hiding controls only: every route checks the same keys itself
+  const { can } = useAccess()
+  const canDelete = can("salesOrders.delete")
+  const canEdit = can("salesOrders.edit")
+  const canChangeStatus = can("salesOrders.changeStatus")
+  const canGeneratePO = can("salesOrders.generatePO")
   const router = useRouter()
   const [so, setSo] = useState<SalesOrderDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -175,8 +196,6 @@ export default function SalesOrderDetailPage({
   const [changingStatus, setChangingStatus] = useState(false)
   const [showGeneratePO, setShowGeneratePO] = useState(false)
   const [activeTab, setActiveTab] = useState<SOTabKey>("details")
-  const [canDelete, setCanDelete] = useState(false)
-  const [canEdit, setCanEdit] = useState(false)
 
   const [comments, setComments] = useState<SOCommentType[]>([])
   const [newComment, setNewComment] = useState("")
@@ -190,7 +209,9 @@ export default function SalesOrderDetailPage({
   function loadSO() {
     fetch(`/api/sales-orders/${id}`)
       .then((res) => {
-        if (res.status === 404) {
+        // Someone else's order, one outside the company, or any other
+        // refusal all land on the same not found state
+        if (!res.ok) {
           setNotFound(true)
           return null
         }
@@ -224,13 +245,6 @@ export default function SalesOrderDetailPage({
     fetch("/api/vendors")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setVendors(data))
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then((session) => {
-        const access = session?.user?.access
-        setCanDelete(!!access?.isGlobalAdmin || !!access?.permissions?.salesOrders?.delete)
-        setCanEdit(!!access?.isGlobalAdmin || !!access?.permissions?.salesOrders?.edit)
-      })
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id])
 
@@ -423,7 +437,7 @@ export default function SalesOrderDetailPage({
     return (
       <div className="w-full">
         <Breadcrumbs items={breadcrumbItems} current="Not found" />
-        <p className="text-sm text-danger">Sales Order not found.</p>
+        <p className="text-sm text-muted-foreground">This sales order was not found, or you do not have access to it.</p>
       </div>
     )
   }
@@ -486,7 +500,7 @@ export default function SalesOrderDetailPage({
             <select
               value={so.status}
               onChange={(e) => handleChangeStatus(e.target.value)}
-              disabled={changingStatus}
+              disabled={changingStatus || !canChangeStatus}
               className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {STATUS_OPTIONS.map((s) => (
@@ -714,22 +728,28 @@ export default function SalesOrderDetailPage({
               <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-2 text-sm">
                 <h2 className="font-semibold text-sm text-foreground">Client Notes</h2>
                 <p className="text-xs text-muted-foreground">Notes about this order from or for the client, separate from your team&apos;s internal notes.</p>
-                <textarea
-                  key={`client-notes-${so.clientNotes}`}
-                  defaultValue={so.clientNotes ?? ""}
-                  onBlur={(e) => handleUpdateField("clientNotes", e.target.value || null)}
-                  rows={3}
-                  placeholder="No client notes yet."
-                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                />
+                {canEdit ? (
+                  <textarea
+                    key={`client-notes-${so.clientNotes}`}
+                    defaultValue={so.clientNotes ?? ""}
+                    onBlur={(e) => handleUpdateField("clientNotes", e.target.value || null)}
+                    rows={3}
+                    placeholder="No client notes yet."
+                    className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  />
+                ) : (
+                  <p className="whitespace-pre-wrap text-foreground">{so.clientNotes || "No client notes yet."}</p>
+                )}
               </div>
 
               <div className="space-y-3">
                 <div className="flex items-center justify-between">
                   <h2 className="font-semibold text-heading text-foreground">Line Items</h2>
-                  <Button size="sm" onClick={() => setShowGeneratePO(true)}>
-                    + Generate Purchase Order
-                  </Button>
+                  {canGeneratePO && (
+                    <Button size="sm" onClick={() => setShowGeneratePO(true)}>
+                      + Generate Purchase Order
+                    </Button>
+                  )}
                 </div>
 
                 <SOLineItemBuilder
@@ -757,7 +777,7 @@ export default function SalesOrderDetailPage({
                   }))}
                   catalog={catalog}
                   vendors={vendors}
-                  locked={so.status !== "DRAFT"}
+                  locked={so.status !== "DRAFT" || !canEdit}
                   onCreate={createLineItem}
                   onUpdate={updateLineItem}
                   onDelete={deleteLineItem}
@@ -848,10 +868,12 @@ export default function SalesOrderDetailPage({
         {activeTab === "attachments" && (
           <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 max-w-2xl">
             <h2 className="font-semibold text-sm text-foreground">Attachments</h2>
-            <FileUploadZone
-              uploadUrl={`/api/sales-orders/${id}/attachments`}
-              onUploaded={loadAttachments}
-            />
+            {canEdit && (
+              <FileUploadZone
+                uploadUrl={`/api/sales-orders/${id}/attachments`}
+                onUploaded={loadAttachments}
+              />
+            )}
             <div className="space-y-2">
               {attachments.length === 0 && (
                 <p className="text-sm text-muted-foreground">No files attached yet.</p>
@@ -863,12 +885,14 @@ export default function SalesOrderDetailPage({
                   </a>
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-muted-foreground">{fileSizeLabel(a.fileSize)}</span>
-                    <button
-                      onClick={() => handleDeleteAttachment(a.id)}
-                      className="text-xs text-danger hover:underline"
-                    >
-                      Remove
-                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => handleDeleteAttachment(a.id)}
+                        className="text-xs text-danger hover:underline"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

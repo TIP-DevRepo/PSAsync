@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface VendorOption {
   id: string
@@ -24,6 +26,19 @@ interface ClientOption {
 }
 
 export default function NewPurchaseOrderPage() {
+  const { can } = useAccess()
+  if (!can("pages.purchaseOrders") || !can("purchaseOrders.create")) {
+    return (
+      <div className="w-full space-y-4">
+        <Breadcrumbs items={[{ label: "Purchase Orders", href: "/dashboard/purchase-orders" }]} current="No access" />
+        <NoAccess />
+      </div>
+    )
+  }
+  return <NewPurchaseOrderForm />
+}
+
+function NewPurchaseOrderForm() {
   const router = useRouter()
   const [vendors, setVendors] = useState<VendorOption[]>([])
   const [salesOrders, setSalesOrders] = useState<SalesOrderOption[]>([])
