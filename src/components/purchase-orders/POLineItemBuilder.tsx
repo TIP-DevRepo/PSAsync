@@ -176,7 +176,7 @@ export function POLineItemBuilder({
       return <span className="text-xs font-medium text-success">✓ Received</span>
     }
     if (!canReceive) {
-      return <span className="text-xs text-muted-foreground">—</span>
+      return <span className="text-xs text-muted-foreground">-</span>
     }
     if (!isInventoryTracked(li)) {
       return (
