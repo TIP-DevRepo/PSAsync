@@ -38,6 +38,9 @@ export interface AccessRule {
   // Only for the routes the forced password change screen needs. Everything
   // else refuses a user still on an admin's temporary password.
   allowPasswordGate?: boolean
+  // The 403 message when a rule fails, e.g. "You do not have permission to
+  // edit quotes". Defaults to a generic one.
+  message?: string
 }
 
 export interface AccessContext {
@@ -48,6 +51,21 @@ export interface AccessContext {
   userName: string | null
   access: EffectiveAccess
   can: (path: string) => boolean
+}
+
+// Whether line item cost (and the margins worked out from it) may be shown.
+// Anyone who maintains the catalog or edits quotes, sales orders, or
+// purchase orders already works with cost. Global Admin always can.
+export function canSeeCost(ctx: Pick<AccessContext, "can">): boolean {
+  return ["pages.catalog", "quotes.edit", "salesOrders.edit", "purchaseOrders.edit"].some((p) => ctx.can(p))
+}
+
+// A line item without its cost field, for responses to callers who can't
+// see cost. Everything else on the row is kept as is.
+export function omitCost<T extends { cost?: unknown }>(item: T): Omit<T, "cost"> {
+  const rest: Partial<T> = { ...item }
+  delete rest.cost
+  return rest as Omit<T, "cost">
 }
 
 export type AccessResult =
@@ -87,7 +105,7 @@ export async function requireAccess(rule: AccessRule = {}): Promise<AccessResult
     (rule.settingsSection !== undefined && !can(`settingsSections.${rule.settingsSection}`)) ||
     (permissions.length > 0 && !permissions.some((p) => can(p)))
   if (refused) {
-    return { response: apiError(403, "You don't have permission to do this", "FORBIDDEN") }
+    return { response: apiError(403, rule.message ?? "You don't have permission to do this", "FORBIDDEN") }
   }
 
   return {
