@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
+// Open to any active user: the inventory asset forms read these
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const fields = await prisma.inventoryCustomField.findMany({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     select: { id: true, name: true, categoryId: true },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   })

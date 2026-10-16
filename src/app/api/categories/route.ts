@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
+// Open to any active user: catalog and inventory forms pick categories
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const categories = await prisma.category.findMany({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     select: { id: true, name: true, parentId: true, defaultIsSerialized: true },
     orderBy: { name: "asc" },
   })
@@ -18,12 +17,13 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    settingsSection: "company",
+    message: "You do not have permission to manage company settings",
+  })
+  if (response) return response
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
   const name = (body.name ?? "").trim()
   const parentId = body.parentId || null
