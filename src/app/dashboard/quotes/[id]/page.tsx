@@ -19,6 +19,7 @@ import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
 import { RolePill } from "@/components/roles/RolePill"
 import { useAccess } from "@/components/AccessProvider"
+import { canSeeCostWith } from "@/lib/access-check"
 import { NoAccess } from "@/components/NoAccess"
 
 // ─── Types ────────────────────────────────────────────────────────────────
@@ -525,7 +526,9 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
       recurringByInterval[li.recurringInterval as RecurringInterval] += lineTotal(li)
     })
 
-  const totalCost = pricedItems.reduce((sum, li) => sum + li.cost * li.quantity, 0)
+  // Cost is left out of the quote for users who can't see it
+  const costVisible = canSeeCostWith(can) && pricedItems.every((li) => typeof li.cost === "number")
+  const totalCost = pricedItems.reduce((sum, li) => sum + (li.cost ?? 0) * li.quantity, 0)
   const totalRevenue = pricedItems.reduce((sum, li) => sum + lineTotal(li), 0)
   const totalMargin = totalRevenue - totalCost
   const marginPct = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0
@@ -836,6 +839,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
               onDelete={deleteLineItem}
               onMove={moveItem}
               onDuplicate={duplicateLineItem}
+              showCost={costVisible}
             />
           </div>
 
@@ -873,15 +877,15 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
             <div className="border-t border-border mt-2 pt-2 space-y-1 text-muted-foreground">
               <div className="flex justify-between">
                 <span>Internal: Total Cost</span>
-                <span className="tabular-nums">{money(totalCost)}</span>
+                <span className="tabular-nums">{costVisible ? money(totalCost) : "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span>Internal: Total Margin $</span>
-                <span className="tabular-nums">{money(totalMargin)}</span>
+                <span className="tabular-nums">{costVisible ? money(totalMargin) : "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span>Internal: Margin %</span>
-                <span className="tabular-nums">{marginPct.toFixed(1)}%</span>
+                <span className="tabular-nums">{costVisible ? `${marginPct.toFixed(1)}%` : "-"}</span>
               </div>
             </div>
           </div>

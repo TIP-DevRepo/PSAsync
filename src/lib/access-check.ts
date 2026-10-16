@@ -12,3 +12,12 @@ export function checkAccess(access: EffectiveAccess | null | undefined, path: st
   const sectionObj = access.permissions[section] as Record<string, boolean> | undefined
   return !!sectionObj?.[key]
 }
+
+// Holding any one of these lets a user see line item cost and the margins
+// worked out from it: they maintain the catalog or edit quotes, sales
+// orders, or purchase orders. Shared by the API's canSeeCost and the UI.
+export const COST_PERMISSIONS = ["pages.catalog", "quotes.edit", "salesOrders.edit", "purchaseOrders.edit"] as const
+
+export function canSeeCostWith(can: (path: string) => boolean): boolean {
+  return COST_PERMISSIONS.some((p) => can(p))
+}

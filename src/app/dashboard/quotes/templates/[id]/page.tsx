@@ -13,6 +13,7 @@ import { toast } from "@/lib/toast"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
 import { useAccess } from "@/components/AccessProvider"
+import { canSeeCostWith } from "@/lib/access-check"
 import { NoAccess } from "@/components/NoAccess"
 
 interface TemplateDetail {
@@ -272,7 +273,9 @@ function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
   // interval since templates don't need that level of preview detail) ────
   const pricedItems = template.lineItems.filter((li) => !li.isTextBlock)
   const subtotal = pricedItems.reduce((sum, li) => sum + lineTotal(li), 0)
-  const totalCost = pricedItems.reduce((sum, li) => sum + li.cost * li.quantity, 0)
+  // Cost is left out of the template for users who can't see it
+  const costVisible = canSeeCostWith(can) && pricedItems.every((li) => typeof li.cost === "number")
+  const totalCost = pricedItems.reduce((sum, li) => sum + (li.cost ?? 0) * li.quantity, 0)
   const totalMargin = subtotal - totalCost
   const marginPct = subtotal > 0 ? (totalMargin / subtotal) * 100 : 0
 
@@ -385,6 +388,7 @@ function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
           onDelete={deleteLineItem}
           onMove={moveItem}
           onDuplicate={duplicateLineItem}
+          showCost={costVisible}
         />
       </div>
 
@@ -399,15 +403,15 @@ function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
         <div className="border-t mt-2 pt-2 space-y-1 text-zinc-500">
           <div className="flex justify-between">
             <span>Internal: Total Cost</span>
-            <span>{money(totalCost)}</span>
+            <span>{costVisible ? money(totalCost) : "-"}</span>
           </div>
           <div className="flex justify-between">
             <span>Internal: Total Margin $</span>
-            <span>{money(totalMargin)}</span>
+            <span>{costVisible ? money(totalMargin) : "-"}</span>
           </div>
           <div className="flex justify-between">
             <span>Internal: Margin %</span>
-            <span>{subtotal > 0 ? `${marginPct.toFixed(1)}%` : "—"}</span>
+            <span>{!costVisible ? "-" : subtotal > 0 ? `${marginPct.toFixed(1)}%` : "—"}</span>
           </div>
         </div>
       </div>

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { checkAccess, type EffectiveAccess, type RolePermissions } from "@/lib/permissions"
+import { canSeeCostWith } from "@/lib/access-check"
 
 // The one JSON error shape every API route returns
 export interface ApiError {
@@ -55,9 +56,10 @@ export interface AccessContext {
 
 // Whether line item cost (and the margins worked out from it) may be shown.
 // Anyone who maintains the catalog or edits quotes, sales orders, or
-// purchase orders already works with cost. Global Admin always can.
+// purchase orders already works with cost (see COST_PERMISSIONS). Global
+// Admin always can.
 export function canSeeCost(ctx: Pick<AccessContext, "can">): boolean {
-  return ["pages.catalog", "quotes.edit", "salesOrders.edit", "purchaseOrders.edit"].some((p) => ctx.can(p))
+  return canSeeCostWith(ctx.can)
 }
 
 // A line item without its cost field, for responses to callers who can't
