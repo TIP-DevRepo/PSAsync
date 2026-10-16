@@ -12,6 +12,8 @@ import {
 import { toast } from "@/lib/toast"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface TemplateDetail {
   id: string
@@ -41,6 +43,23 @@ export default function TemplateDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  const { can } = useAccess()
+  if (!can("pages.quotes")) {
+    return (
+      <div className="w-full space-y-4">
+        <Breadcrumbs items={breadcrumbItems} current="No access" />
+        <NoAccess />
+      </div>
+    )
+  }
+  return <TemplateDetail params={params} />
+}
+
+function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
+  // Templates are maintained from Quote Settings; anyone else may look but
+  // not change them
+  const { can } = useAccess()
+  const canManage = can("settingsSections.quotes")
   const [id, setId] = useState<string | null>(null)
   const [template, setTemplate] = useState<TemplateDetail | null>(null)
   const [catalog, setCatalog] = useState<CatalogOption[]>([])
@@ -268,7 +287,13 @@ export default function TemplateDetailPage({
 
       <h1 className="text-2xl font-bold">{template.name}</h1>
 
-      <div className="rounded-md border p-4 space-y-4">
+      {!canManage && (
+        <p className="text-sm text-muted-foreground">
+          You can view this template. Changing it needs Quote Settings access.
+        </p>
+      )}
+
+      <fieldset disabled={!canManage} className="min-w-0 rounded-md border p-4 space-y-4">
         <div>
           <label className="block text-sm font-medium mb-1">Template Name</label>
           <input
@@ -311,8 +336,13 @@ export default function TemplateDetailPage({
               className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
               dangerouslySetInnerHTML={{ __html: companyDefaultTerms || "No company default set." }}
             />
-          ) : (
+          ) : canManage ? (
             <RichTextEditor value={template.terms ?? ""} onChange={(html) => update("terms", html)} />
+          ) : (
+            <div
+              className="rounded-md border border-border p-3 text-sm text-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
+              dangerouslySetInnerHTML={{ __html: template.terms ?? "" }}
+            />
           )}
         </CollapsibleField>
         <div>
@@ -332,10 +362,12 @@ export default function TemplateDetailPage({
           />
           Active (available when starting a new quote)
         </label>
-        <Button onClick={handleSave} disabled={saving}>
-          {saving ? "Saving..." : "Save Changes"}
-        </Button>
-      </div>
+        {canManage && (
+          <Button onClick={handleSave} disabled={saving}>
+            {saving ? "Saving..." : "Save Changes"}
+          </Button>
+        )}
+      </fieldset>
 
       {/* Line item builder — same component and behavior as quotes */}
       <div className="space-y-4">
@@ -344,7 +376,7 @@ export default function TemplateDetailPage({
         <LineItemBuilder
           items={template.lineItems}
           catalog={catalog}
-          locked={false}
+          locked={!canManage}
           persistedSections={template.sections}
           onAddSection={handleAddSection}
           onRemoveSection={handleRemoveSection}

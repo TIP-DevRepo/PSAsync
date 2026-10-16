@@ -10,6 +10,8 @@ import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { TabsBar } from "@/components/ui/tabs-bar"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Quote {
@@ -194,6 +196,13 @@ const TOP_TABS: { key: TabKey; label: string }[] = [
 
 // ─── Main Page ────────────────────────────────────────────────────────────
 export default function QuotesPage() {
+  const { can } = useAccess()
+  if (!can("pages.quotes")) return <NoAccess />
+  return <QuotesPageContent />
+}
+
+function QuotesPageContent() {
+  const { can } = useAccess()
   const [activeTab, setActiveTab] = useState<TabKey>("quotes")
   const [showTemplatePicker, setShowTemplatePicker] = useState(false)
 
@@ -215,7 +224,7 @@ export default function QuotesPage() {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-display font-semibold tracking-tight text-foreground">Quotes</h1>
-        <Button onClick={() => setShowTemplatePicker(true)}>New Quote</Button>
+        {can("quotes.create") && <Button onClick={() => setShowTemplatePicker(true)}>New Quote</Button>}
       </div>
 
       <TabsBar tabs={TOP_TABS} activeTab={activeTab} onChange={setActiveTab} ariaLabel="Quotes sections" />
@@ -296,6 +305,8 @@ function ScorecardTab() {
 // ─── Quotes Tab ───────────────────────────────────────────────────────────
 function QuotesTab() {
   const router = useRouter()
+  const { can } = useAccess()
+  const canEdit = can("quotes.edit")
   const [quotes, setQuotes] = useState<Quote[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
@@ -486,9 +497,9 @@ function QuotesTab() {
             className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <option value="">Bulk actions:</option>
-            <option value="mark_lost">Mark as Lost</option>
-            <option value="mark_expired">Mark as Expired</option>
-            <option value="delete">Delete</option>
+            {can("quotes.changeStatus") && <option value="mark_lost">Mark as Lost</option>}
+            {can("quotes.changeStatus") && <option value="mark_expired">Mark as Expired</option>}
+            {can("quotes.delete") && <option value="delete">Delete</option>}
           </select>
           <Button variant="outline" size="sm" onClick={handleBulkSubmit} disabled={!bulkAction || selected.size === 0}>
             Submit
@@ -642,13 +653,15 @@ function QuotesTab() {
                       >
                         <Pencil size={15} />
                       </button>
-                      <button
-                        title="Send Quote"
-                        onClick={() => router.push(`/dashboard/quotes/${quote.id}?send=1`)}
-                        className="text-muted-foreground hover:text-foreground"
-                      >
-                        <Mail size={15} />
-                      </button>
+                      {can("quotes.sendEmail") && (
+                        <button
+                          title="Send Quote"
+                          onClick={() => router.push(`/dashboard/quotes/${quote.id}?send=1`)}
+                          className="text-muted-foreground hover:text-foreground"
+                        >
+                          <Mail size={15} />
+                        </button>
+                      )}
                       <button
                         title="View Portal"
                         onClick={() => window.open(`/portal/${quote.accessToken}`, "_blank")}
@@ -657,9 +670,14 @@ function QuotesTab() {
                         <Search size={15} />
                       </button>
                       <button
-                        title={quote.flagged ? "Unflag" : "Flag for follow-up"}
+                        title={
+                          canEdit
+                            ? quote.flagged ? "Unflag" : "Flag for follow-up"
+                            : "You do not have permission to flag quotes"
+                        }
                         onClick={() => handleToggleFlag(quote.id)}
-                        className={quote.flagged ? "text-warning" : "text-muted-foreground hover:text-foreground"}
+                        disabled={!canEdit}
+                        className={`${quote.flagged ? "text-warning" : "text-muted-foreground hover:text-foreground"} disabled:cursor-not-allowed disabled:opacity-60`}
                       >
                         <Flag size={15} fill={quote.flagged ? "currentColor" : "none"} />
                       </button>
@@ -861,6 +879,7 @@ function QuoteActionsMenu({
   onShowRevisions: () => void
 }) {
   const router = useRouter()
+  const { can } = useAccess()
   const [open, setOpen] = useState(false)
   const [subPanel, setSubPanel] = useState<"assign" | "status" | null>(null)
   const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
@@ -979,25 +998,31 @@ function QuoteActionsMenu({
         >
           {subPanel === null && (
             <>
-              <button
-                onClick={openAssign}
-                className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
-              >
-                Assign <UserPlus size={14} className="text-muted-foreground" />
-              </button>
-              <button
-                onClick={handleCopyQuote}
-                disabled={copying}
-                className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
-              >
-                {copying ? "Copying..." : "Copy"} <Copy size={14} className="text-muted-foreground" />
-              </button>
-              <button
-                onClick={() => setSubPanel("status")}
-                className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
-              >
-                Change Status <Workflow size={14} className="text-muted-foreground" />
-              </button>
+              {can("quotes.edit") && (
+                <button
+                  onClick={openAssign}
+                  className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
+                >
+                  Assign <UserPlus size={14} className="text-muted-foreground" />
+                </button>
+              )}
+              {can("quotes.create") && (
+                <button
+                  onClick={handleCopyQuote}
+                  disabled={copying}
+                  className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
+                >
+                  {copying ? "Copying..." : "Copy"} <Copy size={14} className="text-muted-foreground" />
+                </button>
+              )}
+              {can("quotes.changeStatus") && (
+                <button
+                  onClick={() => setSubPanel("status")}
+                  className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
+                >
+                  Change Status <Workflow size={14} className="text-muted-foreground" />
+                </button>
+              )}
               <button
                 onClick={() => {
                   window.open(`/api/quotes/${quote.id}/pdf`, "_blank")
@@ -1034,12 +1059,14 @@ function QuoteActionsMenu({
               >
                 Revisions <History size={14} className="text-muted-foreground" />
               </button>
-              <button
-                onClick={handleDelete}
-                className="flex items-center justify-between w-full text-left px-3 py-2 text-danger hover:bg-surface-hover border-t border-border"
-              >
-                Delete <Trash2 size={14} />
-              </button>
+              {can("quotes.delete") && (
+                <button
+                  onClick={handleDelete}
+                  className="flex items-center justify-between w-full text-left px-3 py-2 text-danger hover:bg-surface-hover border-t border-border"
+                >
+                  Delete <Trash2 size={14} />
+                </button>
+              )}
             </>
           )}
 
@@ -1152,6 +1179,8 @@ function RevisionsModal({ quote, onClose }: { quote: Quote; onClose: () => void 
 
 // ─── Templates Tab ────────────────────────────────────────────────────────
 function TemplatesTab() {
+  const { can } = useAccess()
+  const canManageTemplates = can("settingsSections.quotes")
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
   const [showNew, setShowNew] = useState(false)
@@ -1194,13 +1223,15 @@ function TemplatesTab() {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-end">
-        <Button onClick={() => setShowNew(!showNew)}>
-          {showNew ? "Cancel" : "New Template"}
-        </Button>
-      </div>
+      {canManageTemplates && (
+        <div className="flex justify-end">
+          <Button onClick={() => setShowNew(!showNew)}>
+            {showNew ? "Cancel" : "New Template"}
+          </Button>
+        </div>
+      )}
 
-      {showNew && (
+      {canManageTemplates && showNew && (
         <div className="rounded-lg border border-border bg-card p-4 shadow-card space-y-3">
           <div>
             <label className="block text-sm font-medium mb-1 text-foreground">Template Name *</label>
@@ -1264,7 +1295,9 @@ function TemplatesTab() {
           </Link>
         ))}
         {templates.length === 0 && (
-          <p className="text-sm text-muted-foreground">No templates yet. Create one above.</p>
+          <p className="text-sm text-muted-foreground">
+            {canManageTemplates ? "No templates yet. Create one above." : "No templates yet."}
+          </p>
         )}
       </div>
     </div>

@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 import { Sidebar, type PagePermissions } from "@/components/layout/sidebar"
 import { Topbar } from "@/components/layout/topbar"
 import { resolvePagePermissions } from "@/lib/permissions"
+import { AccessProvider } from "@/components/AccessProvider"
 
 export default async function DashboardLayout({
   children,
@@ -33,7 +34,9 @@ export default async function DashboardLayout({
       {/* Main content area */}
       <div className="flex flex-1 flex-col overflow-hidden">
         <Topbar userName={session.user.name ?? "User"} pagePermissions={pagePermissions} />
-        <main className="flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 overflow-y-auto p-6">
+          <AccessProvider access={session.user.access ?? null}>{children}</AccessProvider>
+        </main>
       </div>
     </div>
   )

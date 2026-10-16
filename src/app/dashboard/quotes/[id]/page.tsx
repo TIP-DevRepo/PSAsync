@@ -18,6 +18,8 @@ import { promptDialog } from "@/lib/prompt-dialog"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
 import { RolePill } from "@/components/roles/RolePill"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface QuoteDetail {
@@ -76,14 +78,6 @@ interface Comment {
   createdAt: string
 }
 
-interface MyAccess {
-  rank: number
-  isGlobalAdmin?: boolean
-  permissions: {
-    quotes?: { changeStatus?: boolean; delete?: boolean; edit?: boolean }
-  }
-}
-
 interface ClientOption {
   id: string
   name: string
@@ -131,7 +125,21 @@ export default function QuoteDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  const { can } = useAccess()
+  if (!can("pages.quotes")) {
+    return (
+      <div className="w-full space-y-4">
+        <Breadcrumbs items={breadcrumbItems} current="No access" />
+        <NoAccess />
+      </div>
+    )
+  }
+  return <QuoteDetail params={params} />
+}
+
+function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const { access: myAccess, can } = useAccess()
   const [quote, setQuote] = useState<QuoteDetail | null>(null)
   const [catalog, setCatalog] = useState<CatalogOption[]>([])
   const [loading, setLoading] = useState(true)
@@ -144,7 +152,6 @@ export default function QuoteDetailPage({
   const [creatingVersion, setCreatingVersion] = useState(false)
   const [reactivatingId, setReactivatingId] = useState<string | null>(null)
   const [approvals, setApprovals] = useState<ApprovalRequirement[]>([])
-  const [myAccess, setMyAccess] = useState<MyAccess | null>(null)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [changingStatus, setChangingStatus] = useState(false)
@@ -203,13 +210,14 @@ export default function QuoteDetailPage({
     fetch("/api/quote-settings")
       .then((res) => res.json())
       .then((json) => setCompanyDefaultTerms(json.quoteTerms ?? ""))
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then((session) => setMyAccess(session?.user?.access ?? null))
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("send") === "1") {
+    if (
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("send") === "1" &&
+      can("quotes.sendEmail")
+    ) {
       setShowSendModal(true)
     }
-  }, [loadQuote, loadVersions, loadApprovals, loadComments])
+  }, [loadQuote, loadVersions, loadApprovals, loadComments, can])
 
   useEffect(() => {
     if (!quote?.client?.id) return
@@ -523,9 +531,12 @@ export default function QuoteDetailPage({
   const marginPct = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0
 
   const isLocked = quote.status !== "DRAFT"
-  const canChangeStatus = myAccess?.isGlobalAdmin || !!myAccess?.permissions?.quotes?.changeStatus
-  const canDeleteQuote = myAccess?.isGlobalAdmin || !!myAccess?.permissions?.quotes?.delete
-  const canEditQuote = myAccess?.isGlobalAdmin || !!myAccess?.permissions?.quotes?.edit
+  const canChangeStatus = can("quotes.changeStatus")
+  const canDeleteQuote = can("quotes.delete")
+  const canEditQuote = can("quotes.edit")
+  const canSendEmail = can("quotes.sendEmail")
+  const canCreateQuote = can("quotes.create")
+  const canApprove = can("quotes.approve")
   const showEditableHeader = !isLocked && canEditQuote
 
   return (
@@ -548,12 +559,16 @@ export default function QuoteDetailPage({
           <div className="flex items-center gap-3">
             {quote.status === "DRAFT" && (
               <>
-                <Button size="sm" onClick={() => setShowSendModal(true)}>
-                  Send Quote
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleMarkSent} disabled={sending}>
-                  {sending ? "Marking..." : "Mark as Sent (no email)"}
-                </Button>
+                {canSendEmail && (
+                  <Button size="sm" onClick={() => setShowSendModal(true)}>
+                    Send Quote
+                  </Button>
+                )}
+                {canChangeStatus && (
+                  <Button size="sm" variant="outline" onClick={handleMarkSent} disabled={sending}>
+                    {sending ? "Marking..." : "Mark as Sent (no email)"}
+                  </Button>
+                )}
               </>
             )}
             <Button size="sm" variant="outline" onClick={handleCopyLink}>
@@ -601,9 +616,11 @@ export default function QuoteDetailPage({
           <p className="text-sm text-warning">
             This quote has been sent and is locked. Create a new version to make changes.
           </p>
-          <Button size="sm" onClick={handleCreateVersion} disabled={creatingVersion}>
-            {creatingVersion ? "Creating..." : "Create New Version"}
-          </Button>
+          {canCreateQuote && (
+            <Button size="sm" onClick={handleCreateVersion} disabled={creatingVersion}>
+              {creatingVersion ? "Creating..." : "Create New Version"}
+            </Button>
+          )}
         </div>
       )}
 
@@ -620,7 +637,7 @@ export default function QuoteDetailPage({
                 const requiredRank = a.workflow.requiredRole?.rank ?? 999
                 const requiredRole = a.workflow.requiredRole
                 const requiredRoleName = requiredRole ? <RolePill role={requiredRole} /> : "sufficient permission"
-                const canDecide = myRank >= requiredRank
+                const canDecide = canApprove && myRank >= requiredRank
 
                 return (
                   <div
@@ -664,9 +681,11 @@ export default function QuoteDetailPage({
           <p className="text-sm text-muted-foreground">
             This is an archived version. Another version is currently the active one shown to the client.
           </p>
-          <Button size="sm" variant="outline" onClick={() => handleReactivate(id)} disabled={reactivatingId === id}>
-            {reactivatingId === id ? "Reactivating..." : "Reactivate This Version"}
-          </Button>
+          {canEditQuote && (
+            <Button size="sm" variant="outline" onClick={() => handleReactivate(id)} disabled={reactivatingId === id}>
+              {reactivatingId === id ? "Reactivating..." : "Reactivate This Version"}
+            </Button>
+          )}
         </div>
       )}
 
@@ -808,7 +827,7 @@ export default function QuoteDetailPage({
             <LineItemBuilder
               items={quote.lineItems}
               catalog={catalog}
-              locked={isLocked}
+              locked={isLocked || !canEditQuote}
               persistedSections={quote.sections}
               onAddSection={handleAddSection}
               onRemoveSection={handleRemoveSection}
@@ -890,7 +909,7 @@ export default function QuoteDetailPage({
                     </a>
                     {v.isActive ? (
                       <span className="text-xs font-medium text-success">Active</span>
-                    ) : v.sentAt ? (
+                    ) : v.sentAt && canEditQuote ? (
                       <Button
                         size="sm"
                         variant="outline"
@@ -899,7 +918,7 @@ export default function QuoteDetailPage({
                       >
                         {reactivatingId === v.id ? "..." : "Reactivate"}
                       </Button>
-                    ) : (
+                    ) : v.sentAt ? null : (
                       <span className="text-xs text-muted-foreground">Draft in progress</span>
                     )}
                       </div>
@@ -962,7 +981,7 @@ export default function QuoteDetailPage({
         </div>
       )}
 
-      {showSendModal && (
+      {showSendModal && canSendEmail && (
         <SendQuoteModal
           quoteId={id}
           defaultTo={quote.contact?.email || quote.client.email || ""}
