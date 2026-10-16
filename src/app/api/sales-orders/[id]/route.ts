@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { apiError, notFound, requireAccess } from "@/lib/api-access"
+import { apiError, canSeeCost, notFound, omitCost, omitUnitCost, requireAccess } from "@/lib/api-access"
 import { loadViewableSalesOrder, salesOrderWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
 import { notifySalesOrderStatusChange } from "@/lib/notify"
 
@@ -78,6 +78,16 @@ export async function GET(
   })
 
   if (!salesOrder) return notFound()
+
+  // Line item cost, and the cost on the linked purchase orders' lines, only
+  // goes to users who can see cost
+  if (!canSeeCost(ctx)) {
+    return NextResponse.json({
+      ...salesOrder,
+      lineItems: salesOrder.lineItems.map(omitCost),
+      purchaseOrders: salesOrder.purchaseOrders.map((po) => ({ ...po, lineItems: po.lineItems.map(omitUnitCost) })),
+    })
+  }
 
   return NextResponse.json(salesOrder)
 }

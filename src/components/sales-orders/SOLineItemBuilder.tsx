@@ -22,7 +22,8 @@ export interface SOLineItemBuilderItem {
   description: string | null
   quantity: number
   unitPrice: number
-  cost: number
+  // Left out by the sales order API for users who can't see cost
+  cost?: number
   discount: number
   taxable: boolean
   isRecurring: boolean
@@ -198,7 +199,11 @@ export function SOLineItemBuilder({
               <input type="number" defaultValue={li.quantity} onBlur={(e) => onUpdate(li.id, { quantity: Number(e.target.value) })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-right text-foreground tabular-nums" />
             </td>
             <td className="py-2 pr-2 align-top text-right">
-              <input type="number" step="0.01" defaultValue={li.cost} onBlur={(e) => onUpdate(li.id, { cost: Number(e.target.value) })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-right text-foreground tabular-nums" />
+              {typeof li.cost === "number" ? (
+                <input type="number" step="0.01" defaultValue={li.cost} onBlur={(e) => onUpdate(li.id, { cost: Number(e.target.value) })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-right text-foreground tabular-nums" />
+              ) : (
+                <span className="text-xs text-muted-foreground">-</span>
+              )}
             </td>
             <td className="py-2 pr-2 align-top text-right">
               <input type="number" step="0.01" defaultValue={li.unitPrice} onBlur={(e) => onUpdate(li.id, { unitPrice: Number(e.target.value) })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-right text-foreground tabular-nums" />
@@ -230,7 +235,7 @@ export function SOLineItemBuilder({
             <td className="py-2 pr-2 align-top text-muted-foreground truncate">{li.vendor?.name ?? "—"}</td>
             <td className="py-2 pr-2 align-top text-muted-foreground"><CopyableCell value={li.vendorSku} /></td>
             <td className="py-2 pr-2 align-top text-right text-foreground tabular-nums">{li.quantity}</td>
-            <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{money(li.cost)}</td>
+            <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{typeof li.cost === "number" ? money(li.cost) : "-"}</td>
             <td className="py-2 pr-2 align-top text-right text-foreground tabular-nums">{money(li.unitPrice)}</td>
             <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{li.discount ? `${li.discount}%` : "—"}</td>
             <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>

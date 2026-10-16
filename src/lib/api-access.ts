@@ -70,6 +70,13 @@ export function omitCost<T extends { cost?: unknown }>(item: T): Omit<T, "cost">
   return rest as Omit<T, "cost">
 }
 
+// The same for a purchase order line item, whose cost field is unitCost
+export function omitUnitCost<T extends { unitCost?: unknown }>(item: T): Omit<T, "unitCost"> {
+  const rest: Partial<T> = { ...item }
+  delete rest.unitCost
+  return rest as Omit<T, "unitCost">
+}
+
 export type AccessResult =
   | { ctx: AccessContext; response?: undefined }
   | { response: NextResponse; ctx?: undefined }

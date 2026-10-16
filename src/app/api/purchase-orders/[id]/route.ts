@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { apiError, notFound, requireAccess } from "@/lib/api-access"
+import { apiError, canSeeCost, notFound, omitUnitCost, requireAccess } from "@/lib/api-access"
 import { purchaseOrderWhere, viewablePurchaseOrderWhere } from "@/lib/scoped-loaders"
 
 const VALID_STATUSES = ["DRAFT", "PARTS_ORDERED", "RECEIVED", "ON_HOLD", "BACKORDERED", "CANCELLED"]
@@ -60,6 +60,11 @@ export async function GET(
   })
 
   if (!po) return notFound()
+
+  // Line item cost only goes to users who can see cost
+  if (!canSeeCost(ctx)) {
+    return NextResponse.json({ ...po, lineItems: po.lineItems.map(omitUnitCost) })
+  }
 
   return NextResponse.json(po)
 }

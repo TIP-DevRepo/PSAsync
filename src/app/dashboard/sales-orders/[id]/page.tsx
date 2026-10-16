@@ -25,7 +25,8 @@ interface SOLineItem {
   section: string | null
     quantity: number
     unitPrice: number
-    cost: number
+    // Left out for users who can't see cost
+    cost?: number
     discount: number
     taxable: boolean
     isRecurring: boolean
@@ -44,7 +45,8 @@ interface POLineItemSummary {
   name: string
   sku: string | null
   quantity: number
-  unitCost: number
+  // Left out for users who can't see cost
+  unitCost?: number
   received: boolean
 }
 

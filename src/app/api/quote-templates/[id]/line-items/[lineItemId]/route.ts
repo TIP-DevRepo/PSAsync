@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { notFound, requireAccess } from "@/lib/api-access"
+import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
+import { mayWriteCost } from "@/lib/line-item-cost"
 
 // Templates are maintained from Quote Settings
 const TEMPLATE_WRITE_RULE = {
@@ -39,7 +40,7 @@ export async function PATCH(
   if (body.sku !== undefined) data.sku = body.sku || null
   if (body.quantity !== undefined) data.quantity = Number(body.quantity)
   if (body.unitPrice !== undefined) data.unitPrice = Number(body.unitPrice)
-  if (body.cost !== undefined) data.cost = Number(body.cost)
+  if (mayWriteCost(ctx, body.cost)) data.cost = Number(body.cost)
   if (body.discount !== undefined) data.discount = Number(body.discount)
   if (body.taxable !== undefined) data.taxable = Boolean(body.taxable)
   if (body.isOptional !== undefined) data.isOptional = Boolean(body.isOptional)
@@ -102,7 +103,7 @@ export async function PATCH(
     })
   }
 
-  return NextResponse.json(lineItem)
+  return NextResponse.json(canSeeCost(ctx) ? lineItem : omitCost(lineItem))
 }
 
 export async function DELETE(

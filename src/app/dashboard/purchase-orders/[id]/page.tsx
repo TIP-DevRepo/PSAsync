@@ -420,7 +420,10 @@ export default function PurchaseOrderDetailPage({
     )
   }
 
-  const total = po.lineItems.reduce((sum, li) => sum + li.unitCost * li.quantity, 0)
+  // Line item cost is left out for users who can't see it, and then the
+  // total shows "-" rather than a partial or NaN sum
+  const costVisible = po.lineItems.every((li) => typeof li.unitCost === "number")
+  const total = po.lineItems.reduce((sum, li) => sum + (li.unitCost ?? 0) * li.quantity, 0)
   const receivedCount = po.lineItems.filter((li) => li.received).length
   // Same line the Delete block already draws: once anything's been
   // received, payment and shipping details stop being editable.
@@ -629,7 +632,7 @@ export default function PurchaseOrderDetailPage({
                 <div className="flex justify-end">
                   <div className="rounded-lg border border-border bg-card shadow-card p-3 text-sm">
                     <span className="text-muted-foreground mr-3">Total</span>
-                    <span className="font-semibold text-foreground tabular-nums">{money(total)}</span>
+                    <span className="font-semibold text-foreground tabular-nums">{costVisible ? money(total) : "-"}</span>
                   </div>
                 </div>
               </div>

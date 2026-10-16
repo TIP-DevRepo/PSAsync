@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { RecurringInterval } from "@/generated/prisma"
 import { apiError, isEnumValue, requireAccess, notFound } from "@/lib/api-access"
+import { mayWriteCost } from "@/lib/line-item-cost"
 import { assertRefs, loadSalesOrderLineItem, salesOrderLineItemWhere } from "@/lib/scoped-loaders"
 
 export async function PATCH(
@@ -35,7 +36,7 @@ export async function PATCH(
   if (body.vendorId !== undefined) data.vendorId = body.vendorId || null
   if (body.quantity !== undefined) data.quantity = Number(body.quantity)
   if (body.unitPrice !== undefined) data.unitPrice = Number(body.unitPrice)
-  if (body.cost !== undefined) data.cost = Number(body.cost)
+  if (mayWriteCost(ctx, body.cost)) data.cost = Number(body.cost)
   if (body.discount !== undefined) data.discount = Number(body.discount)
   if (body.taxable !== undefined) data.taxable = body.taxable
   if (body.isRecurring !== undefined) data.isRecurring = body.isRecurring

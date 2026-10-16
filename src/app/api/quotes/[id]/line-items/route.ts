@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { RecurringInterval } from "@/generated/prisma"
 import { apiError, isEnumValue, notFound, requireAccess } from "@/lib/api-access"
 import { assertRefs, loadViewableQuote } from "@/lib/scoped-loaders"
+import { newLineItemCost } from "@/lib/line-item-cost"
 
 export async function POST(
   req: NextRequest,
@@ -56,7 +57,7 @@ export async function POST(
       sku: body.sku || null,
       quantity: isContentOnly ? 0 : Number(body.quantity) || 1,
       unitPrice: isContentOnly ? 0 : Number(body.unitPrice) || 0,
-      cost: isContentOnly ? 0 : Number(body.cost) || 0,
+      cost: isContentOnly ? 0 : await newLineItemCost(ctx, body.catalogItemId, body.cost),
       discount: isContentOnly ? 0 : Number(body.discount) || 0,
       taxable: isContentOnly ? false : body.taxable ?? true,
       isRecurring: isContentOnly ? false : body.isRecurring ?? false,

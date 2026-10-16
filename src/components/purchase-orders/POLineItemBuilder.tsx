@@ -20,7 +20,8 @@ export interface POLineItemBuilderItem {
   name: string
   description: string | null
   quantity: number
-  unitCost: number
+  // Left out by the purchase order API for users who can't see cost
+  unitCost?: number
   serialNumber: string | null
   received: boolean
   sortOrder: number
@@ -36,8 +37,13 @@ export interface POCatalogOption {
   cost?: number
 }
 
+// null when the cost was left out, so the row shows "-" instead of NaN
 function lineTotal(li: POLineItemBuilderItem) {
-  return li.unitCost * li.quantity
+  return typeof li.unitCost === "number" ? li.unitCost * li.quantity : null
+}
+
+function moneyOrDash(n: number | null | undefined) {
+  return typeof n === "number" ? money(n) : "-"
 }
 
 // A line item only goes through Inventory receiving if it's linked to a
@@ -208,9 +214,13 @@ export function POLineItemBuilder({
               <input type="number" defaultValue={li.quantity} onBlur={(e) => onUpdate(li.id, { quantity: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
             </td>
             <td className="py-2 pr-2 align-top text-right">
-              <input type="number" step="0.01" defaultValue={li.unitCost} onBlur={(e) => onUpdate(li.id, { unitCost: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
+              {typeof li.unitCost === "number" ? (
+                <input type="number" step="0.01" defaultValue={li.unitCost} onBlur={(e) => onUpdate(li.id, { unitCost: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
+              ) : (
+                <span className="text-xs text-muted-foreground">-</span>
+              )}
             </td>
-            <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
+            <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{moneyOrDash(total)}</td>
             <td className="py-2 pr-2 align-top">{renderSerialCell(li)}</td>
             <td className="py-2 pr-2 align-top text-center">{renderReceivedCell(li)}</td>
             <td className="py-2 pr-4 align-top">
@@ -226,8 +236,8 @@ export function POLineItemBuilder({
             </td>
             <td className="py-2 pr-2 align-top text-muted-foreground"><CopyableCell value={li.vendorSku} /></td>
             <td className="py-2 pr-2 align-top text-right text-foreground tabular-nums">{li.quantity}</td>
-            <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{money(li.unitCost)}</td>
-            <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
+            <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{moneyOrDash(li.unitCost)}</td>
+            <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{moneyOrDash(total)}</td>
             <td className="py-2 pr-2 align-top">{renderSerialCell(li)}</td>
             <td className="py-2 pr-2 align-top text-center">{renderReceivedCell(li)}</td>
             <td className="py-2 pr-4 align-top">
