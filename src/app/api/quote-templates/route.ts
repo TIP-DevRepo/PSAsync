@@ -1,33 +1,39 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { canSeeCost, omitCost, requireAccess } from "@/lib/api-access"
+
+// Templates are maintained from Quote Settings
+const TEMPLATE_WRITE_RULE = {
+  settingsSection: "quotes",
+  message: "You do not have permission to edit quote templates",
+} as const
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({ page: "quotes", message: "You do not have permission to view quotes" })
+  if (response) return response
 
   const templates = await prisma.quoteTemplate.findMany({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     include: { lineItems: true },
     orderBy: { name: "asc" },
   })
+
+  if (!canSeeCost(ctx)) {
+    return NextResponse.json(templates.map((t) => ({ ...t, lineItems: t.lineItems.map(omitCost) })))
+  }
 
   return NextResponse.json(templates)
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess(TEMPLATE_WRITE_RULE)
+  if (response) return response
 
   const body = await req.json()
 
   const template = await prisma.quoteTemplate.create({
     data: {
-      companyId: session.user.companyId,
+      companyId: ctx.companyId,
       name: body.name,
       description: body.description || null,
       introText: body.introText || null,

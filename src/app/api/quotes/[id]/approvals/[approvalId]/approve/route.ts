@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { sendQuoteEmail } from "@/lib/send-quote-email"
 import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
-import { getUserRank } from "@/lib/permissions"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { loadViewableQuote } from "@/lib/scoped-loaders"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
@@ -12,20 +12,28 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; approvalId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.approve",
+    message: "You do not have permission to approve quotes",
+  })
+  if (response) return response
 
   const { id, approvalId } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
+
+  // The approver must be able to open the quote. A pending approval they
+  // can decide counts, so this only refuses approvals for other companies,
+  // missing quotes, or ones above their rank.
+  const viewable = await loadViewableQuote(ctx, id)
+  if (!viewable) return notFound()
+
 
   const approval = await prisma.quoteApproval.findUnique({
     where: { id: approvalId },
     include: { workflow: { include: { requiredRole: true } }, quote: true },
   })
   if (!approval || approval.quoteId !== id || approval.quote.companyId !== companyId) {
-    return NextResponse.json({ error: "Approval not found" }, { status: 404 })
+    return notFound()
   }
   if (approval.status !== "PENDING") {
     return NextResponse.json({ error: "This approval has already been decided" }, { status: 400 })
@@ -33,7 +41,7 @@ export async function POST(
 
   // Highest rank across every role the user holds, resolved fresh from the
   // database (Global Admin always outranks any requirement)
-  const userRank = await getUserRank(session.user.id)
+  const userRank = ctx.access.rank
   const requiredRank = approval.workflow.requiredRole?.rank ?? 999
   if (userRank < requiredRank) {
     return NextResponse.json(
@@ -44,7 +52,7 @@ export async function POST(
 
   await prisma.quoteApproval.update({
     where: { id: approvalId },
-    data: { status: "APPROVED", approvedByUserId: session.user.id, decidedAt: new Date() },
+    data: { status: "APPROVED", approvedByUserId: ctx.userId, decidedAt: new Date() },
   })
 
   // If every requirement on this quote is now approved, complete the send

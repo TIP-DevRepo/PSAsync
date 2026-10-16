@@ -1,31 +1,31 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { notFound, requireAccess } from "@/lib/api-access"
 
-// Confirms the line item exists and belongs to a template owned by this company
-async function getOwnedLineItem(lineItemId: string, companyId: string) {
-  const lineItem = await prisma.quoteTemplateLineItem.findUnique({
-    where: { id: lineItemId },
-    include: { template: { select: { companyId: true } } },
+// Templates are maintained from Quote Settings
+const TEMPLATE_WRITE_RULE = {
+  settingsSection: "quotes",
+  message: "You do not have permission to edit quote templates",
+} as const
+
+// The line item, only when it sits on the template in the URL and that
+// template belongs to this company
+function getOwnedLineItem(templateId: string, lineItemId: string, companyId: string) {
+  return prisma.quoteTemplateLineItem.findFirst({
+    where: { id: lineItemId, templateId, template: { id: templateId, companyId } },
   })
-  if (!lineItem || lineItem.template.companyId !== companyId) return null
-  return lineItem
 }
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess(TEMPLATE_WRITE_RULE)
+  if (response) return response
 
-  const { lineItemId } = await params
-  const existing = await getOwnedLineItem(lineItemId, session.user.companyId)
-  if (!existing) {
-    return NextResponse.json({ error: "Line item not found" }, { status: 404 })
-  }
+  const { id: templateId, lineItemId } = await params
+  const existing = await getOwnedLineItem(templateId, lineItemId, ctx.companyId)
+  if (!existing) return notFound()
 
   const body = await req.json()
 
@@ -80,7 +80,7 @@ export async function PATCH(
   }
 
   const lineItem = await prisma.quoteTemplateLineItem.update({
-    where: { id: lineItemId },
+    where: { id: lineItemId, templateId: existing.templateId },
     data,
   })
 
@@ -109,18 +109,14 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess(TEMPLATE_WRITE_RULE)
+  if (response) return response
 
-  const { lineItemId } = await params
-  const existing = await getOwnedLineItem(lineItemId, session.user.companyId)
-  if (!existing) {
-    return NextResponse.json({ error: "Line item not found" }, { status: 404 })
-  }
+  const { id: templateId, lineItemId } = await params
+  const existing = await getOwnedLineItem(templateId, lineItemId, ctx.companyId)
+  if (!existing) return notFound()
 
-  await prisma.quoteTemplateLineItem.delete({ where: { id: lineItemId } })
+  await prisma.quoteTemplateLineItem.delete({ where: { id: lineItemId, templateId: existing.templateId } })
 
   return NextResponse.json({ deleted: true })
 }

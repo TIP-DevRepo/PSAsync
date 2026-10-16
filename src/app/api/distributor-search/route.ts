@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 import { getAdapter } from "@/lib/distributors/registry"
 import {
   DistributorKey,
@@ -10,11 +10,14 @@ import {
 } from "@/lib/distributors/types"
 import { generateMockResults, generateMockOffer } from "@/lib/distributors/mock-data"
 
+// Shared by every line item picker: quotes, catalog, sales orders, and
+// purchase orders
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: ["pages.quotes", "pages.catalog", "pages.purchaseOrders", "pages.salesOrders"],
+    message: "You do not have permission to search distributors",
+  })
+  if (response) return response
 
   const query = req.nextUrl.searchParams.get("q")?.trim()
   if (!query) {
@@ -27,7 +30,7 @@ export async function GET(req: NextRequest) {
     : null
 
   const allEnabled = await prisma.distributorIntegration.findMany({
-    where: { companyId: session.user.companyId, enabled: true },
+    where: { companyId: ctx.companyId, enabled: true },
     orderBy: { priority: "asc" },
   })
 

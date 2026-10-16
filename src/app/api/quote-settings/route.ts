@@ -1,17 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { quoteSettingsSelect } from "@/lib/safe-selects"
 import { apiError, requireAccess } from "@/lib/api-access"
 
+// Any active user, since the quote pages read these defaults
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const settings = await prisma.companySettings.findUnique({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     include: { quoteSendFromConnection: { select: { id: true, label: true, email: true } } },
   })
 

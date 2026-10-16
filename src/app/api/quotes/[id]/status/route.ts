@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
 
 const VALID_STATUSES = [
@@ -18,27 +18,22 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "quotes.changeStatus"))) {
-    return NextResponse.json({ error: "You don't have permission to change a quote's status manually" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.changeStatus",
+    message: "You don't have permission to change a quote's status manually",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
 
   if (!VALID_STATUSES.includes(body.status)) {
     return NextResponse.json({ error: "Invalid status" }, { status: 400 })
   }
 
-  const quote = await prisma.quote.findUnique({ where: { id, companyId } })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  const quote = await prisma.quote.findFirst({ where: viewableQuoteWhere(ctx, id) })
+  if (!quote) return notFound()
 
   const data: Record<string, unknown> = { status: body.status }
   if (body.status === "SENT" && !quote.sentAt) data.sentAt = new Date()

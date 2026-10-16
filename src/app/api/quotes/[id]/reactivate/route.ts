@@ -1,23 +1,23 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { loadViewableQuote, quoteWhere } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.edit",
+    message: "You do not have permission to edit quotes",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
-  const quote = await prisma.quote.findUnique({ where: { id, companyId } })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  const quote = await loadViewableQuote(ctx, id)
+  if (!quote) return notFound()
 
   const updated = await prisma.$transaction(async (tx) => {
     await tx.quote.updateMany({
@@ -26,7 +26,7 @@ export async function POST(
     })
 
     return tx.quote.update({
-      where: { id },
+      where: quoteWhere(ctx, id),
       data: { isActive: true },
     })
   })

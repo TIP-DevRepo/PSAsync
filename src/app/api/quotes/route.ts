@@ -1,18 +1,16 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
-import { assertRefs } from "@/lib/scoped-loaders"
+import { assertRefs, quoteListWhere } from "@/lib/scoped-loaders"
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({ page: "quotes", message: "You do not have permission to view quotes" })
+  if (response) return response
 
-  // Pull every quote (not just active ones) so we can spot draft siblings
+  // Pull every quote the user may open (not just active ones) so we can
+  // spot draft siblings
   const allQuotes = await prisma.quote.findMany({
-    where: { companyId: session.user.companyId },
+    where: quoteListWhere(ctx),
     include: {
       client: { select: { name: true } },
       contact: { select: { firstName: true, lastName: true } },
@@ -83,7 +81,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.create",
+    message: "You do not have permission to create quotes",
+  })
   if (response) return response
 
   const body = await req.json()

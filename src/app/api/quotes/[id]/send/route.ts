@@ -1,26 +1,26 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.changeStatus",
+    message: "You do not have permission to change a quote's status",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
-  const quote = await prisma.quote.findUnique({
-    where: { id, companyId },
+  const quote = await prisma.quote.findFirst({
+    where: viewableQuoteWhere(ctx, id),
     include: { lineItems: true },
   })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  if (!quote) return notFound()
   if (quote.status !== "DRAFT") {
     return NextResponse.json(
       { error: "Only draft quotes can be sent. A quote pending approval must be approved first." },
