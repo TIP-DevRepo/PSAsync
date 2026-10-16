@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 
 // Copies a dashboard (typically the read-only company Default) into a
@@ -9,27 +9,25 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
   const source = await prisma.dashboard.findUnique({
-    where: { id, companyId: session.user.companyId },
+    where: { id, companyId: ctx.companyId },
     include: { widgets: true },
   })
   if (!source) {
     return NextResponse.json({ error: "Dashboard not found" }, { status: 404 })
   }
-  if (source.userId && source.userId !== session.user.id) {
+  if (source.userId && source.userId !== ctx.userId) {
     return NextResponse.json({ error: "Dashboard not found" }, { status: 404 })
   }
 
   const clone = await prisma.dashboard.create({
     data: {
-      companyId: session.user.companyId,
-      userId: session.user.id,
+      companyId: ctx.companyId,
+      userId: ctx.userId,
       name: `${source.name} (My Copy)`,
       isDefault: false,
       widgets: {

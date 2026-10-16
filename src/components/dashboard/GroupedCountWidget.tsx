@@ -7,6 +7,8 @@ import type { WidgetType } from "@/lib/dashboards/widgetTypes"
 
 interface GroupData {
   groups: { key: string; count: number }[]
+  // Set instead of groups when the user may not see this widget's data
+  noAccess?: boolean
 }
 
 export function GroupedCountWidget({
@@ -33,6 +35,14 @@ export function GroupedCountWidget({
 
   if (error) return <p className="text-sm text-muted-foreground">Couldn't load this widget.</p>
   if (!data) return <WidgetSkeleton />
+  if (data.noAccess) {
+    return (
+      <div className="flex flex-1 flex-col gap-2">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{label}</p>
+        <p className="text-sm text-muted-foreground">You do not have access to this data.</p>
+      </div>
+    )
+  }
 
   const total = data.groups.reduce((sum, g) => sum + g.count, 0)
 
