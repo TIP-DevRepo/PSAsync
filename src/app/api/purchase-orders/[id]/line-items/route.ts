@@ -1,21 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireAccess } from "@/lib/api-access"
-import { assertRefs, loadPurchaseOrder } from "@/lib/scoped-loaders"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { assertRefs, loadViewablePurchaseOrder } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "purchaseOrders.edit",
+    message: "You do not have permission to edit purchase orders",
+  })
   if (response) return response
 
   const { id } = await params
 
-  const po = await loadPurchaseOrder(ctx, id)
-  if (!po) {
-    return NextResponse.json({ error: "Purchase Order not found" }, { status: 404 })
-  }
+  const po = await loadViewablePurchaseOrder(ctx, id)
+  if (!po) return notFound()
 
   const body = await req.json()
 

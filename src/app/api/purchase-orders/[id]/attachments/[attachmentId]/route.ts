@@ -7,7 +7,10 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; attachmentId: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "purchaseOrders.edit",
+    message: "You do not have permission to edit purchase orders",
+  })
   if (response) return response
 
   const { id, attachmentId } = await params

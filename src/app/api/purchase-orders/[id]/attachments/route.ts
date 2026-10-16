@@ -2,17 +2,20 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { uploadFileToS3 } from "@/lib/s3"
 import { requireAccess, notFound } from "@/lib/api-access"
-import { loadPurchaseOrder } from "@/lib/scoped-loaders"
+import { loadViewablePurchaseOrder } from "@/lib/scoped-loaders"
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "pages.purchaseOrders",
+    message: "You do not have permission to view purchase orders",
+  })
   if (response) return response
 
   const { id } = await params
-  const order = await loadPurchaseOrder(ctx, id)
+  const order = await loadViewablePurchaseOrder(ctx, id)
   if (!order) return notFound()
 
   const attachments = await prisma.pOAttachment.findMany({
@@ -27,11 +30,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "purchaseOrders.edit",
+    message: "You do not have permission to edit purchase orders",
+  })
   if (response) return response
 
   const { id } = await params
-  const order = await loadPurchaseOrder(ctx, id)
+  const order = await loadViewablePurchaseOrder(ctx, id)
   if (!order) return notFound()
 
   const formData = await req.formData()
