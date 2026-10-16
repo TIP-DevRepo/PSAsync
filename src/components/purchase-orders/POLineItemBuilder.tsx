@@ -32,7 +32,8 @@ export interface POCatalogOption {
   name: string
   vendorSku: string | null
   manufacturerSku: string | null
-  cost: number
+  // Left out by the catalog API for users who can't see cost
+  cost?: number
 }
 
 function lineTotal(li: POLineItemBuilderItem) {
@@ -261,7 +262,7 @@ export function POLineItemBuilder({
       {showAddModal && (
         <AddLineItemModal
           catalog={catalog}
-          catalogSubtitle={(item) => `${item.manufacturerSku ?? item.vendorSku ?? "No SKU"} · $${item.cost.toFixed(2)}`}
+          catalogSubtitle={(item) => `${item.manufacturerSku ?? item.vendorSku ?? "No SKU"} · ${typeof item.cost === "number" ? `$${item.cost.toFixed(2)}` : "-"}`}
           onClose={() => setShowAddModal(false)}
           onAddCatalog={(item, quantity) =>
             onCreate({ catalogItemId: item.id, name: item.name, partNumber: item.manufacturerSku ?? item.vendorSku ?? undefined, vendorSku: item.vendorSku ?? undefined, unitCost: item.cost, quantity })

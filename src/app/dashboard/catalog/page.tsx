@@ -15,7 +15,8 @@ interface CatalogItem {
   categoryRef: { name: string; parent: { name: string } | null }
   type: string
   msrp: number
-  cost: number
+  // Left out by the catalog API for users who can't see cost
+  cost?: number
   taxable: boolean
   active: boolean
   vendor: { name: string } | null
@@ -47,7 +48,7 @@ function compareItems(a: CatalogItem, b: CatalogItem, column: SortColumn): numbe
     case "category":
       return categoryLabel(a).localeCompare(categoryLabel(b))
     case "cost":
-      return a.cost - b.cost
+      return (a.cost ?? 0) - (b.cost ?? 0)
     case "msrp":
       return a.msrp - b.msrp
     case "status":
@@ -248,7 +249,9 @@ export default function CatalogListPage() {
                 </td>
                 <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{categoryLabel(item)}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{item.type}</td>
-                <td className={`${ROW_PADDING[density]} px-3 text-right tabular-nums text-foreground`}>${item.cost.toFixed(2)}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-right tabular-nums text-foreground`}>
+                  {typeof item.cost === "number" ? `$${item.cost.toFixed(2)}` : "-"}
+                </td>
                 <td className={`${ROW_PADDING[density]} px-3 text-right tabular-nums font-medium text-foreground`}>${item.msrp.toFixed(2)}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-center text-muted-foreground`}>{item.taxable ? "Yes" : "No"}</td>
                 <td className={`${ROW_PADDING[density]} px-3`}>
