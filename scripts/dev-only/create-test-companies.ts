@@ -1,30 +1,39 @@
 // DEV ONLY. Creates (or tops up) two throwaway companies, "Test Company B"
 // and "Test Company C", each with a Global Admin user and enough sample
 // data to reach every company scoped API route, for check-cross-company.ts.
+// Each company also gets the permission test users for check-permissions.ts:
+// "Test Everyone" (only the Everyone role, which is reset to no
+// permissions) and "Test Rep" (only a "Rep" role with pages.quotes,
+// quotes.create, and quotes.edit) with a quote of their own, plus a sample
+// mailbox row for the admin with placeholder tokens.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts). Run from
 // the repo root:
 //   npx tsx scripts/dev-only/create-test-companies.ts --yes
 //
 // Safe to re-run: existing records are found by their fixed sample names and
-// reused, missing ones are created. Each run gives both admins a new random
-// password, printed once below and never written anywhere else.
+// reused, missing ones are created. Each run gives every test user a new
+// random password, printed once below and never written anywhere else.
 
 import bcrypt from "bcryptjs"
 import { enforceDevGuard } from "./lib/guard"
 import {
   BCRYPT_COST,
   DUMMY_FILE_URL,
+  PLACEHOLDER_TOKEN,
+  REP_PERMISSIONS,
   TEST_LETTERS,
   generatePassword,
+  loadPermissionFixtureIds,
   loadSampleIds,
   testNames,
+  type PermissionFixtureIds,
   type SampleIds,
   type TestLetter,
 } from "./lib/test-data"
 // These three only import Prisma types, so loading them can't reach the database
 import { globalAdminRoleData } from "@/lib/global-admin-role"
-import { ensureEveryoneRole } from "@/lib/everyone-role"
+import { ensureEveryoneRole, everyoneRoleData } from "@/lib/everyone-role"
 import { setUserRoles } from "@/lib/user-roles"
 
 // Must stay first: nothing below may run before the guard has passed
@@ -39,7 +48,39 @@ async function main() {
   const { generateAssetTag } = await import("@/lib/inventory/generateAssetTag")
   const { logAssetEvent } = await import("@/lib/inventory/logAssetEvent")
 
-  async function setUpCompany(letter: TestLetter): Promise<{ password: string; adminEmail: string; ids: SampleIds }> {
+  // Creates the user or resets an existing one to a known state: active, a
+  // new password, no forced password change, no lockouts
+  async function upsertTestUser(companyId: string, name: string, email: string) {
+    const password = generatePassword(20)
+    const hashed = await bcrypt.hash(password, BCRYPT_COST)
+    const existing = await prisma.user.findUnique({ where: { email } })
+    if (existing && existing.companyId !== companyId) {
+      throw new Error(`${email} already belongs to a different company, refusing to change it`)
+    }
+    const reset = {
+      name,
+      password: hashed,
+      active: true,
+      mustChangePassword: false,
+      loginFailedAttempts: 0,
+      loginLockedUntil: null,
+      passwordChangeFailedAttempts: 0,
+      passwordChangeLockedUntil: null,
+    }
+    const user = existing
+      ? await prisma.user.update({ where: { id: existing.id }, data: reset })
+      : await prisma.user.create({ data: { companyId, email, ...reset } })
+    return { user, password }
+  }
+
+  async function setUpCompany(letter: TestLetter): Promise<{
+    password: string
+    adminEmail: string
+    ids: SampleIds
+    everyonePassword: string
+    repPassword: string
+    fixtures: PermissionFixtureIds
+  }> {
     const n = testNames(letter)
     const year = new Date().getFullYear()
 
@@ -332,28 +373,108 @@ async function main() {
       })
     }
 
-    return { password, adminEmail: n.adminEmail, ids: await loadSampleIds(prisma, letter) }
+    // ── Permission test users ──
+    // Everyone has no permissions in a test company, so Test Everyone can do
+    // nothing beyond what any signed in user can
+    const everyoneRole = await ensureEveryoneRole(prisma, companyId)
+    await prisma.role.update({
+      where: { id: everyoneRole.id },
+      data: { permissions: everyoneRoleData(companyId, everyoneRole.rank).permissions },
+    })
+    const everyone = await upsertTestUser(companyId, n.everyoneName, n.everyoneEmail)
+    await setUserRoles(prisma, everyone.user.id, [])
+
+    // The Rep role is reset to exactly its permissions on every run
+    const existingRepRole = await prisma.role.findFirst({ where: { companyId, name: n.repRole } })
+    const repRole = existingRepRole
+      ? await prisma.role.update({ where: { id: existingRepRole.id }, data: { permissions: REP_PERMISSIONS } })
+      : await prisma.role.create({ data: { companyId, name: n.repRole, rank: 5, permissions: REP_PERMISSIONS } })
+    const rep = await upsertTestUser(companyId, n.repName, n.repEmail)
+    await setUserRoles(prisma, rep.user.id, [repRole.id])
+
+    // A quote the Rep owns, next to the admin's sample quote they don't
+    let repQuote = await prisma.quote.findFirst({ where: { companyId, title: n.repQuote } })
+    if (!repQuote) {
+      const count = await prisma.quote.count({ where: { companyId, version: 1 } })
+      const expiryDays = settings?.quoteExpiryDays || 30
+      repQuote = await prisma.quote.create({
+        data: {
+          companyId,
+          clientId: client.id,
+          contactId: contact.id,
+          userId: rep.user.id,
+          quoteNumber: `${settings?.quotePrefix ?? "Q"}-${year}-${pad4(count + 1)}`,
+          title: n.repQuote,
+          terms: settings?.quoteTerms ?? null,
+          expiresAt: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000),
+        },
+      })
+    } else if (repQuote.userId !== rep.user.id || repQuote.status !== "DRAFT") {
+      repQuote = await prisma.quote.update({ where: { id: repQuote.id }, data: { userId: rep.user.id, status: "DRAFT" } })
+    }
+    if (!(await prisma.quoteLineItem.findFirst({ where: { quoteId: repQuote.id, name: n.repQuoteLine } }))) {
+      await prisma.quoteLineItem.create({
+        data: { quoteId: repQuote.id, catalogItemId: catalogItem.id, name: n.repQuoteLine, quantity: 1, unitPrice: 100, cost: 60 },
+      })
+    }
+    // The admin's sample quote stays the admin's, so the Rep has one they
+    // don't own
+    if (quote.userId !== admin.id || quote.status !== "DRAFT") {
+      await prisma.quote.update({ where: { id: quote.id }, data: { userId: admin.id, status: "DRAFT" } })
+    }
+
+    // The admin's mailbox row. Placeholder tokens only, and the test
+    // companies have no Microsoft credentials, so it can never send.
+    await prisma.microsoftConnection.upsert({
+      where: { companyId_email: { companyId, email: n.adminMailboxEmail } },
+      update: { label: n.adminMailboxLabel, connectedByUserId: admin.id, accessToken: PLACEHOLDER_TOKEN, refreshToken: PLACEHOLDER_TOKEN },
+      create: {
+        companyId,
+        email: n.adminMailboxEmail,
+        label: n.adminMailboxLabel,
+        connectedByUserId: admin.id,
+        accessToken: PLACEHOLDER_TOKEN,
+        refreshToken: PLACEHOLDER_TOKEN,
+      },
+    })
+
+    return {
+      password,
+      adminEmail: n.adminEmail,
+      ids: await loadSampleIds(prisma, letter),
+      everyonePassword: everyone.password,
+      repPassword: rep.password,
+      fixtures: await loadPermissionFixtureIds(prisma, letter),
+    }
   }
 
-  const results: { letter: TestLetter; password: string; adminEmail: string; ids: SampleIds }[] = []
+  const results: ({ letter: TestLetter } & Awaited<ReturnType<typeof setUpCompany>>)[] = []
   for (const letter of TEST_LETTERS) {
     results.push({ letter, ...(await setUpCompany(letter)) })
   }
 
   console.log("")
-  for (const { letter, password, adminEmail, ids } of results) {
-    console.log(`${testNames(letter).company}`)
+  for (const { letter, password, adminEmail, ids, everyonePassword, repPassword, fixtures } of results) {
+    const n = testNames(letter)
+    console.log(`${n.company}`)
     console.log(`  company id: ${ids.companyId}`)
     console.log(`  admin email: ${adminEmail}`)
     console.log(`  admin password (shown only now, not saved anywhere): ${password}`)
+    console.log(`  everyone email: ${n.everyoneEmail}`)
+    console.log(`  everyone password (shown only now, not saved anywhere): ${everyonePassword}`)
+    console.log(`  rep email: ${n.repEmail}`)
+    console.log(`  rep password (shown only now, not saved anywhere): ${repPassword}`)
     console.log("  sample record ids:")
-    for (const [key, value] of Object.entries(ids)) {
+    for (const [key, value] of Object.entries({ ...ids, ...fixtures })) {
       if (key !== "companyId") console.log(`    ${key}: ${value}`)
     }
     console.log("")
   }
   console.log("To run the cross company check, set these in your shell (not in a file), then start the dev server:")
   for (const { letter } of results) console.log(`  TEST_ADMIN_${letter}_PASSWORD=<the Test Admin ${letter} password above>`)
+  console.log("The permission check also needs:")
+  console.log("  TEST_EVERYONE_B_PASSWORD=<the Test Everyone B password above>")
+  console.log("  TEST_REP_B_PASSWORD=<the Test Rep B password above>")
 
   await prisma.$disconnect()
 }
