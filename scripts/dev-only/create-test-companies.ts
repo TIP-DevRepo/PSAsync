@@ -3,9 +3,12 @@
 // data to reach every company scoped API route, for check-cross-company.ts.
 // Each company also gets the permission test users for check-permissions.ts:
 // "Test Everyone" (only the Everyone role, which is reset to no
-// permissions) and "Test Rep" (only a "Rep" role with pages.quotes,
-// quotes.create, and quotes.edit) with a quote of their own, plus a sample
-// mailbox row for the admin with placeholder tokens.
+// permissions), "Test Rep" (only a "Rep" role with pages.quotes,
+// quotes.create, and quotes.edit) with a quote of their own, and "Test
+// Clerk" (only a "Clerk" role with the Clients, Vendors, Catalog, and
+// Inventory pages plus clients.create and clients.edit) with a sales order
+// and purchase order of their own, plus a sample mailbox row for the admin
+// with placeholder tokens.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts). Run from
 // the repo root:
@@ -19,6 +22,7 @@ import bcrypt from "bcryptjs"
 import { enforceDevGuard } from "./lib/guard"
 import {
   BCRYPT_COST,
+  CLERK_PERMISSIONS,
   DUMMY_FILE_URL,
   PLACEHOLDER_TOKEN,
   REP_PERMISSIONS,
@@ -79,6 +83,7 @@ async function main() {
     ids: SampleIds
     everyonePassword: string
     repPassword: string
+    clerkPassword: string
     fixtures: PermissionFixtureIds
   }> {
     const n = testNames(letter)
@@ -143,7 +148,7 @@ async function main() {
     const clientLocation =
       (await prisma.clientLocation.findFirst({ where: { clientId: client.id, name: n.clientLocation } })) ??
       (await prisma.clientLocation.create({
-        data: { clientId: client.id, name: n.clientLocation, address: "1 Sample Street", city: "Sampleton", isPrimary: true },
+        data: { clientId: client.id, name: n.clientLocation, address: n.clientLocationAddress, city: n.clientLocationCity, isPrimary: true },
       }))
     const contact =
       (await prisma.contact.findFirst({
@@ -154,7 +159,7 @@ async function main() {
           clientId: client.id,
           firstName: n.contactFirstName,
           lastName: n.contactLastName,
-          email: `sample-contact-${letter.toLowerCase()}@example.test`,
+          email: n.contactEmail,
           locationId: clientLocation.id,
           isPrimary: true,
         },
@@ -299,7 +304,7 @@ async function main() {
 
     // Purchase orders: two, so a line item from one can be sent with the
     // other's id in the URL
-    async function ensurePurchaseOrder(marker: string) {
+    async function ensurePurchaseOrder(marker: string, userId = admin.id) {
       const existing = await prisma.purchaseOrder.findFirst({ where: { companyId, internalNotes: marker } })
       if (existing) return existing
       const count = await prisma.purchaseOrder.count({ where: { companyId } })
@@ -307,7 +312,7 @@ async function main() {
         data: {
           companyId,
           vendorId: vendor.id,
-          userId: admin.id,
+          userId,
           poNumber: `${settings?.poPrefix ?? "PO"}-${year}-${pad4(count + 1)}`,
           paymentType: settings?.poDefaultPaymentType ?? "Net30",
           internalNotes: marker,
@@ -358,6 +363,22 @@ async function main() {
         data: { assetId: asset.id, fileName: n.assetAttachment, fileUrl: DUMMY_FILE_URL, fileSize: 1, uploadedByUserId: admin.id },
       })
     }
+
+    // A container under the sample client location, holding pooled stock of
+    // an item that isn't serialized
+    const container =
+      (await prisma.inventoryLocation.findFirst({ where: { companyId, name: n.container } })) ??
+      (await prisma.inventoryLocation.create({ data: { companyId, clientLocationId: clientLocation.id, name: n.container } }))
+    const stockItem =
+      (await prisma.catalogItem.findFirst({ where: { companyId, name: n.stockItem } })) ??
+      (await prisma.catalogItem.create({
+        data: { companyId, name: n.stockItem, categoryId: category.id, isSerialized: false, msrp: 10, cost: 4 },
+      }))
+    await prisma.inventoryStock.upsert({
+      where: { catalogItemId_locationId: { catalogItemId: stockItem.id, locationId: container.id } },
+      create: { companyId, catalogItemId: stockItem.id, locationId: container.id, quantity: 5 },
+      update: {},
+    })
 
     // Approval workflow, inactive so it never holds up a real quote
     if (!(await prisma.approvalWorkflow.findFirst({ where: { companyId, name: n.workflow } }))) {
@@ -423,6 +444,45 @@ async function main() {
       await prisma.quote.update({ where: { id: quote.id }, data: { userId: admin.id, status: "DRAFT" } })
     }
 
+    // The Clerk role is reset to exactly its permissions on every run
+    const existingClerkRole = await prisma.role.findFirst({ where: { companyId, name: n.clerkRole } })
+    const clerkRole = existingClerkRole
+      ? await prisma.role.update({ where: { id: existingClerkRole.id }, data: { permissions: CLERK_PERMISSIONS } })
+      : await prisma.role.create({ data: { companyId, name: n.clerkRole, rank: 4, permissions: CLERK_PERMISSIONS } })
+    const clerk = await upsertTestUser(companyId, n.clerkName, n.clerkEmail)
+    await setUserRoles(prisma, clerk.user.id, [clerkRole.id])
+
+    // A sales order (with a line for the sample item) and a purchase order
+    // the Clerk owns, next to the admin's, for the catalog order history and
+    // vendor purchase order filters
+    let clerkSalesOrder = await prisma.salesOrder.findFirst({ where: { companyId, internalNotes: n.clerkSalesOrder } })
+    if (!clerkSalesOrder) {
+      const count = await prisma.salesOrder.count({ where: { companyId } })
+      clerkSalesOrder = await prisma.salesOrder.create({
+        data: {
+          companyId,
+          clientId: client.id,
+          userId: clerk.user.id,
+          soNumber: `${settings?.soPrefix ?? "SO"}-${year}-${pad4(count + 1)}`,
+          internalNotes: n.clerkSalesOrder,
+        },
+      })
+    } else if (clerkSalesOrder.userId !== clerk.user.id) {
+      clerkSalesOrder = await prisma.salesOrder.update({ where: { id: clerkSalesOrder.id }, data: { userId: clerk.user.id } })
+    }
+    if (!(await prisma.sOLineItem.findFirst({ where: { salesOrderId: clerkSalesOrder.id, name: n.clerkSoLine } }))) {
+      await prisma.sOLineItem.create({
+        data: { salesOrderId: clerkSalesOrder.id, catalogItemId: catalogItem.id, name: n.clerkSoLine, quantity: 1, unitPrice: 100, cost: 60 },
+      })
+    }
+    const clerkPurchaseOrder = await ensurePurchaseOrder(n.clerkPurchaseOrder, clerk.user.id)
+    if (clerkPurchaseOrder.userId !== clerk.user.id) {
+      await prisma.purchaseOrder.update({ where: { id: clerkPurchaseOrder.id }, data: { userId: clerk.user.id } })
+    }
+    // The admin's sample orders stay the admin's, so the Clerk has ones they don't own
+    await prisma.salesOrder.updateMany({ where: { companyId, internalNotes: n.salesOrder }, data: { userId: admin.id } })
+    await prisma.purchaseOrder.updateMany({ where: { companyId, internalNotes: n.purchaseOrder }, data: { userId: admin.id } })
+
     // The admin's mailbox row. Placeholder tokens only, and the test
     // companies have no Microsoft credentials, so it can never send.
     await prisma.microsoftConnection.upsert({
@@ -444,6 +504,7 @@ async function main() {
       ids: await loadSampleIds(prisma, letter),
       everyonePassword: everyone.password,
       repPassword: rep.password,
+      clerkPassword: clerk.password,
       fixtures: await loadPermissionFixtureIds(prisma, letter),
     }
   }
@@ -454,7 +515,7 @@ async function main() {
   }
 
   console.log("")
-  for (const { letter, password, adminEmail, ids, everyonePassword, repPassword, fixtures } of results) {
+  for (const { letter, password, adminEmail, ids, everyonePassword, repPassword, clerkPassword, fixtures } of results) {
     const n = testNames(letter)
     console.log(`${n.company}`)
     console.log(`  company id: ${ids.companyId}`)
@@ -464,6 +525,8 @@ async function main() {
     console.log(`  everyone password (shown only now, not saved anywhere): ${everyonePassword}`)
     console.log(`  rep email: ${n.repEmail}`)
     console.log(`  rep password (shown only now, not saved anywhere): ${repPassword}`)
+    console.log(`  clerk email: ${n.clerkEmail}`)
+    console.log(`  clerk password (shown only now, not saved anywhere): ${clerkPassword}`)
     console.log("  sample record ids:")
     for (const [key, value] of Object.entries({ ...ids, ...fixtures })) {
       if (key !== "companyId") console.log(`    ${key}: ${value}`)
@@ -475,6 +538,7 @@ async function main() {
   console.log("The permission check also needs:")
   console.log("  TEST_EVERYONE_B_PASSWORD=<the Test Everyone B password above>")
   console.log("  TEST_REP_B_PASSWORD=<the Test Rep B password above>")
+  console.log("  TEST_CLERK_B_PASSWORD=<the Test Clerk B password above>")
 
   await prisma.$disconnect()
 }

@@ -25,8 +25,11 @@ export function testNames(letter: TestLetter) {
     client: `Sample Client ${letter}`,
     clientPrefix: `TC${letter}`,
     clientLocation: `Sample Location ${letter}`,
+    clientLocationAddress: "1 Sample Street",
+    clientLocationCity: "Sampleton",
     contactFirstName: "Sample",
     contactLastName: `Contact ${letter}`,
+    contactEmail: `sample-contact-${lower}@example.test`,
     vendor: `Sample Vendor ${letter}`,
     vendorLocation: `Sample Vendor Location ${letter}`,
     vendorContactFirstName: "Sample",
@@ -64,6 +67,18 @@ export function testNames(letter: TestLetter) {
     repRole: "Rep",
     repQuote: `Sample Rep Quote ${letter}`,
     repQuoteLine: `Sample Rep Quote Line ${letter}`,
+    // Clerk holds the Clerk role below, plus a sales order and purchase
+    // order of its own so the "only your own" filters can be seen
+    clerkName: `Test Clerk ${letter}`,
+    clerkEmail: `test-clerk-${lower}@example.test`,
+    clerkRole: "Clerk",
+    clerkSalesOrder: `Sample Clerk Sales Order ${letter}`,
+    clerkSoLine: `Sample Clerk SO Line ${letter}`,
+    clerkPurchaseOrder: `Sample Clerk Purchase Order ${letter}`,
+    // Pooled stock needs a catalog item that isn't serialized, held in a
+    // container under the sample client location
+    stockItem: `Sample Stock Item ${letter}`,
+    container: `Sample Container ${letter}`,
     // A mailbox row with placeholder tokens, never usable to send anything
     adminMailboxEmail: `test-admin-${lower}-mailbox@example.test`,
     adminMailboxLabel: `Sample Mailbox ${letter}`,
@@ -82,6 +97,13 @@ export const PLACEHOLDER_TOKEN = "dev-only-not-a-real-token"
 
 // Rep: the quotes page and creating and editing quotes, nothing else
 export const REP_PERMISSIONS = { pages: { quotes: true }, quotes: { create: true, edit: true } }
+
+// Clerk: the Clients, Vendors, Catalog, and Inventory pages, and creating and
+// editing clients, nothing else (no settings, no deletes)
+export const CLERK_PERMISSIONS = {
+  pages: { clients: true, vendors: true, catalog: true, inventory: true },
+  clients: { create: true, edit: true },
+}
 
 // Letters and digits only, so it pastes into any shell without quoting
 const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
@@ -135,6 +157,13 @@ export interface PermissionFixtureIds {
   repQuoteId: string
   repQuoteLineId: string
   adminMailboxId: string
+  clerkUserId: string
+  clerkRoleId: string
+  clerkSalesOrderId: string
+  clerkPurchaseOrderId: string
+  stockItemId: string
+  containerId: string
+  stockId: string
 }
 
 // The permission test records for one test company (check-permissions).
@@ -149,13 +178,35 @@ export async function loadPermissionFixtureIds(prisma: PrismaClient, letter: Tes
   const companyId = company.id
   const id = (row: { id: string } | null) => row?.id ?? ""
 
-  const [everyoneUser, repUser, repRole, repQuote, adminMailbox] = await Promise.all([
+  const [
+    everyoneUser,
+    repUser,
+    repRole,
+    repQuote,
+    adminMailbox,
+    clerkUser,
+    clerkRole,
+    clerkSalesOrder,
+    clerkPurchaseOrder,
+    stockItem,
+    container,
+  ] = await Promise.all([
     prisma.user.findFirst({ where: { email: n.everyoneEmail, companyId }, select: { id: true } }),
     prisma.user.findFirst({ where: { email: n.repEmail, companyId }, select: { id: true } }),
     prisma.role.findFirst({ where: { companyId, name: n.repRole }, select: { id: true } }),
     prisma.quote.findFirst({ where: { companyId, title: n.repQuote }, select: { id: true } }),
     prisma.microsoftConnection.findFirst({ where: { companyId, email: n.adminMailboxEmail }, select: { id: true } }),
+    prisma.user.findFirst({ where: { email: n.clerkEmail, companyId }, select: { id: true } }),
+    prisma.role.findFirst({ where: { companyId, name: n.clerkRole }, select: { id: true } }),
+    prisma.salesOrder.findFirst({ where: { companyId, internalNotes: n.clerkSalesOrder }, select: { id: true } }),
+    prisma.purchaseOrder.findFirst({ where: { companyId, internalNotes: n.clerkPurchaseOrder }, select: { id: true } }),
+    prisma.catalogItem.findFirst({ where: { companyId, name: n.stockItem }, select: { id: true } }),
+    prisma.inventoryLocation.findFirst({ where: { companyId, name: n.container }, select: { id: true } }),
   ])
+  const stock = await prisma.inventoryStock.findFirst({
+    where: { companyId, catalogItemId: id(stockItem), locationId: id(container) },
+    select: { id: true },
+  })
   const repQuoteLine = await prisma.quoteLineItem.findFirst({
     where: { name: n.repQuoteLine, quoteId: id(repQuote), quote: { companyId } },
     select: { id: true },
@@ -168,6 +219,13 @@ export async function loadPermissionFixtureIds(prisma: PrismaClient, letter: Tes
     repQuoteId: id(repQuote),
     repQuoteLineId: id(repQuoteLine),
     adminMailboxId: id(adminMailbox),
+    clerkUserId: id(clerkUser),
+    clerkRoleId: id(clerkRole),
+    clerkSalesOrderId: id(clerkSalesOrder),
+    clerkPurchaseOrderId: id(clerkPurchaseOrder),
+    stockItemId: id(stockItem),
+    containerId: id(container),
+    stockId: id(stock),
   }
   const missing = Object.entries(ids)
     .filter(([, value]) => !value)
