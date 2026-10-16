@@ -47,6 +47,19 @@ interface QuoteDetail {
   contact: { id: string; firstName: string; lastName: string; email: string | null } | null
   user: { id: string; name: string }
   lineItems: LineItemBuilderItem[]
+  pendingEmailPayload: HeldEmailView | null
+}
+
+// The email composed in the Send Quote dialog and held on the quote. When
+// lastSendError is set, it was approved but couldn't be sent.
+interface HeldEmailView {
+  to: string
+  cc: string | null
+  subject: string
+  message?: string
+  includePdf: boolean
+  connectionId?: string
+  lastSendError?: string
 }
 
 interface VersionSummary {
@@ -266,9 +279,20 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
 
   async function handleApprove(approvalId: string) {
     setDecidingId(approvalId)
-    await fetch(`/api/quotes/${id}/approvals/${approvalId}/approve`, { method: "POST" })
+    const res = await fetch(`/api/quotes/${id}/approvals/${approvalId}/approve`, { method: "POST" })
+    const data = await res.json().catch(() => ({}))
     setDecidingId(null)
-    toast.success("Approval granted")
+    if (!res.ok) {
+      toast.error("Couldn't approve", data.error)
+    } else if (data.warning) {
+      // The approval stands even though the held email didn't go out
+      toast.warning(
+        "Approved, but the email could not be sent",
+        `${data.warning}. The quote owner can send it from the quote.`
+      )
+    } else {
+      toast.success("Approval granted")
+    }
     loadQuote()
     loadVersions()
     loadApprovals()
@@ -613,6 +637,20 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
           </div>
         </div>
       </div>
+
+      {quote.status === "DRAFT" && quote.pendingEmailPayload?.lastSendError && (
+        <div className="rounded-lg border border-warning/30 bg-warning-bg p-4 flex items-center justify-between gap-4">
+          <p className="text-sm text-warning">
+            This quote was approved, but its email could not be sent: {quote.pendingEmailPayload.lastSendError}. The email is
+            still waiting to be sent.
+          </p>
+          {canSendEmail && (
+            <Button size="sm" onClick={() => setShowSendModal(true)}>
+              Send Quote
+            </Button>
+          )}
+        </div>
+      )}
 
       {isLocked && quote.status !== "PENDING_APPROVAL" && (
         <div className="rounded-lg border border-warning/30 bg-warning-bg p-4 flex items-center justify-between">
@@ -989,6 +1027,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
         <SendQuoteModal
           quoteId={id}
           defaultTo={quote.contact?.email || quote.client.email || ""}
+          held={quote.pendingEmailPayload?.lastSendError ? quote.pendingEmailPayload : null}
           quoteNumber={quote.quoteNumber}
           version={quote.version}
           accessToken={quote.accessToken}
@@ -1028,6 +1067,7 @@ function senderLabel(o: SenderOption) {
 function SendQuoteModal({
   quoteId,
   defaultTo,
+  held: heldProp,
   quoteNumber,
   version,
   accessToken,
@@ -1036,6 +1076,8 @@ function SendQuoteModal({
 }: {
   quoteId: string
   defaultTo: string
+  // An approved email that couldn't be sent, to start the dialog from
+  held: HeldEmailView | null
   quoteNumber: string
   version: number
   accessToken: string
@@ -1046,13 +1088,17 @@ function SendQuoteModal({
     typeof window !== "undefined" ? `${window.location.origin}/portal/${accessToken}` : ""
   const displayNumber = version > 1 ? `${quoteNumber} v${version}` : quoteNumber
 
-  const [to, setTo] = useState(defaultTo)
-  const [cc, setCc] = useState("")
-  const [subject, setSubject] = useState(`Quote ${displayNumber}`)
+  // Fixed for as long as the dialog is open, so a quote reload behind it
+  // never resets what the user is editing
+  const [held] = useState(heldProp)
+  const [to, setTo] = useState(held?.to ?? defaultTo)
+  const [cc, setCc] = useState(held?.cc ?? "")
+  const [subject, setSubject] = useState(held?.subject ?? `Quote ${displayNumber}`)
   const [message, setMessage] = useState(
-    `Hi,\n\nPlease find your quote ${displayNumber} attached. You can also view it and respond online here:\n${portalLink}\n\nLet us know if you have any questions.`
+    held?.message ??
+      `Hi,\n\nPlease find your quote ${displayNumber} attached. You can also view it and respond online here:\n${portalLink}\n\nLet us know if you have any questions.`
   )
-  const [includePdf, setIncludePdf] = useState(true)
+  const [includePdf, setIncludePdf] = useState(held?.includePdf ?? true)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
   const [pendingApprovalMessage, setPendingApprovalMessage] = useState("")
@@ -1064,9 +1110,9 @@ function SendQuoteModal({
     fetch("/api/quote-settings")
       .then((res) => res.json())
       .then((json) => {
-        if (json.quoteDefaultCc) setCc(json.quoteDefaultCc)
+        if (json.quoteDefaultCc && !held) setCc(json.quoteDefaultCc)
       })
-  }, [])
+  }, [held])
 
   // Who the email goes out from. If this fails the dialog still works and
   // the server picks the default sender on Send.
@@ -1076,13 +1122,16 @@ function SendQuoteModal({
         const data = await res.json().catch(() => ({}))
         if (!res.ok) throw new Error(data.error || "Please try again.")
         setSenderOptions(data)
-        setSenderId(data.defaultConnectionId ?? null)
+        // A held email starts from the mailbox it was going to go out from,
+        // when this user may pick it
+        const heldSender = (data as SendOptions).options.find((o) => o.connectionId === held?.connectionId)
+        setSenderId(data.canChooseSender && heldSender ? heldSender.connectionId : data.defaultConnectionId ?? null)
       })
       .catch((err: Error) => {
         setSenderLoadFailed(true)
         toast.error("Couldn't load sending mailboxes", err.message)
       })
-  }, [quoteId])
+  }, [quoteId, held])
 
   const defaultSender = senderOptions?.options.find((o) => o.connectionId === senderOptions.defaultConnectionId)
 

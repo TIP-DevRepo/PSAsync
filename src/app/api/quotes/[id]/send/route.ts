@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
+import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
@@ -63,7 +64,9 @@ export async function POST(
           create: { quoteId: id, workflowId: w.id, status: "PENDING" },
         })
       ),
-      prisma.quote.update({ where: { id }, data: { status: "PENDING_APPROVAL" } }),
+      // No email goes with this send, so an email held earlier must not go
+      // out once it's approved
+      prisma.quote.update({ where: { id }, data: { status: "PENDING_APPROVAL", pendingEmailPayload: Prisma.JsonNull } }),
     ])
 
     const updated = await prisma.quote.findUnique({ where: { id } })
@@ -81,7 +84,7 @@ export async function POST(
 
     return tx.quote.update({
       where: { id },
-      data: { status: "SENT", sentAt: new Date(), isActive: true },
+      data: { status: "SENT", sentAt: new Date(), isActive: true, pendingEmailPayload: Prisma.JsonNull },
     })
   })
 

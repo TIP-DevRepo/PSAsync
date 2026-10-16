@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { sendQuoteEmail } from "@/lib/send-quote-email"
+import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
+import { approvalFingerprint, type HeldEmail } from "@/lib/quote-approval"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { escapeHtmlWithBreaks } from "@/lib/html"
@@ -78,6 +80,8 @@ export async function POST(
     cc: cc.list.length > 0 ? cc.list.join(", ") : null,
     subject,
     bodyHtml: escapeHtmlWithBreaks(message),
+    // Kept as typed, so the dialog can show it again if the email is held
+    message,
     includePdf: body.includePdf !== false,
     connectionId: sender.mailbox.id,
     // Who clicked Send, so the audit note names them even when an
@@ -104,7 +108,19 @@ export async function POST(
     return false
   })
 
-  if (matched.length > 0) {
+  // Approvals already granted for this quote count, but only for an email
+  // that was approved and then couldn't be sent, and only while nothing the
+  // workflows look at has changed since. Anything else asks again.
+  const held = quote.pendingEmailPayload as HeldEmail | null
+  const alreadyApproved =
+    matched.length > 0 &&
+    !!held?.approvedFingerprint &&
+    held.approvedFingerprint === approvalFingerprint(quote.userId, quote.lineItems) &&
+    (await prisma.quoteApproval.count({
+      where: { quoteId: id, workflowId: { in: matched.map((w) => w.id) }, status: "APPROVED" },
+    })) === matched.length
+
+  if (matched.length > 0 && !alreadyApproved) {
     // Needs sign-off: hold the composed email and its sender until approved
     await prisma.$transaction([
       ...matched.map((w) =>
@@ -138,7 +154,13 @@ export async function POST(
     })
     return tx.quote.update({
       where: quoteWhere(ctx, id),
-      data: { status: "SENT", sentAt: new Date(), isActive: true, internalNotes: withNote(quote.internalNotes, note) },
+      data: {
+        status: "SENT",
+        sentAt: new Date(),
+        isActive: true,
+        pendingEmailPayload: Prisma.JsonNull,
+        internalNotes: withNote(quote.internalNotes, note),
+      },
     })
   })
 
