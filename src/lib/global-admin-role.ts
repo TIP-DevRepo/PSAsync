@@ -33,8 +33,9 @@ export function buildGlobalAdminPermissions(): Prisma.InputJsonValue {
       approve: true,
       sendEmail: true,
       viewAllUsersQuotes: true,
+      sendAsOthers: true,
     },
-    clients: { create: true, edit: true, delete: true, viewAllClients: true },
+    clients: { create: true, edit: true, delete: true },
     salesOrders: { create: true, edit: true, delete: true, changeStatus: true, generatePO: true, viewAll: true },
     purchaseOrders: { create: true, edit: true, delete: true, changeStatus: true, send: true, viewAll: true },
     settingsSections: {

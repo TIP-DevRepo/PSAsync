@@ -8,10 +8,10 @@ import { usesMicrosoftSso } from "@/lib/sso-account"
 export interface RolePermissions {
   pages?: Partial<Record<"clients" | "catalog" | "vendors" | "inventory" | "quotes" | "settings" | "salesOrders" | "purchaseOrders", boolean>>
   quotes?: Partial<Record<
-    "create" | "edit" | "delete" | "changeStatus" | "approve" | "sendEmail" | "viewAllUsersQuotes",
+    "create" | "edit" | "delete" | "changeStatus" | "approve" | "sendEmail" | "viewAllUsersQuotes" | "sendAsOthers",
     boolean
   >>
-  clients?: Partial<Record<"create" | "edit" | "delete" | "viewAllClients", boolean>>
+  clients?: Partial<Record<"create" | "edit" | "delete", boolean>>
   salesOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "generatePO" | "viewAll", boolean>>
   purchaseOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "send" | "viewAll", boolean>>
   catalog?: Partial<Record<"delete", boolean>>

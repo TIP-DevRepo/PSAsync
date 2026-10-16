@@ -6,14 +6,22 @@ import { checkAccess, type EffectiveAccess, type RolePermissions } from "@/lib/p
 // rejected as unknown.
 const BOOLEAN_SECTIONS: Record<string, readonly string[]> = {
   pages: ["clients", "catalog", "vendors", "inventory", "quotes", "settings", "salesOrders", "purchaseOrders"],
-  quotes: ["create", "edit", "delete", "changeStatus", "approve", "sendEmail", "viewAllUsersQuotes"],
-  clients: ["create", "edit", "delete", "viewAllClients"],
+  quotes: ["create", "edit", "delete", "changeStatus", "approve", "sendEmail", "viewAllUsersQuotes", "sendAsOthers"],
+  clients: ["create", "edit", "delete"],
   salesOrders: ["create", "edit", "delete", "changeStatus", "generatePO", "viewAll"],
   purchaseOrders: ["create", "edit", "delete", "changeStatus", "send", "viewAll"],
   catalog: ["delete"],
   inventory: ["delete"],
   settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders"],
   dashboards: ["manage"],
+}
+
+// Keys that were removed from the catalog but may still be stored on
+// existing roles. The Roles panel sends a role's stored permissions back on
+// save, so these are accepted and silently dropped instead of failing the
+// save as unknown. Nothing reads them.
+const LEGACY_KEYS: Record<string, readonly string[]> = {
+  clients: ["viewAllClients"],
 }
 
 // Top level numbers, e.g. maxDiscount (a percentage)
@@ -27,7 +35,8 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 
 // Checks a permissions JSON from a request body against the known
 // structure. Sections and keys may be left out, but nothing unknown or of
-// the wrong type is accepted.
+// the wrong type is accepted. Legacy keys are dropped from the returned
+// permissions, so they are never stored again.
 export function validateRolePermissions(
   input: unknown
 ): { permissions: RolePermissions; error?: undefined } | { error: string; permissions?: undefined } {
@@ -52,6 +61,7 @@ export function validateRolePermissions(
       return { error: `Permission section "${key}" must be an object` }
     }
     for (const [subKey, subValue] of Object.entries(value)) {
+      if (LEGACY_KEYS[key]?.includes(subKey)) continue
       if (!allowed.includes(subKey)) {
         return { error: `Unknown permission "${key}.${subKey}"` }
       }
@@ -61,7 +71,19 @@ export function validateRolePermissions(
     }
   }
 
-  return { permissions: input as RolePermissions }
+  return { permissions: dropLegacyKeys(input) as RolePermissions }
+}
+
+function dropLegacyKeys(input: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {}
+  for (const [key, value] of Object.entries(input)) {
+    const legacy = LEGACY_KEYS[key]
+    out[key] =
+      legacy && isPlainObject(value)
+        ? Object.fromEntries(Object.entries(value).filter(([subKey]) => !legacy.includes(subKey)))
+        : value
+  }
+  return out
 }
 
 // Permissions a save would newly turn on (or raise) that the actor doesn't

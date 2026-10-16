@@ -47,8 +47,9 @@ interface RolePermissions {
     approve: boolean
     sendEmail: boolean
     viewAllUsersQuotes: boolean
+    sendAsOthers: boolean
   }
-  clients: { create: boolean; edit: boolean; delete: boolean; viewAllClients: boolean }
+  clients: { create: boolean; edit: boolean; delete: boolean }
   salesOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; generatePO: boolean; viewAll: boolean }
   purchaseOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; send: boolean; viewAll: boolean }
   catalog: { delete: boolean }
@@ -60,6 +61,7 @@ interface RolePermissions {
     approvalWorkflows: boolean
     notifications: boolean
     integrations: boolean
+    salesOrders: boolean
   }
   dashboards: { manage: boolean }
 }
@@ -96,13 +98,13 @@ const QUOTE_LABELS: [keyof RolePermissions["quotes"], string][] = [
   ["approve", "Approve pending-approval quotes"],
   ["sendEmail", "Send quotes via email"],
   ["viewAllUsersQuotes", "See all users' quotes (not just their own)"],
+  ["sendAsOthers", "Send quotes as another mailbox"],
 ]
 
 const CLIENT_LABELS: [keyof RolePermissions["clients"], string][] = [
   ["create", "Create clients"],
   ["edit", "Edit clients"],
   ["delete", "Delete clients"],
-  ["viewAllClients", "View all clients (not just ones tied to their own quotes)"],
 ]
 
 const SALES_ORDER_LABELS: [keyof RolePermissions["salesOrders"], string][] = [
@@ -138,6 +140,7 @@ const SETTINGS_LABELS: [keyof RolePermissions["settingsSections"], string][] = [
   ["approvalWorkflows", "Approval Workflows"],
   ["notifications", "Notifications"],
   ["integrations", "Integrations"],
+  ["salesOrders", "Sales & Purchase Order Settings"],
 ]
 
 const DASHBOARD_LABELS: [keyof RolePermissions["dashboards"], string][] = [
@@ -650,7 +653,7 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.isGlobalAdmin ? true : draft.permissions.quotes[key]}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.quotes?.[key] ?? false}
                       disabled={isLocked}
                       onChange={(e) => updateQuotePerm(key, e.target.checked)}
                     />
@@ -667,7 +670,7 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.isGlobalAdmin ? true : draft.permissions.clients[key]}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.clients?.[key] ?? false}
                       disabled={isLocked}
                       onChange={(e) => updateClientPerm(key, e.target.checked)}
                     />
@@ -752,7 +755,7 @@ export function RolesPermissionsPanel() {
                   <label key={key} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
-                      checked={draft.isGlobalAdmin ? true : draft.permissions.settingsSections[key]}
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.settingsSections?.[key] ?? false}
                       disabled={isLocked}
                       onChange={(e) => updateSettingsPerm(key, e.target.checked)}
                     />

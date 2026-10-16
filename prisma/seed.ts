@@ -36,8 +36,8 @@ async function main() {
       isSystem: true,
       permissions: {
         pages: { clients: true, catalog: true, vendors: true, quotes: true, settings: true },
-        quotes: { create: true, edit: true, delete: true, changeStatus: true, approve: true, sendEmail: true, viewAllUsersQuotes: true },
-        clients: { create: true, edit: true, delete: true, viewAllClients: true },
+        quotes: { create: true, edit: true, delete: true, changeStatus: true, approve: true, sendEmail: true, viewAllUsersQuotes: true, sendAsOthers: true },
+        clients: { create: true, edit: true, delete: true },
         settingsSections: { company: true, users: true, quotes: true, approvalWorkflows: true, notifications: true, integrations: true },
         maxDiscount: 100,
       },
