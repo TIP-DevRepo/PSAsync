@@ -1,14 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { RecurringInterval } from "@/generated/prisma"
-import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { apiError, isEnumValue, notFound, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
+
+// Templates are maintained from Quote Settings
+const TEMPLATE_WRITE_RULE = {
+  settingsSection: "quotes",
+  message: "You do not have permission to edit quote templates",
+} as const
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess(TEMPLATE_WRITE_RULE)
   if (response) return response
 
   const { id: templateId } = await params
@@ -17,9 +23,7 @@ export async function POST(
   const template = await prisma.quoteTemplate.findUnique({
     where: { id: templateId, companyId: ctx.companyId },
   })
-  if (!template) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 })
-  }
+  if (!template) return notFound()
 
   const body = await req.json()
 

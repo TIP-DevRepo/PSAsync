@@ -1,21 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
+import { loadViewableQuote, quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
 
-  const quote = await prisma.quote.findUnique({
-    where: { id, companyId: session.user.companyId },
+  const quote = await prisma.quote.findFirst({
+    where: viewableQuoteWhere(ctx, id),
     include: {
       client: { select: { id: true, name: true, email: true } },
       contact: { select: { id: true, firstName: true, lastName: true, email: true } },
@@ -24,8 +22,12 @@ export async function GET(
     },
   })
 
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+  if (!quote) return notFound()
+
+  // Line item cost (and the margin the builder works out from it) is only
+  // sent to users who may see cost
+  if (!canSeeCost(ctx)) {
+    return NextResponse.json({ ...quote, lineItems: quote.lineItems.map(omitCost) })
   }
 
   return NextResponse.json(quote)
@@ -35,21 +37,17 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "quotes.edit"))) {
-    return NextResponse.json({ error: "You don't have permission to edit quotes" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.edit",
+    message: "You do not have permission to edit quotes",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
-  const existing = await prisma.quote.findUnique({ where: { id, companyId } })
-  if (!existing) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  const existing = await prisma.quote.findFirst({ where: viewableQuoteWhere(ctx, id) })
+  if (!existing) return notFound()
   if (existing.status !== "DRAFT") {
     return NextResponse.json({ error: "Only draft quotes can be edited this way." }, { status: 400 })
   }
@@ -85,7 +83,7 @@ export async function PATCH(
   if (body.paymentTerms !== undefined) data.paymentTerms = body.paymentTerms || null
   if (body.expiresAt !== undefined) data.expiresAt = body.expiresAt ? new Date(body.expiresAt) : null
 
-  const updated = await prisma.quote.update({ where: { id }, data })
+  const updated = await prisma.quote.update({ where: quoteWhere(ctx, id), data })
 
   return NextResponse.json(updated)
 }
@@ -94,32 +92,26 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "quotes.delete"))) {
-    return NextResponse.json({ error: "You don't have permission to delete quotes" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.delete",
+    message: "You do not have permission to delete quotes",
+  })
+  if (response) return response
 
   const { id } = await params
 
-  const quote = await prisma.quote.findUnique({
-    where: { id, companyId: session.user.companyId },
-    include: { salesOrder: { select: { id: true } } },
-  })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
-  if (quote.salesOrder) {
+  const quote = await loadViewableQuote(ctx, id)
+  if (!quote) return notFound()
+
+  const salesOrder = await prisma.salesOrder.findUnique({ where: { quoteId: id }, select: { id: true } })
+  if (salesOrder) {
     return NextResponse.json(
       { error: "This quote has a Sales Order linked to it and can't be deleted." },
       { status: 400 }
     )
   }
 
-  await prisma.quote.delete({ where: { id } })
+  await prisma.quote.delete({ where: quoteWhere(ctx, id) })
 
   return NextResponse.json({ deleted: true })
 }

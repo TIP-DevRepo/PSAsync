@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import crypto from "crypto"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
 const SCOPES = "openid profile offline_access User.Read Mail.Send Mail.ReadWrite"
 
+// Any active user may connect their own mailbox. Whether a reconnect of an
+// existing mailbox is allowed is only known once Microsoft says which
+// account was picked, so the callback checks that.
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.redirect(new URL("/login", req.url))
+  const { ctx, response: refusal } = await requireAccess()
+  if (refusal) {
+    return refusal.status === 401
+      ? NextResponse.redirect(new URL("/login", req.url))
+      : NextResponse.redirect(
+          new URL(`/dashboard/settings?panel=microsoft&error=${encodeURIComponent("You need to change your password before connecting a mailbox.")}`, req.url)
+        )
   }
 
   const label = req.nextUrl.searchParams.get("label")?.trim()
@@ -19,7 +26,7 @@ export async function GET(req: NextRequest) {
   }
 
   const settings = await prisma.companySettings.findUnique({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
   })
 
   if (!settings?.microsoftClientId || !settings?.microsoftTenantId) {

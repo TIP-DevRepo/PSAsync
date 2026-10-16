@@ -6,6 +6,8 @@ import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { ContactSearchInput, type ContactSearchResult } from "@/components/ContactSearchInput"
 import { formatPhoneInput } from "@/lib/phone"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface UserOption {
@@ -30,6 +32,18 @@ function addDaysIso(days: number) {
 
 // ─── Page wrapper (Suspense required for useSearchParams) ──────────────────
 export default function NewQuotePage() {
+  const { can } = useAccess()
+  if (!can("pages.quotes") || !can("quotes.create")) {
+    return (
+      <div className="w-full space-y-4">
+        <Breadcrumbs items={[{ label: "Quotes", href: "/dashboard/quotes" }]} current="New Quote" />
+        <NoAccess
+          title={can("pages.quotes") ? "You do not have permission to create quotes" : undefined}
+        />
+      </div>
+    )
+  }
+
   return (
     <Suspense
       fallback={

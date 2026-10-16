@@ -1,6 +1,7 @@
 import { cache } from "react"
 import { prisma } from "@/lib/prisma"
 import { usesMicrosoftSso } from "@/lib/sso-account"
+import { checkAccess } from "@/lib/access-check"
 
 // Shape of the permissions JSON stored on each Role. Kept loose (not every
 // field required) since it's read with optional chaining throughout —
@@ -8,10 +9,10 @@ import { usesMicrosoftSso } from "@/lib/sso-account"
 export interface RolePermissions {
   pages?: Partial<Record<"clients" | "catalog" | "vendors" | "inventory" | "quotes" | "settings" | "salesOrders" | "purchaseOrders", boolean>>
   quotes?: Partial<Record<
-    "create" | "edit" | "delete" | "changeStatus" | "approve" | "sendEmail" | "viewAllUsersQuotes",
+    "create" | "edit" | "delete" | "changeStatus" | "approve" | "sendEmail" | "viewAllUsersQuotes" | "sendAsOthers",
     boolean
   >>
-  clients?: Partial<Record<"create" | "edit" | "delete" | "viewAllClients", boolean>>
+  clients?: Partial<Record<"create" | "edit" | "delete", boolean>>
   salesOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "generatePO" | "viewAll", boolean>>
   purchaseOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "send" | "viewAll", boolean>>
   catalog?: Partial<Record<"delete", boolean>>
@@ -147,17 +148,9 @@ export async function hasPermission(userId: string, path: string): Promise<boole
   return checkAccess(await getEffectiveAccess(userId), path)
 }
 
-// The pure check behind hasPermission and requireAccess's ctx.can, so the
-// Global Admin bypass lives in exactly one place. Null access (a missing or
-// deactivated user) is always refused.
-export function checkAccess(access: EffectiveAccess | null | undefined, path: string): boolean {
-  if (!access) return false
-  if (access.isGlobalAdmin) return true
-
-  const [section, key] = path.split(".") as [keyof RolePermissions, string]
-  const sectionObj = access.permissions[section] as Record<string, boolean> | undefined
-  return !!sectionObj?.[key]
-}
+// Lives in its own module so client components can import it without
+// pulling in the database client
+export { checkAccess }
 
 // The user's highest rank across every role they hold, for "X or higher"
 // comparisons like approval workflow requirements and the users/roles

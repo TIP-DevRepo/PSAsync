@@ -8,10 +8,10 @@ export const EVERYONE_ROLE_NAME = "Everyone"
 function buildNoPermissions(): Prisma.InputJsonValue {
   return {
     pages: { clients: false, catalog: false, vendors: false, inventory: false, quotes: false, settings: false, salesOrders: false, purchaseOrders: false },
-    quotes: { create: false, edit: false, delete: false, changeStatus: false, approve: false, sendEmail: false, viewAllUsersQuotes: false },
-    clients: { create: false, edit: false, delete: false, viewAllClients: false },
+    quotes: { create: false, edit: false, delete: false, changeStatus: false, approve: false, sendEmail: false, viewAllUsersQuotes: false, sendAsOthers: false },
+    clients: { create: false, edit: false, delete: false },
     salesOrders: { create: false, edit: false, delete: false, changeStatus: false, generatePO: false, viewAll: false },
-    purchaseOrders: { create: false, edit: false, delete: false, changeStatus: false, send: false },
+    purchaseOrders: { create: false, edit: false, delete: false, changeStatus: false, send: false, viewAll: false },
     catalog: { delete: false },
     inventory: { delete: false },
     settingsSections: { company: false, users: false, quotes: false, approvalWorkflows: false, notifications: false, integrations: false, salesOrders: false },

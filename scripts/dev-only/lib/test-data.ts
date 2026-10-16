@@ -55,8 +55,33 @@ export function testNames(letter: TestLetter) {
     targetRole: `Test Target Role ${letter}`,
     limitedUserName: `Test Limited ${letter}`,
     limitedUserEmail: `test-limited-${lower}@example.test`,
+    // Permission test users (create-test-companies). Everyone holds only the
+    // Everyone role; Rep holds the Rep role below.
+    everyoneName: `Test Everyone ${letter}`,
+    everyoneEmail: `test-everyone-${lower}@example.test`,
+    repName: `Test Rep ${letter}`,
+    repEmail: `test-rep-${lower}@example.test`,
+    repRole: "Rep",
+    repQuote: `Sample Rep Quote ${letter}`,
+    repQuoteLine: `Sample Rep Quote Line ${letter}`,
+    // A mailbox row with placeholder tokens, never usable to send anything
+    adminMailboxEmail: `test-admin-${lower}-mailbox@example.test`,
+    adminMailboxLabel: `Sample Mailbox ${letter}`,
+    // Only created by the check-permissions script, for the sender checks
+    senderRole: `Test Sender Role ${letter}`,
+    senderName: `Test Sender ${letter}`,
+    senderEmail: `test-sender-${lower}@example.test`,
+    senderMailboxEmail: `test-sender-${lower}-mailbox@example.test`,
   }
 }
+
+// Stored in place of real Microsoft tokens on the sample mailbox rows. The
+// test companies have no Microsoft credentials either, so nothing can ever
+// be sent from them.
+export const PLACEHOLDER_TOKEN = "dev-only-not-a-real-token"
+
+// Rep: the quotes page and creating and editing quotes, nothing else
+export const REP_PERMISSIONS = { pages: { quotes: true }, quotes: { create: true, edit: true } }
 
 // Letters and digits only, so it pastes into any shell without quoting
 const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
@@ -101,6 +126,56 @@ export interface SampleIds {
   assetId: string
   assetAttachmentId: string
   workflowId: string
+}
+
+export interface PermissionFixtureIds {
+  everyoneUserId: string
+  repUserId: string
+  repRoleId: string
+  repQuoteId: string
+  repQuoteLineId: string
+  adminMailboxId: string
+}
+
+// The permission test records for one test company (check-permissions).
+// Kept apart from loadSampleIds so check-cross-company doesn't depend on
+// them. Throws naming whatever is missing.
+export async function loadPermissionFixtureIds(prisma: PrismaClient, letter: TestLetter): Promise<PermissionFixtureIds> {
+  const n = testNames(letter)
+  const company = await prisma.company.findFirst({ where: { name: n.company }, select: { id: true } })
+  if (!company) {
+    throw new Error(`${n.company} doesn't exist yet. Run create-test-companies first.`)
+  }
+  const companyId = company.id
+  const id = (row: { id: string } | null) => row?.id ?? ""
+
+  const [everyoneUser, repUser, repRole, repQuote, adminMailbox] = await Promise.all([
+    prisma.user.findFirst({ where: { email: n.everyoneEmail, companyId }, select: { id: true } }),
+    prisma.user.findFirst({ where: { email: n.repEmail, companyId }, select: { id: true } }),
+    prisma.role.findFirst({ where: { companyId, name: n.repRole }, select: { id: true } }),
+    prisma.quote.findFirst({ where: { companyId, title: n.repQuote }, select: { id: true } }),
+    prisma.microsoftConnection.findFirst({ where: { companyId, email: n.adminMailboxEmail }, select: { id: true } }),
+  ])
+  const repQuoteLine = await prisma.quoteLineItem.findFirst({
+    where: { name: n.repQuoteLine, quoteId: id(repQuote), quote: { companyId } },
+    select: { id: true },
+  })
+
+  const ids: PermissionFixtureIds = {
+    everyoneUserId: id(everyoneUser),
+    repUserId: id(repUser),
+    repRoleId: id(repRole),
+    repQuoteId: id(repQuote),
+    repQuoteLineId: id(repQuoteLine),
+    adminMailboxId: id(adminMailbox),
+  }
+  const missing = Object.entries(ids)
+    .filter(([, value]) => !value)
+    .map(([key]) => key)
+  if (missing.length > 0) {
+    throw new Error(`${n.company} is missing permission test records (${missing.join(", ")}). Run create-test-companies again to top them up.`)
+  }
+  return ids
 }
 
 // Finds every sample record for one test company. Throws naming whatever

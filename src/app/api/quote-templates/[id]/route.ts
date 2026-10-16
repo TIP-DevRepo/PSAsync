@@ -1,25 +1,37 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
+
+// Templates are maintained from Quote Settings
+const TEMPLATE_WRITE_RULE = {
+  settingsSection: "quotes",
+  message: "You do not have permission to edit quote templates",
+} as const
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({ page: "quotes", message: "You do not have permission to view quotes" })
+  if (response) return response
 
   const { id } = await params
 
   const template = await prisma.quoteTemplate.findUnique({
-    where: { id, companyId: session.user.companyId },
+    where: { id, companyId: ctx.companyId },
     include: { lineItems: { include: { catalogItem: true } } },
   })
 
-  if (!template) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 })
+  if (!template) return notFound()
+
+  if (!canSeeCost(ctx)) {
+    return NextResponse.json({
+      ...template,
+      lineItems: template.lineItems.map((li) => ({
+        ...omitCost(li),
+        catalogItem: li.catalogItem ? omitCost(li.catalogItem) : null,
+      })),
+    })
   }
 
   return NextResponse.json(template)
@@ -29,18 +41,14 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess(TEMPLATE_WRITE_RULE)
+  if (response) return response
 
   const { id } = await params
   const existing = await prisma.quoteTemplate.findUnique({
-    where: { id, companyId: session.user.companyId },
+    where: { id, companyId: ctx.companyId },
   })
-  if (!existing) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 })
-  }
+  if (!existing) return notFound()
 
   const body = await req.json()
 
@@ -53,7 +61,7 @@ export async function PATCH(
   if (body.expiryDays !== undefined) data.expiryDays = Number(body.expiryDays) || 30
   if (body.active !== undefined) data.active = Boolean(body.active)
 
-  const template = await prisma.quoteTemplate.update({ where: { id }, data })
+  const template = await prisma.quoteTemplate.update({ where: { id, companyId: ctx.companyId }, data })
 
   return NextResponse.json(template)
 }

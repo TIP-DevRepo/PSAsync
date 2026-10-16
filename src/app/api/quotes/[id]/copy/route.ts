@@ -1,26 +1,26 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.create",
+    message: "You do not have permission to create quotes",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
-  const source = await prisma.quote.findUnique({
-    where: { id, companyId },
+  const source = await prisma.quote.findFirst({
+    where: viewableQuoteWhere(ctx, id),
     include: { lineItems: true },
   })
-  if (!source) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  if (!source) return notFound()
 
   const settings = await prisma.companySettings.findUnique({ where: { companyId } })
   const prefix = settings?.quotePrefix ?? "Q"
@@ -33,7 +33,8 @@ export async function POST(
       companyId,
       clientId: source.clientId,
       contactId: source.contactId,
-      userId: source.userId,
+      // The copy belongs to whoever made it, so they can always open it
+      userId: ctx.userId,
       quoteNumber,
       templateId: source.templateId,
       title: source.title ? `${source.title} (Copy)` : null,

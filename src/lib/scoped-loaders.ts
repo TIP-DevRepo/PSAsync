@@ -167,6 +167,53 @@ export function loadSalesOrderAttachment(ctx: Scope, salesOrderId: string, attac
   })
 }
 
+// Quotes
+
+type QuoteViewer = Pick<AccessContext, "companyId" | "userId" | "access" | "can">
+
+// Matches no row, for callers who may not open any quote
+const NO_QUOTES = { id: { in: [] as string[] } } satisfies Prisma.QuoteWhereInput
+
+// Which of the company's quotes a user may open: they need the Quotes page,
+// and then a quote is theirs, they see everyone's (quotes.viewAllUsersQuotes),
+// or it is waiting on an approval they can decide (quotes.approve and a
+// rank at or above the approval's required role). Global Admin sees all.
+export function quoteVisibilityWhere(ctx: QuoteViewer): Prisma.QuoteWhereInput {
+  if (!ctx.can("pages.quotes")) return NO_QUOTES
+  if (ctx.can("quotes.viewAllUsersQuotes")) return {}
+  const visible: Prisma.QuoteWhereInput[] = [{ userId: ctx.userId }]
+  if (ctx.can("quotes.approve")) {
+    visible.push({
+      approvals: {
+        some: { status: "PENDING", workflow: { requiredRole: { rank: { lte: ctx.access.rank } } } },
+      },
+    })
+  }
+  return { OR: visible }
+}
+
+// The list filter for every quote the user may open
+export const quoteListWhere = (ctx: QuoteViewer) =>
+  ({ companyId: ctx.companyId, AND: [quoteVisibilityWhere(ctx)] }) satisfies Prisma.QuoteWhereInput
+
+// Company scoping only, for writes after loadViewableQuote has passed
+export const quoteWhere = (ctx: Scope, quoteId: string) =>
+  ({ id: quoteId, companyId: ctx.companyId }) satisfies Prisma.QuoteWhereUniqueInput
+
+// One quote the user may open, for reads that need their own include
+export const viewableQuoteWhere = (ctx: QuoteViewer, quoteId: string) =>
+  ({ id: quoteId, companyId: ctx.companyId, AND: [quoteVisibilityWhere(ctx)] }) satisfies Prisma.QuoteWhereUniqueInput
+
+// The quote view check (VQ) every quote route runs on its URL id. A quote
+// the user can't open is a miss, same as one that doesn't exist.
+export function loadViewableQuote(ctx: QuoteViewer, quoteId: string) {
+  if (!ctx.can("pages.quotes")) return Promise.resolve(null)
+  return prisma.quote.findFirst({
+    where: viewableQuoteWhere(ctx, quoteId),
+    select: { id: true, userId: true, status: true, quoteNumber: true },
+  })
+}
+
 // Purchase orders
 
 export const purchaseOrderWhere = (ctx: Scope, purchaseOrderId: string) =>
