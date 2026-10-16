@@ -1,22 +1,23 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { RecurringInterval } from "@/generated/prisma"
-import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
-import { assertRefs, loadSalesOrder } from "@/lib/scoped-loaders"
+import { apiError, isEnumValue, notFound, requireAccess } from "@/lib/api-access"
+import { assertRefs, loadViewableSalesOrder } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "salesOrders.edit",
+    message: "You do not have permission to edit sales orders",
+  })
   if (response) return response
 
   const { id } = await params
 
-  const so = await loadSalesOrder(ctx, id)
-  if (!so) {
-    return NextResponse.json({ error: "Sales Order not found" }, { status: 404 })
-  }
+  const so = await loadViewableSalesOrder(ctx, id)
+  if (!so) return notFound()
 
   const body = await req.json()
 

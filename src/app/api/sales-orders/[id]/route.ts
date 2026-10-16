@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { apiError, notFound, requireAccess } from "@/lib/api-access"
+import { loadViewableSalesOrder, salesOrderWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
 import { notifySalesOrderStatusChange } from "@/lib/notify"
 
 const VALID_STATUSES = [
@@ -39,19 +39,23 @@ const EDIT_GATED_FIELDS = [
   "shipCountry",
 ]
 
+// Every field other than status needs salesOrders.edit, the notes included
+const EDIT_FIELDS = [...EDIT_GATED_FIELDS, "internalNotes", "clientNotes"]
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "pages.salesOrders",
+    message: "You do not have permission to view sales orders",
+  })
+  if (response) return response
 
   const { id } = await params
 
-  const salesOrder = await prisma.salesOrder.findUnique({
-    where: { id, companyId: session.user.companyId },
+  const salesOrder = await prisma.salesOrder.findFirst({
+    where: viewableSalesOrderWhere(ctx, id),
     include: {
       client: { select: { id: true, name: true } },
       user: { select: { id: true, name: true } },
@@ -73,14 +77,7 @@ export async function GET(
     },
   })
 
-  if (!salesOrder) {
-    return NextResponse.json({ error: "Sales Order not found" }, { status: 404 })
-  }
-
-  const canViewAll = await hasPermission(session.user.id, "salesOrders.viewAll")
-  if (!canViewAll && salesOrder.userId !== session.user.id) {
-    return NextResponse.json({ error: "Sales Order not found" }, { status: 404 })
-  }
+  if (!salesOrder) return notFound()
 
   return NextResponse.json(salesOrder)
 }
@@ -89,25 +86,26 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  // Status needs salesOrders.changeStatus and every other field needs
+  // salesOrders.edit, checked per field below once the body is read
+  const { ctx, response } = await requireAccess({
+    permission: ["salesOrders.edit", "salesOrders.changeStatus"],
+    message: "You do not have permission to edit sales orders",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
-  const body = await req.json()
 
-  const existing = await prisma.salesOrder.findUnique({ where: { id, companyId } })
-  if (!existing) {
-    return NextResponse.json({ error: "Sales Order not found" }, { status: 404 })
-  }
+  const existing = await loadViewableSalesOrder(ctx, id)
+  if (!existing) return notFound()
+
+  const body = await req.json()
 
   const data: Record<string, unknown> = {}
 
   if (body.status !== undefined) {
-    if (!(await hasPermission(session.user.id, "salesOrders.changeStatus"))) {
-      return NextResponse.json({ error: "You don't have permission to change a Sales Order's status" }, { status: 403 })
+    if (!ctx.can("salesOrders.changeStatus")) {
+      return apiError(403, "You do not have permission to change a sales order's status", "FORBIDDEN")
     }
     if (!VALID_STATUSES.includes(body.status)) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 })
@@ -115,12 +113,15 @@ export async function PATCH(
     data.status = body.status
   }
 
+  if (EDIT_FIELDS.some((field) => body[field] !== undefined) && !ctx.can("salesOrders.edit")) {
+    return apiError(403, "You do not have permission to edit sales orders", "FORBIDDEN")
+  }
+
   const touchesGatedField = EDIT_GATED_FIELDS.some((field) => body[field] !== undefined)
   if (touchesGatedField) {
-    if (!(await hasPermission(session.user.id, "salesOrders.edit"))) {
-      return NextResponse.json({ error: "You don't have permission to edit this sales order" }, { status: 403 })
-    }
-    const linkedPOCount = await prisma.purchaseOrder.count({ where: { salesOrderId: id } })
+    const linkedPOCount = await prisma.purchaseOrder.count({
+      where: { salesOrderId: existing.id, companyId: ctx.companyId },
+    })
     if (linkedPOCount > 0) {
       return NextResponse.json(
         { error: "This sales order has purchase orders generated from it. Payment and billing/shipping details can no longer be edited." },
@@ -153,11 +154,11 @@ export async function PATCH(
   if (body.shipZip !== undefined) data.shipZip = body.shipZip || null
   if (body.shipCountry !== undefined) data.shipCountry = body.shipCountry || null
 
-  const updated = await prisma.salesOrder.update({ where: { id }, data })
+  const updated = await prisma.salesOrder.update({ where: salesOrderWhere(ctx, existing.id), data })
 
   // Fire notifications for the 3 statuses that have a configured notify rule
   if (body.status && ["READY_TO_INVOICE", "READY_TO_ORDER", "READY_TO_CLOSEOUT"].includes(body.status)) {
-    notifySalesOrderStatusChange(id, body.status).catch((err) =>
+    notifySalesOrderStatusChange(existing.id, body.status).catch((err) =>
       console.error("notifySalesOrderStatusChange failed:", err)
     )
   }
@@ -169,25 +170,20 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "salesOrders.delete"))) {
-    return NextResponse.json({ error: "You don't have permission to delete sales orders" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "salesOrders.delete",
+    message: "You do not have permission to delete sales orders",
+  })
+  if (response) return response
 
   const { id } = await params
 
-  const salesOrder = await prisma.salesOrder.findUnique({
-    where: { id, companyId: session.user.companyId },
+  const salesOrder = await prisma.salesOrder.findFirst({
+    where: viewableSalesOrderWhere(ctx, id),
     include: { purchaseOrders: { select: { id: true } } },
   })
 
-  if (!salesOrder) {
-    return NextResponse.json({ error: "Sales Order not found" }, { status: 404 })
-  }
+  if (!salesOrder) return notFound()
 
   if (salesOrder.purchaseOrders.length > 0) {
     return NextResponse.json(
@@ -198,7 +194,7 @@ export async function DELETE(
     )
   }
 
-  await prisma.salesOrder.delete({ where: { id } })
+  await prisma.salesOrder.delete({ where: salesOrderWhere(ctx, salesOrder.id) })
 
   return NextResponse.json({ deleted: true })
 }

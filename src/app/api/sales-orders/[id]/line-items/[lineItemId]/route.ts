@@ -8,7 +8,10 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "salesOrders.edit",
+    message: "You do not have permission to edit sales orders",
+  })
   if (response) return response
 
   const { id, lineItemId } = await params
@@ -54,7 +57,10 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "salesOrders.edit",
+    message: "You do not have permission to edit sales orders",
+  })
   if (response) return response
 
   const { id, lineItemId } = await params
