@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { ClientStatus } from "@/generated/prisma"
 import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
@@ -9,15 +8,15 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  // Open to any active user: forms on other pages load a client's contacts
+  // and locations from here
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
 
   const client = await prisma.client.findUnique({
-    where: { id, companyId: session.user.companyId },
+    where: { id, companyId: ctx.companyId },
     include: {
       contacts: {
         include: { tags: { include: { contactTag: true } } },
@@ -42,7 +41,10 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "clients.edit",
+    message: "You do not have permission to edit clients",
+  })
   if (response) return response
 
   const { id } = await params

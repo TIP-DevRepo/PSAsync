@@ -1,12 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  // Open to any active user: the contact pickers on quote and order forms
+  // search here
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? ""
   if (q.length < 2) {
@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
 
   const contacts = await prisma.contact.findMany({
     where: {
-      client: { companyId: session.user.companyId },
+      client: { companyId: ctx.companyId },
       OR: [
         { firstName: { contains: q, mode: "insensitive" } },
         { lastName: { contains: q, mode: "insensitive" } },

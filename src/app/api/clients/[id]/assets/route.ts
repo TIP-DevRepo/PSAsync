@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 import { buildLocationPathOptions } from "@/lib/inventory/locationPaths"
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to view inventory",
+  })
+  if (response) return response
 
   const { id: clientId } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const client = await prisma.client.findUnique({ where: { id: clientId, companyId }, select: { id: true } })
   if (!client) {
