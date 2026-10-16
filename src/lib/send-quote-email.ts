@@ -1,20 +1,7 @@
-import { PrismaClient } from "@/generated/prisma"
-import { PrismaPg } from "@prisma/adapter-pg"
-import { Pool } from "pg"
+import { prisma } from "@/lib/prisma"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
-
-const pool = new Pool({
-  host: process.env.DB_HOST,
-  port: 5432,
-  database: process.env.DB_NAME,
-  user: process.env.DB_USER,
-  password: process.env.DB_PASSWORD,
-  ssl: { rejectUnauthorized: false },
-})
-const adapter = new PrismaPg(pool)
-const prisma = new PrismaClient({ adapter })
 
 const SCOPES = "openid profile email offline_access User.Read Mail.Send Mail.ReadWrite Calendars.ReadWrite"
 
@@ -25,6 +12,10 @@ export interface SendQuoteEmailInput {
   subject: string
   bodyHtml: string
   includePdf: boolean
+  // The mailbox chosen when Send was clicked (see src/lib/quote-sender.ts).
+  // Only emails held for approval before this was stored arrive without
+  // it, and those keep the sender they would have had when they were held.
+  connectionId?: string | null
 }
 
 export interface SendQuoteEmailResult {
@@ -41,27 +32,35 @@ function toRecipients(list: string) {
 }
 
 export async function sendQuoteEmail(input: SendQuoteEmailInput): Promise<SendQuoteEmailResult> {
-  const quote = await prisma.quote.findUnique({
-    where: { id: input.quoteId },
-    include: {
-      client: { select: { name: true } },
-      contact: { select: { firstName: true, lastName: true } },
-      user: { select: { id: true, name: true, email: true } },
-      company: { select: { name: true, logoUrl: true, settings: true } },
-      lineItems: { orderBy: { sortOrder: "asc" } },
-    },
-  })
+  const quote = await loadQuoteForEmail(input.quoteId)
   if (!quote) return { success: false, error: "Quote not found" }
 
-  const settings = quote.company.settings
-  if (!settings?.microsoftClientId || !settings.microsoftTenantId || !settings.microsoftClientSecret) {
+  const raw = quote.company.settings
+  if (!raw?.microsoftClientId || !raw.microsoftTenantId || !raw.microsoftClientSecret) {
     return { success: false, error: "Microsoft integration isn't configured for this company." }
   }
+  const settings = raw as ConfiguredSettings
 
-  // Figure out which connected mailbox to send from
-  let connection =
+  // The chosen mailbox, never a different one if it has gone since
+  if (input.connectionId) {
+    const chosen = await prisma.microsoftConnection.findFirst({
+      where: { id: input.connectionId, companyId: quote.companyId },
+    })
+    if (!chosen) {
+      return {
+        success: false,
+        error: "The mailbox chosen to send this quote is no longer connected. Reconnect it or send the quote again.",
+      }
+    }
+    return sendFromConnection(input, quote, settings, chosen)
+  }
+
+  // Emails held before the sender was stored: the sender they had then
+  const connection =
     settings.quoteSendFromMode === "SPECIFIC" && settings.quoteSendFromConnectionId
-      ? await prisma.microsoftConnection.findUnique({ where: { id: settings.quoteSendFromConnectionId } })
+      ? await prisma.microsoftConnection.findFirst({
+          where: { id: settings.quoteSendFromConnectionId, companyId: quote.companyId },
+        })
       : await prisma.microsoftConnection.findFirst({
           where: { companyId: quote.companyId, connectedByUserId: quote.userId },
         })
@@ -76,6 +75,35 @@ export async function sendQuoteEmail(input: SendQuoteEmailInput): Promise<SendQu
     }
   }
 
+  return sendFromConnection(input, quote, settings, connection)
+}
+
+type QuoteForEmail = NonNullable<Awaited<ReturnType<typeof loadQuoteForEmail>>>
+type ConfiguredSettings = NonNullable<QuoteForEmail["company"]["settings"]> & {
+  microsoftClientId: string
+  microsoftTenantId: string
+  microsoftClientSecret: string
+}
+
+function loadQuoteForEmail(quoteId: string) {
+  return prisma.quote.findUnique({
+    where: { id: quoteId },
+    include: {
+      client: { select: { name: true } },
+      contact: { select: { firstName: true, lastName: true } },
+      user: { select: { id: true, name: true, email: true } },
+      company: { select: { name: true, logoUrl: true, settings: true } },
+      lineItems: { orderBy: { sortOrder: "asc" } },
+    },
+  })
+}
+
+async function sendFromConnection(
+  input: SendQuoteEmailInput,
+  quote: QuoteForEmail,
+  settings: ConfiguredSettings,
+  connection: { id: string; refreshToken: string }
+): Promise<SendQuoteEmailResult> {
   // Refresh the access token before using it — simpler and more reliable
   // than tracking expiry ourselves
   const tokenRes = await fetch(
@@ -174,8 +202,10 @@ export async function sendQuoteEmail(input: SendQuoteEmailInput): Promise<SendQu
 
 // Shared mailbox-picking + send logic for any company-level notification
 // email (not tied to a specific quote). If quoteSendFromMode is SPECIFIC,
-// uses that configured mailbox; otherwise prefers the given user's own
-// connected mailbox, falling back to any connected mailbox for the company.
+// uses that configured mailbox; otherwise the given user's own connected
+// mailbox (the quote owner, for quote notifications). With neither, the
+// email is skipped, never sent from some other person's mailbox. Callers
+// keep their in-app notification either way.
 export async function sendCompanyNotificationEmail(
   companyId: string,
   to: string,
@@ -188,16 +218,15 @@ export async function sendCompanyNotificationEmail(
     return { success: false, error: "Microsoft integration isn't configured for this company." }
   }
 
-  let connection =
+  const connection =
     settings.quoteSendFromMode === "SPECIFIC" && settings.quoteSendFromConnectionId
-      ? await prisma.microsoftConnection.findUnique({ where: { id: settings.quoteSendFromConnectionId } })
+      ? await prisma.microsoftConnection.findFirst({ where: { id: settings.quoteSendFromConnectionId, companyId } })
       : preferredUserId
-        ? await prisma.microsoftConnection.findFirst({ where: { companyId, connectedByUserId: preferredUserId } })
+        ? await prisma.microsoftConnection.findFirst({
+            where: { companyId, connectedByUserId: preferredUserId },
+            orderBy: { createdAt: "asc" },
+          })
         : null
-
-  if (!connection) {
-    connection = await prisma.microsoftConnection.findFirst({ where: { companyId } })
-  }
 
   if (!connection) {
     return { success: false, error: "No connected mailbox available to send from." }

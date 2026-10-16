@@ -4,6 +4,7 @@ import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { loadViewableQuote } from "@/lib/scoped-loaders"
+import { loadCompanyMailbox, sendAsNote, withNote } from "@/lib/quote-sender"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
@@ -64,7 +65,9 @@ export async function POST(
     const quote = await prisma.quote.findUnique({ where: { id } })
     if (quote) {
       // If this quote was submitted through the Send Quote dialog, the
-      // composed email was held until now — send it before going live
+      // composed email was held until now. Send it before going live, from
+      // the mailbox chosen when Send was clicked (never the approver's)
+      let note: string | null = null
       if (quote.pendingEmailPayload) {
         const payload = quote.pendingEmailPayload as {
           to: string
@@ -72,13 +75,32 @@ export async function POST(
           subject: string
           bodyHtml: string
           includePdf: boolean
+          // Missing on emails held before the sender was stored
+          connectionId?: string
+          sentByUserId?: string
+          sentByName?: string
         }
-        const result = await sendQuoteEmail({ quoteId: id, ...payload })
+        const result = await sendQuoteEmail({
+          quoteId: id,
+          to: payload.to,
+          cc: payload.cc,
+          subject: payload.subject,
+          bodyHtml: payload.bodyHtml,
+          includePdf: payload.includePdf,
+          connectionId: payload.connectionId ?? null,
+        })
         if (!result.success) {
           return NextResponse.json(
             { error: `Approved, but sending the email failed: ${result.error}` },
             { status: 500 }
           )
+        }
+
+        if (payload.connectionId && payload.sentByUserId) {
+          const mailbox = await loadCompanyMailbox(companyId, payload.connectionId)
+          if (mailbox) {
+            note = sendAsNote({ userId: payload.sentByUserId, name: payload.sentByName ?? "a team member" }, mailbox)
+          }
         }
       }
 
@@ -89,7 +111,13 @@ export async function POST(
         })
         await tx.quote.update({
           where: { id },
-          data: { status: "SENT", sentAt: new Date(), isActive: true, pendingEmailPayload: Prisma.JsonNull },
+          data: {
+            status: "SENT",
+            sentAt: new Date(),
+            isActive: true,
+            pendingEmailPayload: Prisma.JsonNull,
+            internalNotes: withNote(quote.internalNotes, note),
+          },
         })
       })
     }

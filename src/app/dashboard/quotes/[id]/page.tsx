@@ -1031,15 +1031,12 @@ function SendQuoteModal({
     setSending(true)
     setError("")
 
-    const bodyHtml = message
-      .split("\n")
-      .map((line) => (line ? line : "<br/>"))
-      .join("<br/>")
-
+    // The message goes as plain text; the server escapes it and keeps the
+    // line breaks when it builds the email
     const res = await fetch(`/api/quotes/${quoteId}/send-email`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, cc: cc || null, subject, bodyHtml, includePdf }),
+      body: JSON.stringify({ to, cc: cc || null, subject, message, includePdf }),
     })
     const data = await res.json()
     setSending(false)
