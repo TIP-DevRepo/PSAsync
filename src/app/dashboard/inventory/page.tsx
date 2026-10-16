@@ -10,6 +10,8 @@ import { computeStatusLabel, currentUserLabel, statusBadgeClass } from "@/lib/in
 import { AddInventoryItemModal } from "@/components/inventory/AddInventoryItemModal"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { toast } from "@/lib/toast"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface AssetRow {
   id: string
@@ -109,6 +111,12 @@ const FILTER_SELECT_CLASS =
   "rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 
 export default function InventoryListPage() {
+  const { can } = useAccess()
+  if (!can("pages.inventory")) return <NoAccess />
+  return <InventoryListPageContent />
+}
+
+function InventoryListPageContent() {
   return (
     <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
       <InventoryListPageInner />

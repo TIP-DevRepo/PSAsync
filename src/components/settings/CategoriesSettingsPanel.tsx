@@ -5,6 +5,8 @@ import { ChevronRight, Plus, Pencil, Trash2, Check, X, ListPlus } from "lucide-r
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { useAccess } from "@/components/AccessProvider"
+import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
 
 interface Category {
   id: string
@@ -46,7 +48,15 @@ function buildTree(flat: Category[]): CategoryTreeItem[] {
   return roots
 }
 
+// Its list loads for anyone (pickers elsewhere read it), so the section is
+// gated here rather than on a refused load
 export function CategoriesSettingsPanel() {
+  const { can } = useAccess()
+  if (!can("settingsSections.company")) return <SettingsNoAccess />
+  return <CategoriesSettingsPanelContent />
+}
+
+function CategoriesSettingsPanelContent() {
   const [categories, setCategories] = useState<Category[]>([])
   const [fields, setFields] = useState<CustomField[]>([])
   const [loading, setLoading] = useState(true)

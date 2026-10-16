@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { CategoryPicker } from "@/components/categories/CategoryPicker"
+import { useAccess } from "@/components/AccessProvider"
 
 export interface CatalogItemOption {
   id: string
@@ -36,6 +37,9 @@ export function CatalogItemPicker({
   value: CatalogItemOption | null
   onChange: (item: CatalogItemOption) => void
 }) {
+  const { can } = useAccess()
+  // Creating an item goes through POST /api/catalog, which needs the Catalog page
+  const canCreateItem = can("pages.catalog")
   const [items, setItems] = useState<CatalogItemOption[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState("")
@@ -169,9 +173,11 @@ export function CatalogItemPicker({
                   </button>
                 ))}
               </div>
-              <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-                + Create new Catalog Item
-              </Button>
+              {canCreateItem && (
+                <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+                  + Create new Catalog Item
+                </Button>
+              )}
             </>
           )}
 

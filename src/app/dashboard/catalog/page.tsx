@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button"
 import { ArrowUp, ArrowDown, ArrowUpDown, Trash2 } from "lucide-react"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { toast } from "@/lib/toast"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface CatalogItem {
   id: string
@@ -90,6 +92,12 @@ function SortableHeader({
 }
 
 export default function CatalogListPage() {
+  const { can } = useAccess()
+  if (!can("pages.catalog")) return <NoAccess />
+  return <CatalogListPageContent />
+}
+
+function CatalogListPageContent() {
   const router = useRouter()
   const [items, setItems] = useState<CatalogItem[]>([])
   const [loading, setLoading] = useState(true)
