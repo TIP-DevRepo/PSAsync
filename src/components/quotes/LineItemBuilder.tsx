@@ -1224,6 +1224,8 @@ export function LineItemBuilder({
                     }}
                   >
                     <SortableContext items={topLevelItems.map((i) => i.id)} strategy={verticalListSortingStrategy}>
+                      {/* The grid keeps its own minimum width (GRID_COLS) and scrolls sideways here when the column is narrower */}
+                      <div className="overflow-x-auto">
                       <div className="w-full text-sm grid" style={{ gridTemplateColumns: GRID_COLS }}>
                         <Cell className={`${pad} pl-4 text-left text-xs text-zinc-500 border-b`} />
                         <Cell className={`${pad} text-left text-xs text-zinc-500 border-b`}>Config</Cell>
@@ -1287,6 +1289,7 @@ export function LineItemBuilder({
                         })}
 
                         <SectionEdgeCap id={bottomCapId} />
+                      </div>
                       </div>
                     </SortableContext>
 
