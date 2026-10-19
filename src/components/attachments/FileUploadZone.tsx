@@ -2,6 +2,14 @@
 
 import { useState, useRef, useCallback } from "react"
 import { Upload, X, RotateCw, CheckCircle2, FileText } from "lucide-react"
+import { toast } from "@/lib/toast"
+import {
+  PROFILE_MAX_BYTES,
+  UPLOAD_MESSAGES,
+  acceptAttribute,
+  checkUploadBasics,
+  type UploadProfile,
+} from "@/lib/upload-rules"
 
 interface QueueItem {
   id: string
@@ -22,7 +30,12 @@ function fileSizeLabel(bytes: number) {
 // percent-complete for an outgoing upload, which the design rules call
 // for explicitly ("show percent complete + time remaining, not just a
 // spinner").
-function uploadWithProgress(url: string, file: File, onProgress: (pct: number) => void): Promise<void> {
+function uploadWithProgress(
+  url: string,
+  file: File,
+  maxBytes: number,
+  onProgress: (pct: number) => void
+): Promise<void> {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest()
     xhr.open("POST", url)
@@ -30,8 +43,17 @@ function uploadWithProgress(url: string, file: File, onProgress: (pct: number) =
       if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100))
     }
     xhr.onload = () => {
-      if (xhr.status >= 200 && xhr.status < 300) resolve()
-      else reject(new Error("Upload failed"))
+      if (xhr.status >= 200 && xhr.status < 300) return resolve()
+      // The server's { error } message when it sent one (a refused type,
+      // contents, or size). 413 is the hosting platform's own size refusal.
+      let message = "Upload failed, try again"
+      try {
+        const body = JSON.parse(xhr.responseText) as { error?: unknown }
+        if (typeof body.error === "string") message = body.error
+      } catch {
+        if (xhr.status === 413) message = UPLOAD_MESSAGES.tooLarge(maxBytes)
+      }
+      reject(new Error(message))
     }
     xhr.onerror = () => reject(new Error("Upload failed"))
     const formData = new FormData()
@@ -49,9 +71,11 @@ function uploadWithProgress(url: string, file: File, onProgress: (pct: number) =
 export function FileUploadZone({
   uploadUrl,
   onUploaded,
+  profile = "ATTACHMENT",
 }: {
   uploadUrl: string
   onUploaded: () => void
+  profile?: UploadProfile
 }) {
   const [isDragging, setIsDragging] = useState(false)
   const [queue, setQueue] = useState<QueueItem[]>([])
@@ -62,24 +86,31 @@ export function FileUploadZone({
       setQueue((prev) =>
         prev.map((q) => (q.id === item.id ? { ...q, status: "uploading", progress: 0, errorMessage: undefined } : q))
       )
-      uploadWithProgress(uploadUrl, item.file, (pct) => {
+      uploadWithProgress(uploadUrl, item.file, PROFILE_MAX_BYTES[profile], (pct) => {
         setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, progress: pct } : q)))
       })
         .then(() => {
           setQueue((prev) => prev.map((q) => (q.id === item.id ? { ...q, status: "done", progress: 100 } : q)))
           onUploaded()
         })
-        .catch(() => {
+        .catch((err: Error) => {
           setQueue((prev) =>
-            prev.map((q) => (q.id === item.id ? { ...q, status: "error", errorMessage: "Upload failed — try again" } : q))
+            prev.map((q) => (q.id === item.id ? { ...q, status: "error", errorMessage: err.message } : q))
           )
         })
     },
-    [uploadUrl, onUploaded]
+    [uploadUrl, onUploaded, profile]
   )
 
   function addFiles(files: FileList | File[]) {
-    const items: QueueItem[] = Array.from(files).map((file) => ({
+    // Type and size are checked before anything is sent; the server checks
+    // them again along with the file's contents
+    const accepted = Array.from(files).filter((file) => {
+      const problem = checkUploadBasics(file, profile)
+      if (problem) toast.error(problem, file.name)
+      return !problem
+    })
+    const items: QueueItem[] = accepted.map((file) => ({
       id: `${file.name}-${file.size}-${Date.now()}-${Math.random()}`,
       file,
       progress: 0,
@@ -115,7 +146,14 @@ export function FileUploadZone({
           isDragging ? "border-primary bg-primary/5" : "border-border hover:border-muted-foreground"
         }`}
       >
-        <input ref={fileInputRef} type="file" multiple onChange={handleFileInputChange} className="hidden" />
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={acceptAttribute(profile)}
+          onChange={handleFileInputChange}
+          className="hidden"
+        />
         <Upload size={20} className={`mx-auto mb-2 ${isDragging ? "text-primary" : "text-muted-foreground"}`} />
         <p className="text-sm text-foreground">
           {isDragging ? "Drop to upload" : "Drag files here, or click to browse"}
