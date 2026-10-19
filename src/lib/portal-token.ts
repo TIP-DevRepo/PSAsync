@@ -1,4 +1,5 @@
 import { randomBytes } from "crypto"
+import { withSafeTerms } from "@/lib/sanitize-terms"
 
 // A customer portal token: 32 random bytes, base64url encoded (43
 // characters). Every route that creates a quote row passes one explicitly
@@ -12,8 +13,12 @@ export function newAccessToken(): string {
 // the customer link on demand (GET /api/quotes/[id]/portal-link). The
 // internal token stays only where the UI opens the internal preview (the
 // quotes list and the quote detail).
+//
+// Every staff response with a quote row passes through one of these, so
+// they also sanitize the row's terms on the way out: stored terms are safe
+// to render even if they were saved before terms were sanitized on save.
 export function withoutCustomerToken<T extends { accessToken?: unknown }>(row: T): Omit<T, "accessToken"> {
-  const rest: Partial<T> = { ...row }
+  const rest: Partial<T> = withSafeTerms({ ...row })
   delete rest.accessToken
   return rest as Omit<T, "accessToken">
 }
@@ -22,7 +27,7 @@ export function withoutCustomerToken<T extends { accessToken?: unknown }>(row: T
 export function withoutPortalTokens<T extends { accessToken?: unknown; internalAccessToken?: unknown }>(
   row: T
 ): Omit<T, "accessToken" | "internalAccessToken"> {
-  const rest: Partial<T> = { ...row }
+  const rest: Partial<T> = withSafeTerms({ ...row })
   delete rest.accessToken
   delete rest.internalAccessToken
   return rest as Omit<T, "accessToken" | "internalAccessToken">

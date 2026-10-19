@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
+import { termsForStorage } from "@/lib/sanitize-terms"
 
 export async function POST(
   req: NextRequest,
@@ -42,7 +43,9 @@ export async function POST(
       templateId: source.templateId,
       title: source.title ? `${source.title} (Copy)` : null,
       introText: source.introText,
-      terms: source.terms,
+      terms: termsForStorage(source.terms),
+      // The copy is a draft: with the flag ticked it follows the current default
+      useDefaultTerms: source.useDefaultTerms,
       internalNotes: source.internalNotes,
       clientPoNumber: source.clientPoNumber,
       expiresAt: source.expiresAt,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { quoteSettingsSelect } from "@/lib/safe-selects"
 import { apiError, requireAccess } from "@/lib/api-access"
+import { termsForStorage, termsToDisplayHtml } from "@/lib/sanitize-terms"
 
 // Any active user, since the quote pages read these defaults
 export async function GET() {
@@ -16,7 +17,7 @@ export async function GET() {
   return NextResponse.json({
     quotePrefix: settings?.quotePrefix ?? "Q",
     quoteExpiryDays: settings?.quoteExpiryDays ?? 30,
-    quoteTerms: settings?.quoteTerms ?? "",
+    quoteTerms: termsToDisplayHtml(settings?.quoteTerms) ?? "",
     quoteDefaultCc: settings?.quoteDefaultCc ?? "",
     quoteApprovalThreshold: settings?.quoteApprovalThreshold ?? null,
     quoteSendFromMode: settings?.quoteSendFromMode ?? "CREATOR",
@@ -66,7 +67,7 @@ export async function PATCH(req: NextRequest) {
   const data = {
     quotePrefix: body.quotePrefix,
     quoteExpiryDays,
-    quoteTerms: body.quoteTerms || null,
+    quoteTerms: termsForStorage(body.quoteTerms),
     quoteDefaultCc: body.quoteDefaultCc || null,
     quoteApprovalThreshold: approvalThreshold ?? null,
     quoteSendFromMode: body.quoteSendFromMode === "SPECIFIC" ? "SPECIFIC" : "CREATOR",
@@ -80,5 +81,5 @@ export async function PATCH(req: NextRequest) {
     select: quoteSettingsSelect,
   })
 
-  return NextResponse.json(settings)
+  return NextResponse.json({ ...settings, quoteTerms: termsToDisplayHtml(settings.quoteTerms) })
 }

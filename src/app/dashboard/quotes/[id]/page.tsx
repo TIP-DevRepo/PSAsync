@@ -43,9 +43,18 @@ interface QuoteDetail {
   version: number
   isActive: boolean
   sections: string[]
+  // The stored terms, for the editor
   terms: string | null
   paymentTerms: string | null
   useDefaultTerms: boolean
+  // What the quote shows everywhere, decided on the server
+  // (resolveQuoteTerms in src/lib/quote-terms.ts)
+  effectiveTerms: string | null
+  // Ticking the box would replace stored custom terms
+  termsDifferFromDefault: boolean
+  // Sent, or moved past draft: terms are shown read only (decided on the
+  // server by isTermsFrozen in src/lib/quote-terms.ts)
+  termsFrozen: boolean
   client: { id: string; name: string; email: string | null }
   contact: { id: string; firstName: string; lastName: string; email: string | null } | null
   user: { id: string; name: string }
@@ -179,7 +188,6 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
   const [clients, setClients] = useState<ClientOption[]>([])
   const [contacts, setContacts] = useState<ContactOption[]>([])
   const [termsDraft, setTermsDraft] = useState("")
-  const [companyDefaultTerms, setCompanyDefaultTerms] = useState("")
 
   const loadQuote = useCallback(() => {
     fetch(`/api/quotes/${id}`)
@@ -225,9 +233,6 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
     fetch("/api/clients")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setClients(data))
-    fetch("/api/quote-settings")
-      .then((res) => res.json())
-      .then((json) => setCompanyDefaultTerms(json.quoteTerms ?? ""))
     if (
       typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("send") === "1" &&
@@ -350,6 +355,33 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
     if (!data.opens) {
       toast.info("This version hasn't been sent yet", "The customer can open the link once it is sent.")
     }
+  }
+
+  // Ticking stores a copy of the company default and unticking starts the
+  // editor from it (the server does both); ticking over custom terms asks
+  // first, since it replaces them
+  async function handleUseDefaultTermsChange(useDefault: boolean) {
+    if (!quote) return
+    if (useDefault && (quote.termsDifferFromDefault || termsDraft !== (quote.terms ?? ""))) {
+      const confirmed = await confirmDialog({
+        title: "Use the company default terms?",
+        description: "This replaces the custom terms on this quote.",
+        confirmLabel: "Use Default Terms",
+      })
+      if (!confirmed) return
+    }
+    const res = await fetch(`/api/quotes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ useDefaultTerms: useDefault }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast.error("Couldn't update the terms", data.error)
+    } else {
+      setTermsDraft(data.terms ?? "")
+    }
+    loadQuote()
   }
 
   async function handleRegenerateLink() {
@@ -796,11 +828,13 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                   <span className="text-muted-foreground">Payment Terms:</span>{" "}
                   <span className="text-foreground">{quote.paymentTerms || "—"}</span>
                 </p>
-                {(quote.useDefaultTerms ? companyDefaultTerms : quote.terms) && (
+                {quote.effectiveTerms && (
                   <CollapsibleField label="Terms & Conditions">
+                    {/* Only ever a terms string from an API response, sanitized on the server
+                        (src/lib/sanitize-terms.ts). Never render anything else here. */}
                     <div
                       className="text-sm text-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
-                      dangerouslySetInnerHTML={{ __html: quote.useDefaultTerms ? companyDefaultTerms : (quote.terms ?? "") }}
+                      dangerouslySetInnerHTML={{ __html: quote.effectiveTerms }}
                     />
                   </CollapsibleField>
                 )}
@@ -881,19 +915,33 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                   />
                 </div>
                 <CollapsibleField label="Terms & Conditions">
-                  <label className="flex items-center gap-2 text-sm text-foreground mb-2">
-                    <input
-                      type="checkbox"
-                      checked={quote.useDefaultTerms}
-                      onChange={(e) => updateQuoteField({ useDefaultTerms: e.target.checked })}
-                      className="accent-primary"
-                    />
-                    Use company default Terms &amp; Conditions
-                  </label>
-                  {quote.useDefaultTerms ? (
+                  {/* Only ever a terms string from an API response, sanitized on the server
+                      (src/lib/sanitize-terms.ts). Never render anything else here. */}
+                  {quote.termsFrozen ? (
+                    <>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        These are the terms this quote was sent with. Create a new version to change them.
+                      </p>
+                      <div
+                        className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
+                        dangerouslySetInnerHTML={{ __html: quote.effectiveTerms || "No terms." }}
+                      />
+                    </>
+                  ) : (
+                    <label className="flex items-center gap-2 text-sm text-foreground mb-2">
+                      <input
+                        type="checkbox"
+                        checked={quote.useDefaultTerms}
+                        onChange={(e) => handleUseDefaultTermsChange(e.target.checked)}
+                        className="accent-primary"
+                      />
+                      Use company default Terms &amp; Conditions
+                    </label>
+                  )}
+                  {quote.termsFrozen ? null : quote.useDefaultTerms ? (
                     <div
                       className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
-                      dangerouslySetInnerHTML={{ __html: companyDefaultTerms || "No company default set." }}
+                      dangerouslySetInnerHTML={{ __html: quote.effectiveTerms || "No company default set." }}
                     />
                   ) : (
                     <RichTextEditor

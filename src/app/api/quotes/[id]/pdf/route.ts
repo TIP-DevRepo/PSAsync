@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
+import { resolveQuoteTerms } from "@/lib/quote-terms"
 import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
@@ -30,7 +31,7 @@ export async function GET(
         select: {
           name: true,
           logoUrl: true,
-          settings: { select: { primaryColor: true, accentColor: true } },
+          settings: { select: { primaryColor: true, accentColor: true, quoteTerms: true } },
         },
       },
       lineItems: { orderBy: { sortOrder: "asc" } },
@@ -39,7 +40,8 @@ export async function GET(
 
   if (!quote) return notFound()
 
-  const html = buildQuotePdfHtml(quote, {
+  const effectiveTerms = resolveQuoteTerms(quote, quote.company.settings?.quoteTerms)
+  const html = buildQuotePdfHtml({ ...quote, effectiveTerms }, {
     name: quote.company.name,
     logoUrl: quote.company.logoUrl,
     primaryColor: quote.company.settings?.primaryColor ?? "#1B3A5C",

@@ -10,6 +10,7 @@ import {
   type CatalogOption,
 } from "@/components/quotes/LineItemBuilder"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
 import { useAccess } from "@/components/AccessProvider"
@@ -21,7 +22,13 @@ interface TemplateDetail {
   name: string
   description: string | null
   introText: string | null
+  // The stored terms, for the editor
   terms: string | null
+  // What the template shows and gives new quotes, decided on the server
+  // (resolveTemplateTerms in src/lib/quote-terms.ts)
+  effectiveTerms: string | null
+  // Ticking the box would replace stored custom terms
+  termsDifferFromDefault: boolean
   expiryDays: number
   active: boolean
   sections: string[]
@@ -67,7 +74,8 @@ function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [notFound, setNotFound] = useState(false)
-  const [companyDefaultTerms, setCompanyDefaultTerms] = useState("")
+  // Terms typed in the editor and not saved yet
+  const [termsEdited, setTermsEdited] = useState(false)
 
   useEffect(() => {
     params.then((p) => setId(p.id))
@@ -94,13 +102,53 @@ function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
     fetch("/api/catalog")
       .then((res) => res.json())
       .then((items: CatalogOption[]) => setCatalog(items.filter((i) => i.active)))
-    fetch("/api/quote-settings")
-      .then((res) => res.json())
-      .then((json) => setCompanyDefaultTerms(json.quoteTerms ?? ""))
   }, [id])
 
   function update(field: string, value: string | number | boolean) {
     setTemplate((prev) => (prev ? { ...prev, [field]: value } : prev))
+  }
+
+  // The terms fields from a saved template, merged into the form without
+  // touching other fields still being edited
+  function mergeSavedTerms(saved: Pick<TemplateDetail, "terms" | "useDefaultTerms" | "effectiveTerms" | "termsDifferFromDefault">) {
+    setTemplate((prev) =>
+      prev
+        ? {
+            ...prev,
+            terms: saved.terms,
+            useDefaultTerms: saved.useDefaultTerms,
+            effectiveTerms: saved.effectiveTerms,
+            termsDifferFromDefault: saved.termsDifferFromDefault,
+          }
+        : prev
+    )
+    setTermsEdited(false)
+  }
+
+  // Saved right away, like on a quote: ticking stores a copy of the company
+  // default and unticking starts the editor from it (the server does both);
+  // ticking over custom terms asks first, since it replaces them
+  async function handleUseDefaultTermsChange(useDefault: boolean) {
+    if (!id || !template) return
+    if (useDefault && (template.termsDifferFromDefault || termsEdited)) {
+      const confirmed = await confirmDialog({
+        title: "Use the company default terms?",
+        description: "This replaces the custom terms on this template.",
+        confirmLabel: "Use Default Terms",
+      })
+      if (!confirmed) return
+    }
+    const res = await fetch(`/api/quote-templates/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ useDefaultTerms: useDefault }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast.error("Couldn't update the terms", data.error)
+      return
+    }
+    mergeSavedTerms(data)
   }
 
   async function handleSave() {
@@ -121,6 +169,7 @@ function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
     })
     setSaving(false)
     if (res.ok) {
+      mergeSavedTerms(await res.json())
       toast.success("Template saved")
     } else {
       toast.error("Couldn't save template")
@@ -329,22 +378,32 @@ function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
             <input
               type="checkbox"
               checked={template.useDefaultTerms}
-              onChange={(e) => update("useDefaultTerms", e.target.checked)}
+              onChange={(e) => handleUseDefaultTermsChange(e.target.checked)}
+              disabled={!canManage}
               className="accent-primary"
             />
             Use company default Terms &amp; Conditions
           </label>
+          {/* Both HTML branches below only ever render a terms string from an API
+              response, sanitized on the server (src/lib/sanitize-terms.ts). Never
+              render anything else here. */}
           {template.useDefaultTerms ? (
             <div
               className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
-              dangerouslySetInnerHTML={{ __html: companyDefaultTerms || "No company default set." }}
+              dangerouslySetInnerHTML={{ __html: template.effectiveTerms || "No company default set." }}
             />
           ) : canManage ? (
-            <RichTextEditor value={template.terms ?? ""} onChange={(html) => update("terms", html)} />
+            <RichTextEditor
+              value={template.terms ?? ""}
+              onChange={(html) => {
+                update("terms", html)
+                setTermsEdited(true)
+              }}
+            />
           ) : (
             <div
               className="rounded-md border border-border p-3 text-sm text-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
-              dangerouslySetInnerHTML={{ __html: template.terms ?? "" }}
+              dangerouslySetInnerHTML={{ __html: template.effectiveTerms ?? "" }}
             />
           )}
         </CollapsibleField>
