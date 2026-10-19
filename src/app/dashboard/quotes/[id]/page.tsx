@@ -776,10 +776,9 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <div className="w-full max-w-[2256px] mx-auto grid grid-cols-1 lg:grid-cols-[auto_minmax(20rem,1fr)] gap-6 items-start">
-          {/* Left: main content — sized to the Line Item table's own natural width, not a fraction of the container */}
-          <div className="space-y-6">
+        <div className="w-full max-w-[2256px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-6 items-start">
+          {/* Left: main content, always two thirds. Fixed tracks so content never changes the split; the line item table scrolls inside its own container */}
+          <div className="min-w-0 space-y-6">
           <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 text-sm">
             {!showEditableHeader ? (
               <>
@@ -975,8 +974,8 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
           </div>
         </div>
 
-        {/* Right: Version History + Comments */}
-        <div className="space-y-6">
+        {/* Right: Version History + Comments, always one third */}
+        <div className="min-w-0 space-y-6">
           <div className="rounded-lg border border-border bg-card shadow-card p-4 text-sm">
               <h2 className="font-semibold text-sm mb-2 text-foreground">Version History</h2>
               <div className="space-y-1">
@@ -1055,7 +1054,6 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
           </div>
         </div>
         </div>
-      </div>
 
       {canDeleteQuote && (
         <div className="flex justify-end">
