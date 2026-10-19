@@ -40,6 +40,7 @@ function LoginPage() {
     could_not_read_profile: "Couldn't read your Microsoft profile. Please try again.",
     no_email_on_account: "Your Microsoft account doesn't have an email address PSAsync can use.",
     wrong_tenant: "That Microsoft account belongs to a different organization. Sign in with your company's Microsoft account.",
+    account_already_linked: "That Microsoft account can't be linked to this PSAsync account. Contact your administrator.",
   }
 
   async function handleEmailContinue(e: React.FormEvent) {

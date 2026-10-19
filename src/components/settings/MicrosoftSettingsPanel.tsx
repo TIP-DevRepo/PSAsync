@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { useAccess } from "@/components/AccessProvider"
+import { TENANT_GUID } from "@/lib/sso-tenant"
 
 interface CredSettings {
   microsoftClientId: string
@@ -164,6 +165,14 @@ export function MicrosoftSettingsPanel() {
   if (loading || !settings) return <p className="text-sm text-zinc-500">Loading...</p>
 
   const readyToConnect = !!(settings.microsoftClientId && settings.microsoftTenantId && settings.hasClientSecret)
+
+  // Sign in skips the directory check for a tenant saved as a domain name
+  // (see checkSsoTenant), so whoever can change the credentials is told
+  const tenantSavedAsDomain =
+    !!access?.isGlobalAdmin &&
+    settings.ssoEnabled &&
+    !!settings.microsoftTenantId &&
+    !TENANT_GUID.test(settings.microsoftTenantId.trim())
 
   // Users without Integrations access only see and manage their own
   // mailboxes, and never the shared quote sender's Disconnect
@@ -358,6 +367,12 @@ export function MicrosoftSettingsPanel() {
           </div>
           {!readyToConnect && (
             <p className="text-xs text-zinc-500">Save your Azure credentials above before enabling SSO.</p>
+          )}
+          {tenantSavedAsDomain && (
+            <p className="rounded-md border border-warning bg-warning-bg p-3 text-sm text-foreground">
+              Your Microsoft directory ID is saved as a domain name. Replace it with the directory ID (a GUID from
+              your Microsoft Entra overview page) so sign in can confirm accounts belong to your organization.
+            </p>
           )}
         </div>
       )}
