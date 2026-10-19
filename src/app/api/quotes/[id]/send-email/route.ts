@@ -7,6 +7,7 @@ import { approvalFingerprint, type HeldEmail } from "@/lib/quote-approval"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { escapeHtmlWithBreaks } from "@/lib/html"
+import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
 import {
   MAX_RECIPIENTS,
   actorName,
@@ -141,14 +142,18 @@ export async function POST(
     return NextResponse.json({ ...(updated ? withoutPortalTokens(updated) : {}), pendingApproval: true })
   }
 
-  // No approval needed, send the email right now
-  const result = await sendQuoteEmail({ quoteId: id, ...emailPayload })
+  // No approval needed, send the email right now. The terms it freezes are
+  // worked out once, used for the attached PDF, and stored when the quote
+  // is marked sent below, so the customer gets exactly what is stored.
+  const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
+  const result = await sendQuoteEmail({ quoteId: id, ...emailPayload, termsFreeze: freeze })
   if (!result.success) {
     return NextResponse.json({ error: result.error }, { status: 400 })
   }
 
   const note = sendAsNote({ userId: ctx.userId, name: clickerName }, sender.mailbox)
   const updated = await prisma.$transaction(async (tx) => {
+    await applyTermsFreeze(tx, id, freeze)
     await tx.quote.updateMany({
       where: { companyId, quoteNumber: quote.quoteNumber, id: { not: id } },
       data: { isActive: false },

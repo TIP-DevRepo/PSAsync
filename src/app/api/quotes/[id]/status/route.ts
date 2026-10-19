@@ -4,6 +4,7 @@ import { withoutPortalTokens } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
+import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
 
 const VALID_STATUSES = [
   "DRAFT",
@@ -44,7 +45,10 @@ export async function POST(
   // Manually marking a quote SENT should make it the live version, same as
   // the normal send flow
   if (body.status === "SENT") {
+    // Freezes the company default terms when this first marks it sent
+    const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
     const updated = await prisma.$transaction(async (tx) => {
+      await applyTermsFreeze(tx, id, freeze)
       await tx.quote.updateMany({
         where: { companyId, quoteNumber: quote.quoteNumber, id: { not: id } },
         data: { isActive: false },

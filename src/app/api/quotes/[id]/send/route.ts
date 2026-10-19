@@ -4,6 +4,7 @@ import { prisma } from "@/lib/prisma"
 import { withoutPortalTokensOrNull, withoutPortalTokens } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
+import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
 
 export async function POST(
   req: NextRequest,
@@ -74,8 +75,11 @@ export async function POST(
     return NextResponse.json(withoutPortalTokensOrNull(updated))
   }
 
-  // No approval needed — send immediately
+  // No approval needed, send immediately. A quote using the company
+  // default terms keeps the default as it is now, frozen in this write.
+  const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
   const updated = await prisma.$transaction(async (tx) => {
+    await applyTermsFreeze(tx, id, freeze)
     // This version becomes the one clients see; every other version in the
     // same quote family is archived (deactivated) but kept for history
     await tx.quote.updateMany({

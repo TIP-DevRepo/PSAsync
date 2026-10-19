@@ -2,6 +2,7 @@ import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { sendQuoteEmail } from "@/lib/send-quote-email"
 import { loadCompanyMailbox, sendAsNote, withNote } from "@/lib/quote-sender"
+import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
 
 // The email composed in the Send Quote dialog, held on the quote
 // (pendingEmailPayload) while it waits for approval
@@ -84,8 +85,14 @@ export async function completeApprovedQuote(
   })
   if (!quote) return { outcome: "skipped" }
 
+  // The quote only becomes sent here, so a quote using the company default
+  // terms freezes the default as it is now: worked out once, used for the
+  // held email's PDF, and stored in the write that marks it sent
+  const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
+
   async function markSent(internalNotes: string | null | undefined) {
     await prisma.$transaction(async (tx) => {
+      await applyTermsFreeze(tx, quoteId, freeze)
       await tx.quote.updateMany({
         where: { companyId, quoteNumber: quote!.quoteNumber, id: { not: quoteId } },
         data: { isActive: false },
@@ -114,6 +121,7 @@ export async function completeApprovedQuote(
       bodyHtml: held.bodyHtml,
       includePdf: held.includePdf,
       connectionId: held.connectionId ?? null,
+      termsFreeze: freeze,
     })
     if (!result.success) error = result.error || "the email service refused it"
   } catch (err) {
