@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import type { QuoteStatus } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
+import { isPastExpiry, PORTAL_EXPIRY_TIME_ZONE } from "@/lib/quote-expiry"
 
 // The one set of rules for the customer portal. Every portal route
 // (GET portal/[token], comments, accept, decline, line-items, pdf) starts
@@ -42,10 +43,10 @@ export interface PortalQuoteState {
   expiresAt: Date | null
 }
 
-// Expired from the moment expiresAt is reached. No date, no expiry.
-export function isPastExpiry(expiresAt: Date | null, now: Date): boolean {
-  return !!expiresAt && expiresAt.getTime() <= now.getTime()
-}
+// The date rule lives in src/lib/quote-expiry.ts: a date only expiresAt is
+// valid through the end of that day in PORTAL_EXPIRY_TIME_ZONE, a real
+// time is compared as is, and null never expires
+export { isPastExpiry, PORTAL_EXPIRY_TIME_ZONE }
 
 export function isExpired(quote: PortalQuoteState, now: Date): boolean {
   return quote.status === "EXPIRED" || isPastExpiry(quote.expiresAt, now)
