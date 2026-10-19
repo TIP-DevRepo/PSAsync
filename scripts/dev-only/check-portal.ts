@@ -38,6 +38,9 @@
 // which sends no email, the default is changed in the database, and the
 // sent quote must still show the text frozen at the send on the customer
 // link and in the PDF. The company default terms are put back at the end.
+// The statusFreeze scene sets a never sent draft to DECLINED through the
+// status route (the same freeze as ACCEPTED, without the sales order an
+// acceptance creates) and checks the default was frozen into its terms.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -64,6 +67,7 @@ type Scene =
   | "termsPatch" // B DRAFT, never sent, box unticked, no terms, for the PATCH step
   | "defaultDraft" // B DRAFT, never sent, box ticked over CUSTOM_OLD, company default DEFAULT_ONE
   | "defaultFrozen" // B VIEWED after the send froze DEFAULT_ONE, company default changed to DEFAULT_TWO
+  | "statusFreeze" // B DRAFT, never sent, box ticked over CUSTOM_OLD, company default DEFAULT_ONE
   | "regenerate" // B VIEWED, not expired, for the regenerate steps
 
 // ─── ATTEMPTS ───────────────────────────────────────────────────────────────
@@ -317,6 +321,15 @@ const ATTEMPTS: Attempt[] = [
     path: (ctx) => `/api/quotes/${ctx.b.quoteId}`, expect: 200,
     check: async (res) => effectiveTermsProblem(res, [DEFAULT_ONE_TEXT], [DEFAULT_TWO_TEXT]) },
 
+  // ── Moving a never sent quote past draft by hand freezes its terms ──
+  { scene: "statusFreeze", as: "admin", name: "status change to DECLINED freezes the default", kind: "allowed", method: "POST",
+    path: (ctx) => `/api/quotes/${ctx.b.quoteId}/status`, body: () => ({ status: "DECLINED" }), expect: 200,
+    check: async (_res, ctx, prisma) => {
+      const q = await prisma.quote.findUniqueOrThrow({ where: { id: ctx.b.quoteId }, select: { status: true, sentAt: true, terms: true } })
+      if (q.status !== "DECLINED" || q.sentAt) return `the quote is ${q.status}${q.sentAt ? " and was marked sent" : ""}`
+      return textsProblem(q.terms ?? "", "the stored terms", [DEFAULT_ONE_TEXT], [CUSTOM_OLD_TEXT])
+    } },
+
   // ── Staff responses and regenerate ──
   { scene: "regenerate", as: "admin", name: "quote detail has no customer token", kind: "control", method: "GET", path: (ctx) => `/api/quotes/${ctx.b.quoteId}`,
     expect: 200, contains: () => ['"internalAccessToken"'], notContains: (ctx) => ['"accessToken"', ctx.bClient] },
@@ -355,6 +368,7 @@ const SCENE_ORDER: Scene[] = [
   "termsPatch",
   "defaultDraft",
   "defaultFrozen",
+  "statusFreeze",
   "regenerate",
 ]
 
@@ -397,6 +411,7 @@ async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; re
     defaultDraft: { ...base, status: "DRAFT" as const, sentAt: null, viewedAt: null },
     // Keeps the terms the send froze
     defaultFrozen: { ...base, status: "VIEWED" as const },
+    statusFreeze: { ...base, status: "DRAFT" as const, sentAt: null, viewedAt: null },
     regenerate: { ...base, status: "VIEWED" as const },
   }[scene]
   // Written straight to the database, past the sanitizer, the way terms
@@ -406,12 +421,13 @@ async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; re
       ? { terms: HOSTILE_TERMS }
       : scene === "termsPatch"
         ? { terms: null, useDefaultTerms: false }
-        : scene === "defaultDraft"
+        : scene === "defaultDraft" || scene === "statusFreeze"
           ? { terms: CUSTOM_OLD, useDefaultTerms: true }
           : {}
   await prisma.quote.update({ where: { id: ids.b }, data: { ...b, ...terms } })
   // Company B's default terms, put back at the end
-  const companyDefault = scene === "defaultDraft" ? DEFAULT_ONE : scene === "defaultFrozen" ? DEFAULT_TWO : null
+  const companyDefault =
+    scene === "defaultDraft" || scene === "statusFreeze" ? DEFAULT_ONE : scene === "defaultFrozen" ? DEFAULT_TWO : null
   if (companyDefault) {
     await prisma.companySettings.upsert({
       where: { companyId: ids.companyB },
