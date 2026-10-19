@@ -31,7 +31,9 @@ interface PdfQuote {
   version: number
   title: string | null
   introText: string | null
-  terms: string | null
+  // The effective terms from resolveQuoteTerms (src/lib/quote-terms.ts),
+  // never the stored terms on their own
+  effectiveTerms: string | null
   clientPoNumber: string | null
   expiresAt: Date | null
   createdAt: Date
@@ -60,9 +62,9 @@ function lineTotal(li: PdfLineItem) {
 }
 
 export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string {
-  // Rich text terms rendered as HTML, sanitized here since this reads the
-  // database directly; older plain text terms keep their line breaks
-  const termsHtml = termsToDisplayHtml(quote.terms)
+  // Rich text terms rendered as HTML. Already resolved and sanitized by the
+  // caller, and sanitized again here since the result goes into the page
+  const termsHtml = termsToDisplayHtml(quote.effectiveTerms)
 
   // Brand colors and the logo URL go into CSS and an attribute, so they are
   // validated rather than trusted. An invalid color falls back to the same

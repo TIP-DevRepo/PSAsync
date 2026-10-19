@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
+import { asSent, resolveQuoteTerms, type TermsFreeze } from "@/lib/quote-terms"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
 
@@ -16,6 +17,11 @@ export interface SendQuoteEmailInput {
   // Only emails held for approval before this was stored arrive without
   // it, and those keep the sender they would have had when they were held.
   connectionId?: string | null
+  // The terms this send freezes (termsFreezeFor), worked out by the caller
+  // before sending and written by it when it marks the quote sent, so the
+  // attached PDF carries exactly what gets stored. null when the send
+  // leaves the stored terms as they are.
+  termsFreeze?: TermsFreeze | null
 }
 
 export interface SendQuoteEmailResult {
@@ -139,7 +145,9 @@ async function sendFromConnection(
   // Optionally attach the branded PDF
   const attachments: Record<string, unknown>[] = []
   if (input.includePdf) {
-    const html = buildQuotePdfHtml(quote, {
+    // The quote as it reads once this send marks it sent
+    const effectiveTerms = resolveQuoteTerms(asSent(quote, input.termsFreeze ?? null), settings.quoteTerms)
+    const html = buildQuotePdfHtml({ ...quote, effectiveTerms }, {
       name: quote.company.name,
       logoUrl: quote.company.logoUrl,
       primaryColor: settings.primaryColor,

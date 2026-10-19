@@ -137,6 +137,7 @@ function termsProblem(text: string, what: string): string | null {
 // The HTML the quote PDF route renders, built the same way from the stored quote
 async function pdfHtmlTermsProblem(prisma: PrismaClient, quoteId: string): Promise<string | null> {
   const { buildQuotePdfHtml } = await import("@/lib/quote-pdf-template")
+  const { loadCompanyDefaultTerms, resolveQuoteTerms } = await import("@/lib/quote-terms")
   const quote = await prisma.quote.findUniqueOrThrow({
     where: { id: quoteId },
     include: {
@@ -146,7 +147,8 @@ async function pdfHtmlTermsProblem(prisma: PrismaClient, quoteId: string): Promi
       lineItems: { orderBy: { sortOrder: "asc" } },
     },
   })
-  const html = buildQuotePdfHtml(quote, { name: B.company, logoUrl: null, primaryColor: "#1B3A5C", accentColor: "#2E86AB" })
+  const effectiveTerms = resolveQuoteTerms(quote, await loadCompanyDefaultTerms(quote.companyId))
+  const html = buildQuotePdfHtml({ ...quote, effectiveTerms }, { name: B.company, logoUrl: null, primaryColor: "#1B3A5C", accentColor: "#2E86AB" })
   return termsProblem(html, "the PDF HTML")
 }
 
