@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireAccess } from "@/lib/api-access"
-import { uploadFileToS3 } from "@/lib/s3"
+import { readUploadFromRequest, storeUpload } from "@/lib/uploads"
 
 export async function POST(
   req: NextRequest,
@@ -23,15 +23,11 @@ export async function POST(
     return NextResponse.json({ error: "Vendor not found" }, { status: 404 })
   }
 
-  const formData = await req.formData()
-  const file = formData.get("file") as File | null
+  // PNG, JPG, or WebP up to 2 MB, checked by content
+  const { file, response: rejected } = await readUploadFromRequest(req, "LOGO")
+  if (rejected) return rejected
 
-  if (!file) {
-    return NextResponse.json({ error: "No file provided" }, { status: 400 })
-  }
-
-  const buffer = Buffer.from(await file.arrayBuffer())
-  const logoUrl = await uploadFileToS3(buffer, file.name, file.type, `vendors/${id}/logo`)
+  const logoUrl = await storeUpload(file, { folder: `vendors/${vendor.id}/logo`, profile: "LOGO" })
 
   const updated = await prisma.vendor.update({
     where: { id },
