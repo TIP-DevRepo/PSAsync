@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireAccess, notFound } from "@/lib/api-access"
+import { apiError, requireAccess, notFound } from "@/lib/api-access"
 import { mayWriteCost } from "@/lib/line-item-cost"
+import { isInventoryTrackedLine, USE_RECEIVE_MESSAGE } from "@/lib/po-receiving"
 import { loadPurchaseOrderLineItem, purchaseOrderLineItemWhere, purchaseOrderWhere } from "@/lib/scoped-loaders"
 
 export async function PATCH(
@@ -23,6 +24,14 @@ export async function PATCH(
   const poId = existing.purchaseOrderId
 
   const body = await req.json()
+
+  // An inventory tracked line is only ever received through the receive
+  // route, which creates its inventory. Same rule as the page's Rcv'd
+  // checkbox and Receive All (isInventoryTrackedLine).
+  if (body.received !== undefined && isInventoryTrackedLine(existing)) {
+    return apiError(400, USE_RECEIVE_MESSAGE)
+  }
+
   const data: Record<string, unknown> = {}
   if (body.received !== undefined) data.received = Boolean(body.received)
   if (body.serialNumber !== undefined) data.serialNumber = body.serialNumber || null
