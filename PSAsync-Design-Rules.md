@@ -69,6 +69,7 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 - Gutters set mood: 8px dense/technical, 24px balanced, 40px editorial/premium.
 - Responsive column drop: 12 → 6 → 4 → 1 across breakpoints.
 - Break the grid on purpose (full-bleed hero, margin pull-quote) only once it's established.
+- **PSAsync two column detail pages:** a fixed two to one split that never depends on content, `lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]` (or `lg:grid-cols-3` with `lg:col-span-2`), with `min-w-0` on both grid children. Never use `auto` or content sized tracks. Wide tables scroll sideways inside their own `overflow-x-auto` container and never widen the column.
 
 ### Proximity Rule
 - Elements close together read as one group — spacing alone can group UI, no borders needed.
