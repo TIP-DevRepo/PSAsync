@@ -21,6 +21,14 @@
 // before anything runs). No attempt accepts, declines, or comments
 // successfully, and the one client visit to a quote that is SENT is never
 // made, so no notification fires. Nothing is uploaded anywhere.
+//
+// The terms scenes store terms holding a script tag, an img onerror, a
+// javascript: link, and an onclick next to harmless text on Test Company
+// B's sample quote, and check that the portal GET, the quote detail, and
+// both PDF routes carry none of the dangerous parts but keep the text, and
+// that a quote PATCH stores sanitized terms. The PDF body is compressed, so
+// its text is checked on the HTML the route renders it from
+// (buildQuotePdfHtml with the stored quote). The terms are put back too.
 
 import type { PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -43,6 +51,8 @@ type Scene =
   | "accepted" // B ACCEPTED, not expired
   | "declined" // B DECLINED, not expired
   | "backToDraft" // B sent, then moved back to DRAFT
+  | "terms" // B VIEWED, not expired, with HOSTILE_TERMS stored as its terms
+  | "termsPatch" // B DRAFT with no terms, for the PATCH step
   | "regenerate" // B VIEWED, not expired, for the regenerate steps
 
 // ─── ATTEMPTS ───────────────────────────────────────────────────────────────
@@ -107,6 +117,38 @@ const p = (token: (ctx: Ctx) => string, rest = "") => (ctx: Ctx) => `/api/portal
 const bClient = (ctx: Ctx) => ctx.bClient
 const LINK_INVALID = "This link is no longer valid"
 const SIGNED = { signatureType: "TYPED", signatureData: "Dev Only", signerName: "Dev Only", termsAgreed: true }
+
+// Terms with every dangerous part next to text that must survive
+const HOSTILE_TERMS =
+  `<p>Harmless terms text</p><script>alert("xss-script")</script>` +
+  `<img src="x" onerror="alert('xss-img')">` +
+  `<a href="javascript:alert('xss-link')">Harmless link text</a>` +
+  `<p onclick="alert('xss-click')">Harmless click text</p>`
+const TERMS_SAFE = ["Harmless terms text", "Harmless link text", "Harmless click text"]
+const TERMS_DANGER = ["<script", "xss-script", "onerror", "xss-img", "javascript:", "xss-link", "onclick", "xss-click"]
+
+function termsProblem(text: string, what: string): string | null {
+  const missing = TERMS_SAFE.filter((t) => !text.includes(t))
+  if (missing.length > 0) return `${what} is missing ${missing.join(", ")}`
+  const present = TERMS_DANGER.filter((t) => text.includes(t))
+  return present.length > 0 ? `${what} still contains ${present.join(", ")}` : null
+}
+
+// The HTML the quote PDF route renders, built the same way from the stored quote
+async function pdfHtmlTermsProblem(prisma: PrismaClient, quoteId: string): Promise<string | null> {
+  const { buildQuotePdfHtml } = await import("@/lib/quote-pdf-template")
+  const quote = await prisma.quote.findUniqueOrThrow({
+    where: { id: quoteId },
+    include: {
+      client: { select: { name: true } },
+      contact: { select: { firstName: true, lastName: true } },
+      user: { select: { name: true, email: true } },
+      lineItems: { orderBy: { sortOrder: "asc" } },
+    },
+  })
+  const html = buildQuotePdfHtml(quote, { name: B.company, logoUrl: null, primaryColor: "#1B3A5C", accentColor: "#2E86AB" })
+  return termsProblem(html, "the PDF HTML")
+}
 
 const ATTEMPTS: Attempt[] = [
   // ── A valid link ──
@@ -183,6 +225,26 @@ const ATTEMPTS: Attempt[] = [
   { scene: "backToDraft", name: "accept on a quote moved back to draft", kind: "refused", method: "POST", path: p(bClient, "/accept"), body: () => SIGNED,
     expect: 404, expectError: LINK_INVALID },
 
+  // ── Terms are sanitized on the way out, whatever is stored ──
+  { scene: "terms", name: "portal GET drops unsafe terms markup", kind: "allowed", method: "GET", path: p(bClient), expect: 200,
+    contains: () => TERMS_SAFE, notContains: () => TERMS_DANGER },
+  { scene: "terms", name: "portal PDF renders with unsafe terms stored", kind: "allowed", method: "GET", path: p(bClient, "/pdf"), expect: 200,
+    contains: () => ["%PDF"], notContains: () => ["javascript:"] },
+  { scene: "terms", as: "admin", name: "quote detail drops unsafe terms markup", kind: "allowed", method: "GET",
+    path: (ctx) => `/api/quotes/${ctx.b.quoteId}`, expect: 200, contains: () => TERMS_SAFE, notContains: () => TERMS_DANGER },
+  { scene: "terms", as: "admin", name: "quote PDF drops unsafe terms markup", kind: "allowed", method: "GET",
+    path: (ctx) => `/api/quotes/${ctx.b.quoteId}/pdf`, expect: 200, contains: () => ["%PDF"], notContains: () => ["javascript:"],
+    check: async (_res, ctx, prisma) => pdfHtmlTermsProblem(prisma, ctx.b.quoteId) },
+
+  // ── Terms are sanitized on save ──
+  { scene: "termsPatch", as: "admin", name: "quote PATCH stores sanitized terms", kind: "allowed", method: "PATCH",
+    path: (ctx) => `/api/quotes/${ctx.b.quoteId}`, body: () => ({ terms: HOSTILE_TERMS }), expect: 200,
+    contains: () => TERMS_SAFE, notContains: () => TERMS_DANGER,
+    check: async (_res, ctx, prisma) => {
+      const q = await prisma.quote.findUnique({ where: { id: ctx.b.quoteId }, select: { terms: true } })
+      return termsProblem(q?.terms ?? "", "the stored terms")
+    } },
+
   // ── Staff responses and regenerate ──
   { scene: "regenerate", as: "admin", name: "quote detail has no customer token", kind: "control", method: "GET", path: (ctx) => `/api/quotes/${ctx.b.quoteId}`,
     expect: 200, contains: () => ['"internalAccessToken"'], notContains: (ctx) => ['"accessToken"', ctx.bClient] },
@@ -209,7 +271,18 @@ const ATTEMPTS: Attempt[] = [
     expect: 200, contains: () => [B.quote], notContains: (ctx) => [...PRIVATE_KEYS, ctx.newBClient, ctx.adminEmailB, ...companyC] },
 ]
 
-const SCENE_ORDER: Scene[] = ["awaiting", "sentUnviewed", "expired", "acceptedExpired", "accepted", "declined", "backToDraft", "regenerate"]
+const SCENE_ORDER: Scene[] = [
+  "awaiting",
+  "sentUnviewed",
+  "expired",
+  "acceptedExpired",
+  "accepted",
+  "declined",
+  "backToDraft",
+  "terms",
+  "termsPatch",
+  "regenerate",
+]
 
 // ─── Database state ─────────────────────────────────────────────────────────
 
@@ -227,6 +300,7 @@ const quoteFields = {
   isActive: true,
   accessToken: true,
   internalNotes: true,
+  terms: true,
 } as const
 
 async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; rep: string; c: string }) {
@@ -243,9 +317,14 @@ async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; re
     accepted: { ...base, status: "ACCEPTED" as const, acceptedAt: sent },
     declined: { ...base, status: "DECLINED" as const, declinedAt: sent },
     backToDraft: { ...base, status: "DRAFT" as const },
+    terms: { ...base, status: "VIEWED" as const },
+    termsPatch: { ...base, status: "DRAFT" as const },
     regenerate: { ...base, status: "VIEWED" as const },
   }[scene]
-  await prisma.quote.update({ where: { id: ids.b }, data: b })
+  // Written straight to the database, past the sanitizer, the way terms
+  // saved before it would look
+  const terms = scene === "terms" ? { terms: HOSTILE_TERMS } : scene === "termsPatch" ? { terms: null } : {}
+  await prisma.quote.update({ where: { id: ids.b }, data: { ...b, ...terms } })
   await prisma.quote.update({ where: { id: ids.rep }, data: { status: "DRAFT", sentAt: null, viewedAt: null } })
   await prisma.quote.update({ where: { id: ids.c }, data: { ...base, status: "VIEWED" } })
 }
@@ -398,7 +477,7 @@ async function main() {
     console.log(`\n${rows.length} checks: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("UNEXPECTED")} UNEXPECTED`)
     return count("FAIL") + count("UNEXPECTED") > 0 ? 1 : 0
   } finally {
-    // Put every version back exactly as it was, tokens and notes included
+    // Put every version back exactly as it was, tokens, notes, and terms included
     for (const q of original) {
       const { id, lineItems, ...fields } = q
       await prisma.quote.update({ where: { id }, data: fields })
