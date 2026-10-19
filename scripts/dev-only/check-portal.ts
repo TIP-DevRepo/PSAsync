@@ -41,6 +41,14 @@
 // The statusFreeze scene sets a never sent draft to DECLINED through the
 // status route (the same freeze as ACCEPTED, without the sales order an
 // acceptance creates) and checks the default was frozen into its terms.
+//
+// The superseded scene adds a newer sent version to Test Company B's sample
+// quote (made the active one, already viewed so opening it notifies no one)
+// and checks the older version's link still opens and downloads but
+// refuses accept, decline, comments, and item changes. The extra version is
+// deleted right after the scene, and again at the end if a check broke.
+// The awaiting scene also sends customer input that is too long or the
+// wrong type, which every portal route must refuse with a 400.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -68,6 +76,7 @@ type Scene =
   | "defaultDraft" // B DRAFT, never sent, box ticked over CUSTOM_OLD, company default DEFAULT_ONE
   | "defaultFrozen" // B VIEWED after the send froze DEFAULT_ONE, company default changed to DEFAULT_TWO
   | "statusFreeze" // B DRAFT, never sent, box ticked over CUSTOM_OLD, company default DEFAULT_ONE
+  | "superseded" // B VIEWED but not active, with a newer active sent version (deleted after the scene)
   | "regenerate" // B VIEWED, not expired, for the regenerate steps
 
 // ─── ATTEMPTS ───────────────────────────────────────────────────────────────
@@ -98,6 +107,9 @@ interface Ctx {
   // Set by the regenerate step
   oldBClient: string
   newBClient: string
+  // The newer version the superseded scene adds, and its client token
+  newerId: string
+  newerClient: string
   adminEmailB: string
   texts: Record<string, string>
 }
@@ -218,6 +230,28 @@ const ATTEMPTS: Attempt[] = [
   { scene: "awaiting", name: "internal token cannot comment", kind: "refused", method: "POST", path: (ctx) => `/api/portal/${ctx.bInternal}/comments`,
     body: () => ({ message: "dev only" }), expect: 404, expectError: LINK_INVALID },
 
+  // ── Customer input is type checked and length limited ──
+  { scene: "awaiting", name: "decline reason over 2000 characters", kind: "refused", method: "POST", path: p(bClient, "/decline"),
+    body: () => ({ reason: "x".repeat(2001) }), expect: 400, expectError: "Decline reason must be 2000 characters or fewer" },
+  { scene: "awaiting", name: "decline reason that isn't text", kind: "refused", method: "POST", path: p(bClient, "/decline"),
+    body: () => ({ reason: 42 }), expect: 400, expectError: "Decline reason must be text" },
+  { scene: "awaiting", name: "comment over 2000 characters", kind: "refused", method: "POST", path: p(bClient, "/comments"),
+    body: () => ({ message: "x".repeat(2001) }), expect: 400, expectError: "Message must be 2000 characters or fewer" },
+  { scene: "awaiting", name: "comment that isn't text", kind: "refused", method: "POST", path: p(bClient, "/comments"),
+    body: () => ({ message: { text: "dev only" } }), expect: 400, expectError: "Message is required" },
+  { scene: "awaiting", name: "accept with a signer name over 200 characters", kind: "refused", method: "POST", path: p(bClient, "/accept"),
+    body: () => ({ ...SIGNED, signerName: "x".repeat(201) }), expect: 400, expectError: "Signer name must be 200 characters or fewer" },
+  { scene: "awaiting", name: "accept with terms agreed as text", kind: "refused", method: "POST", path: p(bClient, "/accept"),
+    body: () => ({ ...SIGNED, termsAgreed: "yes" }), expect: 400, expectError: "You must agree to the terms and conditions" },
+  { scene: "awaiting", name: "accept with a ship address that isn't text", kind: "refused", method: "POST", path: p(bClient, "/accept"),
+    body: () => ({ ...SIGNED, shipAddress: { street: "dev only" } }), expect: 400, expectError: "Address must be text" },
+  { scene: "awaiting", name: "fractional quantity", kind: "refused", method: "PATCH",
+    path: (ctx) => `/api/portal/${ctx.bClient}/line-items/${ctx.b.quoteLineId}`, body: () => ({ quantity: 2.5 }), expect: 400, expectError: "whole number" },
+  { scene: "awaiting", name: "quantity sent as text", kind: "refused", method: "PATCH",
+    path: (ctx) => `/api/portal/${ctx.bClient}/line-items/${ctx.b.quoteLineId}`, body: () => ({ quantity: "3" }), expect: 400, expectError: "whole number" },
+  { scene: "awaiting", name: "option selection sent as text", kind: "refused", method: "PATCH",
+    path: (ctx) => `/api/portal/${ctx.bClient}/line-items/${ctx.b.quoteLineId}`, body: () => ({ optionalSelected: "yes" }), expect: 400, expectError: "Invalid option selection" },
+
   // ── The internal preview never changes the quote ──
   { scene: "sentUnviewed", name: "internal GET is a preview", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.bInternal}`,
     expect: 200, contains: () => ['"isInternalPreview":true'], notContains: privateValues,
@@ -330,6 +364,23 @@ const ATTEMPTS: Attempt[] = [
       return textsProblem(q.terms ?? "", "the stored terms", [DEFAULT_ONE_TEXT], [CUSTOM_OLD_TEXT])
     } },
 
+  // ── An older version after a newer one was sent: view only ──
+  { scene: "superseded", name: "older version still opens, marked superseded", kind: "allowed", method: "GET", path: p(bClient), expect: 200,
+    contains: () => ['"superseded":true', B.quoteLine], notContains: privateValues },
+  { scene: "superseded", name: "older version PDF still downloads", kind: "allowed", method: "GET", path: p(bClient, "/pdf"), expect: 200,
+    contains: () => ["%PDF"] },
+  { scene: "superseded", name: "older version cannot be accepted", kind: "refused", method: "POST", path: p(bClient, "/accept"), body: () => SIGNED,
+    expect: 400, expectError: "A newer version of this quote has been sent", code: "SUPERSEDED" },
+  { scene: "superseded", name: "older version cannot be declined", kind: "refused", method: "POST", path: p(bClient, "/decline"), body: () => ({ reason: "dev only" }),
+    expect: 400, expectError: "A newer version of this quote has been sent", code: "SUPERSEDED" },
+  { scene: "superseded", name: "older version takes no comments", kind: "refused", method: "POST", path: p(bClient, "/comments"), body: () => ({ message: "dev only" }),
+    expect: 400, expectError: "A newer version of this quote has been sent", code: "SUPERSEDED" },
+  { scene: "superseded", name: "older version takes no item changes", kind: "refused", method: "PATCH",
+    path: (ctx) => `/api/portal/${ctx.bClient}/line-items/${ctx.b.quoteLineId}`, body: () => ({ quantity: 2 }),
+    expect: 400, expectError: "A newer version of this quote has been sent", code: "SUPERSEDED" },
+  { scene: "superseded", name: "newer version opens, not superseded", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.newerClient}`,
+    expect: 200, contains: () => ['"superseded":false'], notContains: (ctx) => [...PRIVATE_KEYS, ctx.newerClient, ctx.adminEmailB] },
+
   // ── Staff responses and regenerate ──
   { scene: "regenerate", as: "admin", name: "quote detail has no customer token", kind: "control", method: "GET", path: (ctx) => `/api/quotes/${ctx.b.quoteId}`,
     expect: 200, contains: () => ['"internalAccessToken"'], notContains: (ctx) => ['"accessToken"', ctx.bClient] },
@@ -369,6 +420,7 @@ const SCENE_ORDER: Scene[] = [
   "defaultDraft",
   "defaultFrozen",
   "statusFreeze",
+  "superseded",
   "regenerate",
 ]
 
@@ -412,7 +464,9 @@ async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; re
     // Keeps the terms the send froze
     defaultFrozen: { ...base, status: "VIEWED" as const },
     statusFreeze: { ...base, status: "DRAFT" as const, sentAt: null, viewedAt: null },
-    regenerate: { ...base, status: "VIEWED" as const },
+    // The newer version added for this scene is the active one
+    superseded: { ...base, status: "VIEWED" as const, isActive: false },
+    regenerate: { ...base, status: "VIEWED" as const, isActive: true },
   }[scene]
   // Written straight to the database, past the sanitizer, the way terms
   // saved before it would look
@@ -548,8 +602,55 @@ async function main() {
     unknown: newAccessToken(),
     oldBClient: "",
     newBClient: "",
+    newerId: "",
+    newerClient: "",
     adminEmailB: B.adminEmail,
     texts: {},
+  }
+
+  // The superseded scene's newer version: a sent copy of Company B's sample
+  // quote, already viewed (so opening it marks nothing and notifies no
+  // one), made the active version of the family. No line items.
+  async function addNewerVersion() {
+    const source = await prisma.quote.findUniqueOrThrow({
+      where: { id: b.quoteId },
+      select: { companyId: true, clientId: true, contactId: true, userId: true, quoteNumber: true, version: true, expiresAt: true },
+    })
+    const highest = await prisma.quote.findFirst({
+      where: { companyId: source.companyId, quoteNumber: source.quoteNumber },
+      orderBy: { version: "desc" },
+      select: { version: true },
+    })
+    const now = new Date()
+    const newer = await prisma.quote.create({
+      data: {
+        companyId: source.companyId,
+        clientId: source.clientId,
+        contactId: source.contactId,
+        userId: source.userId,
+        quoteNumber: source.quoteNumber,
+        version: (highest?.version ?? source.version) + 1,
+        parentId: b.quoteId,
+        accessToken: newAccessToken(),
+        internalAccessToken: newAccessToken(),
+        status: "VIEWED",
+        sentAt: now,
+        viewedAt: now,
+        expiresAt: source.expiresAt,
+        isActive: true,
+        title: "Dev only newer version",
+      },
+      select: { id: true, accessToken: true },
+    })
+    ctx.newerId = newer.id
+    ctx.newerClient = newer.accessToken
+  }
+
+  async function removeNewerVersion() {
+    if (!ctx.newerId) return
+    await prisma.quoteComment.deleteMany({ where: { quoteId: ctx.newerId } })
+    await prisma.quote.deleteMany({ where: { id: ctx.newerId } })
+    ctx.newerId = ""
   }
 
   try {
@@ -560,6 +661,7 @@ async function main() {
 
     for (const scene of SCENE_ORDER) {
       await setScene(prisma, scene, { b: b.quoteId, rep: fx.repQuoteId, c: c.quoteId, companyB: b.companyId })
+      if (scene === "superseded") await addNewerVersion()
       let before = await snapshot(prisma, familyIds, [b.companyId, c.companyId])
       for (const a of ATTEMPTS.filter((x) => x.scene === scene)) {
         const label = `[${scene}${a.as === "admin" ? ", Admin B" : ""}] ${a.name}`
@@ -585,6 +687,7 @@ async function main() {
         }
         before = await snapshot(prisma, familyIds, [b.companyId, c.companyId])
       }
+      if (scene === "superseded") await removeNewerVersion()
     }
 
     printTable(rows)
@@ -592,6 +695,8 @@ async function main() {
     console.log(`\n${rows.length} checks: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("UNEXPECTED")} UNEXPECTED`)
     return count("FAIL") + count("UNEXPECTED") > 0 ? 1 : 0
   } finally {
+    // The superseded scene's extra version, if a broken check left it behind
+    await removeNewerVersion()
     // Put every version back exactly as it was, tokens, notes, and terms included
     for (const q of original) {
       const { id, lineItems, pendingEmailPayload, ...fields } = q
