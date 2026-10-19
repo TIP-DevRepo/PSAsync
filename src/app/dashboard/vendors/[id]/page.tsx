@@ -6,6 +6,7 @@ import Link from "next/link"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { acceptAttribute, checkUploadBasics } from "@/lib/upload-rules"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { Modal } from "@/components/Modal"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
@@ -303,6 +304,12 @@ function VendorDetailPageContent() {
   async function handleLogoSelected(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
     if (!file) return
+    const problem = checkUploadBasics(file, "LOGO")
+    if (problem) {
+      toast.error(problem, file.name)
+      e.target.value = ""
+      return
+    }
 
     setUploadingLogo(true)
     const formData = new FormData()
@@ -315,7 +322,8 @@ function VendorDetailPageContent() {
       toast.success("Logo uploaded")
       loadVendor()
     } else {
-      toast.error("Couldn't upload logo")
+      const err = await res.json().catch(() => ({}))
+      toast.error("Couldn't upload logo", err.error)
     }
     e.target.value = ""
   }
@@ -366,7 +374,7 @@ function VendorDetailPageContent() {
               </div>
             ) : (
               <label className="flex h-16 w-16 items-center justify-center rounded-lg border border-dashed border-border bg-card/50 cursor-pointer hover:border-muted-foreground transition-colors">
-                <input type="file" accept="image/*" onChange={handleLogoSelected} className="hidden" disabled={uploadingLogo} />
+                <input type="file" accept={acceptAttribute("LOGO")} onChange={handleLogoSelected} className="hidden" disabled={uploadingLogo} />
                 <Upload size={18} className="text-muted-foreground" />
               </label>
             )}

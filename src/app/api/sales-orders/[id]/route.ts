@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, canSeeCost, notFound, omitCost, omitUnitCost, requireAccess } from "@/lib/api-access"
 import { loadViewableSalesOrder, salesOrderWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
+import { deleteStoredObjects } from "@/lib/uploads"
 import { notifySalesOrderStatusChange } from "@/lib/notify"
 
 const VALID_STATUSES = [
@@ -204,7 +205,13 @@ export async function DELETE(
     )
   }
 
+  // The attachment rows cascade with the order, so their files are
+  // collected first and removed (best effort) once the delete succeeds
+  const attachments = await prisma.sOAttachment.findMany({ where: { salesOrderId: salesOrder.id }, select: { fileUrl: true } })
+
   await prisma.salesOrder.delete({ where: salesOrderWhere(ctx, salesOrder.id) })
+
+  await deleteStoredObjects(attachments.map((a) => a.fileUrl), `sales-orders/${salesOrder.id}/`)
 
   return NextResponse.json({ deleted: true })
 }

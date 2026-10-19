@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { withoutPortalTokens } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
@@ -50,7 +51,7 @@ export async function POST(
       })
       return tx.quote.update({ where: { id }, data: { ...data, isActive: true } })
     })
-    return NextResponse.json(updated)
+    return NextResponse.json(withoutPortalTokens(updated))
   }
 
   const updated = await prisma.quote.update({ where: { id }, data })
@@ -63,5 +64,5 @@ export async function POST(
     }
   }
 
-  return NextResponse.json(updated)
+  return NextResponse.json(withoutPortalTokens(updated))
 }

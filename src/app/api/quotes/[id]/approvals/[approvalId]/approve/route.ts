@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { withoutPortalTokensOrNull } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { loadViewableQuote } from "@/lib/scoped-loaders"
 import { completeApprovedQuote, recordApproval } from "@/lib/quote-approval"
@@ -65,7 +66,7 @@ export async function POST(
 
   const updatedQuote = await prisma.quote.findUnique({ where: { id } })
   return NextResponse.json({
-    quote: updatedQuote,
+    quote: withoutPortalTokensOrNull(updatedQuote),
     allApproved: remaining === 0,
     emailSent: completion?.outcome === "sent",
     ...(completion?.outcome === "send_failed" ? { warning: completion.warning } : {}),

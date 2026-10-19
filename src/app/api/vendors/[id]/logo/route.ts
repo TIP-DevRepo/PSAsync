@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireAccess } from "@/lib/api-access"
-import { uploadFileToS3 } from "@/lib/s3"
+import { deleteStoredObject, readUploadFromRequest, storeUpload } from "@/lib/uploads"
 
 export async function POST(
   req: NextRequest,
@@ -17,26 +17,27 @@ export async function POST(
 
   const vendor = await prisma.vendor.findUnique({
     where: { id, companyId: ctx.companyId },
-    select: { id: true },
+    select: { id: true, logoUrl: true },
   })
   if (!vendor) {
     return NextResponse.json({ error: "Vendor not found" }, { status: 404 })
   }
 
-  const formData = await req.formData()
-  const file = formData.get("file") as File | null
+  // PNG, JPG, or WebP up to 2 MB, checked by content
+  const { file, response: rejected } = await readUploadFromRequest(req, "LOGO")
+  if (rejected) return rejected
 
-  if (!file) {
-    return NextResponse.json({ error: "No file provided" }, { status: 400 })
-  }
-
-  const buffer = Buffer.from(await file.arrayBuffer())
-  const logoUrl = await uploadFileToS3(buffer, file.name, file.type, `vendors/${id}/logo`)
+  const logoUrl = await storeUpload(file, { folder: `vendors/${vendor.id}/logo`, profile: "LOGO" })
 
   const updated = await prisma.vendor.update({
     where: { id },
     data: { logoUrl },
   })
+
+  // The replaced logo's file, best effort once the new one is saved
+  if (vendor.logoUrl && vendor.logoUrl !== logoUrl) {
+    await deleteStoredObject(vendor.logoUrl, `vendors/${vendor.id}/logo/`)
+  }
 
   return NextResponse.json({ logoUrl: updated.logoUrl })
 }
@@ -55,7 +56,7 @@ export async function DELETE(
 
   const vendor = await prisma.vendor.findUnique({
     where: { id, companyId: ctx.companyId },
-    select: { id: true },
+    select: { id: true, logoUrl: true },
   })
   if (!vendor) {
     return NextResponse.json({ error: "Vendor not found" }, { status: 404 })
@@ -65,6 +66,9 @@ export async function DELETE(
     where: { id },
     data: { logoUrl: null },
   })
+
+  // Best effort once the logo is cleared
+  await deleteStoredObject(vendor.logoUrl, `vendors/${vendor.id}/logo/`)
 
   return NextResponse.json({ deleted: true })
 }

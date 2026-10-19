@@ -4,6 +4,7 @@
 // renders it independently of the Next.js app.
 
 import { escapeHtml, safeHexColor, safeUrlAttr } from "@/lib/html"
+import { formatValidUntil } from "@/lib/quote-expiry"
 
 interface PdfLineItem {
   section: string | null
@@ -237,7 +238,7 @@ export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string 
   }</div>
       <div><strong>Prepared by:</strong> ${escapeHtml(quote.user.name)}</div>
       <div><strong>Date:</strong> ${quote.createdAt.toLocaleDateString()}</div>
-      ${quote.expiresAt ? `<div><strong>Valid until:</strong> ${quote.expiresAt.toLocaleDateString()}</div>` : ""}
+      ${quote.expiresAt ? `<div><strong>Valid until:</strong> ${escapeHtml(formatValidUntil(quote.expiresAt))}</div>` : ""}
       ${quote.clientPoNumber ? `<div><strong>Client PO #:</strong> ${escapeHtml(quote.clientPoNumber)}</div>` : ""}
     </div>
 

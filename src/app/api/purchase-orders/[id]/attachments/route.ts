@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { uploadFileToS3 } from "@/lib/s3"
+import { readUploadFromRequest, storeUpload } from "@/lib/uploads"
 import { requireAccess, notFound } from "@/lib/api-access"
 import { loadViewablePurchaseOrder } from "@/lib/scoped-loaders"
 
@@ -40,20 +40,17 @@ export async function POST(
   const order = await loadViewablePurchaseOrder(ctx, id)
   if (!order) return notFound()
 
-  const formData = await req.formData()
-  const file = formData.get("file") as File | null
+  // Type, content, and size are checked here, and the stored key never
+  // uses the file's own name
+  const { file, response: rejected } = await readUploadFromRequest(req, "ATTACHMENT")
+  if (rejected) return rejected
 
-  if (!file) {
-    return NextResponse.json({ error: "No file provided" }, { status: 400 })
-  }
-
-  const buffer = Buffer.from(await file.arrayBuffer())
-  const fileUrl = await uploadFileToS3(buffer, file.name, file.type, `purchase-orders/${order.id}`)
+  const fileUrl = await storeUpload(file, { folder: `purchase-orders/${order.id}`, profile: "ATTACHMENT" })
 
   const attachment = await prisma.pOAttachment.create({
     data: {
       purchaseOrderId: order.id,
-      fileName: file.name,
+      fileName: file.displayName,
       fileUrl,
       fileSize: file.size,
       uploadedByUserId: ctx.userId,

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, canSeeCost, notFound, omitUnitCost, requireAccess } from "@/lib/api-access"
 import { purchaseOrderWhere, viewablePurchaseOrderWhere } from "@/lib/scoped-loaders"
+import { deleteStoredObjects } from "@/lib/uploads"
 
 const VALID_STATUSES = ["DRAFT", "PARTS_ORDERED", "RECEIVED", "ON_HOLD", "BACKORDERED", "CANCELLED"]
 const VALID_PAYMENT_TYPES = ["Due on Receipt", "Net15", "Net30", "Net45", "Net60", "Prepaid", "Credit Card"]
@@ -186,7 +187,13 @@ export async function DELETE(
     )
   }
 
+  // The attachment rows cascade with the order, so their files are
+  // collected first and removed (best effort) once the delete succeeds
+  const attachments = await prisma.pOAttachment.findMany({ where: { purchaseOrderId: po.id }, select: { fileUrl: true } })
+
   await prisma.purchaseOrder.delete({ where: purchaseOrderWhere(ctx, po.id) })
+
+  await deleteStoredObjects(attachments.map((a) => a.fileUrl), `purchase-orders/${po.id}/`)
 
   return NextResponse.json({ deleted: true })
 }

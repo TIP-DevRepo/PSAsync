@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, use } from "react"
 import { Button as HeroButton } from "@heroui/react"
 import { AcceptFlowModal } from "./AcceptFlowModal"
+import { formatValidUntil } from "@/lib/quote-expiry"
 
 const pdfButtonStyle = `
   .pdf-download-btn {
@@ -80,6 +81,39 @@ interface PortalQuote {
 
 const NO_SECTION = "__no_section__"
 
+// What an expired link returns instead of the quote: the company's public
+// branding only (GET /api/portal/[token] answers 410 QUOTE_EXPIRED)
+interface ExpiredBranding {
+  name: string
+  logoUrl: string | null
+  secondaryLogoUrl: string | null
+  primaryColor: string | null
+  accentColor: string | null
+}
+
+function ExpiredQuote({ company }: { company: ExpiredBranding }) {
+  const logo = company.secondaryLogoUrl || company.logoUrl
+  const who = company.name || "us"
+  return (
+    <div className="min-h-screen bg-zinc-50">
+      <div style={{ backgroundColor: company.primaryColor ?? "#1B3A5C" }} className="text-white">
+        <div className="max-w-3xl mx-auto px-6 py-8 flex items-center gap-3">
+          {logo && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logo} alt={company.name} className="h-10 w-auto" />
+          )}
+          {company.name && <span className="text-lg font-semibold">{company.name}</span>}
+        </div>
+      </div>
+      <div className="max-w-3xl mx-auto px-6 py-10">
+        <div className="rounded-md border bg-white p-6 text-center text-zinc-700">
+          This quote has expired. Please contact {who} for an updated quote.
+        </div>
+      </div>
+    </div>
+  )
+}
+
 interface PortalComment {
   id: string
   authorType: "INTERNAL" | "CLIENT"
@@ -114,6 +148,7 @@ export default function PortalPage({
   const [quote, setQuote] = useState<PortalQuote | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [expired, setExpired] = useState<ExpiredBranding | null>(null)
   const [showDeclineForm, setShowDeclineForm] = useState(false)
   const [declineReason, setDeclineReason] = useState("")
   const [comment, setComment] = useState("")
@@ -124,23 +159,30 @@ export default function PortalPage({
 
   const loadComments = useCallback(() => {
     fetch(`/api/portal/${token}/comments`)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : []))
       .then((data) => Array.isArray(data) && setComments(data))
+      .catch(() => setComments([]))
   }, [token])
 
+  // 404 is an invalid or replaced link, 410 an expired quote (branding
+  // only). Anything else that fails reads as an invalid link rather than
+  // an error screen.
   const load = useCallback(() => {
     fetch(`/api/portal/${token}`)
-      .then((res) => {
-        if (res.status === 404) {
+      .then(async (res) => {
+        const data = await res.json().catch(() => null)
+        if (res.status === 410 && data?.company) {
+          setExpired(data.company as ExpiredBranding)
+          setQuote(null)
+        } else if (!res.ok || !data || !Array.isArray(data.lineItems)) {
           setNotFound(true)
-          return null
+          setQuote(null)
+        } else {
+          setQuote(data)
         }
-        return res.json()
       })
-      .then((data) => {
-        if (data) setQuote(data)
-        setLoading(false)
-      })
+      .catch(() => setNotFound(true))
+      .finally(() => setLoading(false))
   }, [token])
 
   useEffect(() => {
@@ -149,8 +191,9 @@ export default function PortalPage({
   }, [load, loadComments])
 
   if (loading) return <div className="p-10 text-center text-zinc-500">Loading your quote...</div>
+  if (expired) return <ExpiredQuote company={expired} />
   if (notFound || !quote)
-    return <div className="p-10 text-center text-zinc-500">This quote link is invalid or no longer available.</div>
+    return <div className="p-10 text-center text-zinc-500">This link is no longer valid.</div>
 
   const primary = quote.company.settings?.primaryColor ?? "#1B3A5C"
   const accent = quote.company.settings?.accentColor ?? "#2E86AB"
@@ -169,11 +212,12 @@ export default function PortalPage({
           }
         : prev
     )
-    await fetch(`/api/portal/${token}/line-items/${li.id}`, {
+    const res = await fetch(`/api/portal/${token}/line-items/${li.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ optionalSelected: !li.optionalSelected }),
-    })
+    }).catch(() => null)
+    if (!res?.ok) load()
   }
 
   async function selectChoice(li: LineItem) {
@@ -189,11 +233,12 @@ export default function PortalPage({
           }
         : prev
     )
-    await fetch(`/api/portal/${token}/line-items/${li.id}`, {
+    const res = await fetch(`/api/portal/${token}/line-items/${li.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ optionalSelected: true }),
-    })
+    }).catch(() => null)
+    if (!res?.ok) load()
   }
 
   async function changeQuantity(li: LineItem, newQuantity: number) {
@@ -208,11 +253,12 @@ export default function PortalPage({
           }
         : prev
     )
-    await fetch(`/api/portal/${token}/line-items/${li.id}`, {
+    const res = await fetch(`/api/portal/${token}/line-items/${li.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ quantity: newQuantity }),
-    })
+    }).catch(() => null)
+    if (!res?.ok) load()
   }
 
   function renderItemRow(li: LineItem) {
@@ -313,6 +359,8 @@ export default function PortalPage({
     } else {
       const data = await res.json().catch(() => ({}))
       setActionMessage(data.error || "Something went wrong.")
+      // Expired or no longer waiting on the customer: show its current state
+      if (res.status === 410 || res.status === 400) load()
     }
     setSubmitting(false)
   }
@@ -328,6 +376,10 @@ export default function PortalPage({
     if (res.ok) {
       setComment("")
       loadComments()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setActionMessage(data.error || "Something went wrong.")
+      if (res.status === 410 || res.status === 400) load()
     }
     setSubmitting(false)
   }
@@ -419,7 +471,7 @@ export default function PortalPage({
             </p>
             {quote.expiresAt && (
               <p className="text-sm text-zinc-500">
-                Valid until {new Date(quote.expiresAt).toLocaleDateString()}
+                Valid until {formatValidUntil(quote.expiresAt)}
               </p>
             )}
           </div>
@@ -671,7 +723,7 @@ export default function PortalPage({
               </div>
             ))}
           </div>
-          {!quote.isInternalPreview && (
+          {showClientActions && (
             <>
               <textarea
                 value={comment}

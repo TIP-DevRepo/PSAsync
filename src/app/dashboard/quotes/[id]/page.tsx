@@ -14,6 +14,8 @@ import {
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { copyText } from "@/lib/clipboard"
+import { formatValidUntil } from "@/lib/quote-expiry"
 import { promptDialog } from "@/lib/prompt-dialog"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
@@ -35,7 +37,8 @@ interface QuoteDetail {
   createdAt: string
   sentAt: string | null
   taxRate: number
-  accessToken: string
+  // Only the internal preview token; the customer link is fetched when
+  // needed (GET /api/quotes/[id]/portal-link)
   internalAccessToken: string
   version: number
   isActive: boolean
@@ -161,6 +164,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
   const [sending, setSending] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copiedInternal, setCopiedInternal] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
   const [showSendModal, setShowSendModal] = useState(false)
   const [versions, setVersions] = useState<VersionSummary[]>([])
   const [creatingVersion, setCreatingVersion] = useState(false)
@@ -328,12 +332,47 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
     if (versionId === id) loadQuote()
   }
 
-  function handleCopyLink() {
-    if (!quote) return
-    const url = `${window.location.origin}/portal/${quote.accessToken}`
-    navigator.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+  async function handleCopyLink() {
+    const res = await fetch(`/api/quotes/${id}/portal-link`)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || typeof data.url !== "string") {
+      toast.error("Couldn't get the client link", data.error)
+      return
+    }
+    const copiedOk = await copyText(data.url)
+    if (!copiedOk) {
+      // Stays on screen so the link can be copied by hand
+      toast.warning("Couldn't copy the client link", data.url)
+    } else {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+    if (!data.opens) {
+      toast.info("This version hasn't been sent yet", "The customer can open the link once it is sent.")
+    }
+  }
+
+  async function handleRegenerateLink() {
+    const confirmed = await confirmDialog({
+      title: "Regenerate the customer link?",
+      description:
+        "Every link already sent for this quote, including earlier versions, will stop working right away. The customer will need the new link to view or respond to the quote.",
+      confirmLabel: "Regenerate",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    setRegenerating(true)
+    const res = await fetch(`/api/quotes/${id}/portal-link/regenerate`, { method: "POST" })
+    const data = await res.json().catch(() => ({}))
+    setRegenerating(false)
+    if (!res.ok || typeof data.url !== "string") {
+      toast.error("Couldn't regenerate the customer link", data.error)
+      return
+    }
+    const copiedOk = await copyText(data.url)
+    if (copiedOk) toast.success("New customer link copied", data.url)
+    else toast.warning("New customer link, copy it from here", data.url)
+    loadQuote()
   }
 
   function handleCopyInternalLink() {
@@ -598,9 +637,16 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                 )}
               </>
             )}
-            <Button size="sm" variant="outline" onClick={handleCopyLink}>
-            {copied ? "Copied!" : "Copy Client Link"}
-          </Button>
+            {(canEditQuote || canSendEmail) && (
+              <Button size="sm" variant="outline" onClick={handleCopyLink}>
+                {copied ? "Copied!" : "Copy Client Link"}
+              </Button>
+            )}
+            {canEditQuote && (
+              <Button size="sm" variant="outline" onClick={handleRegenerateLink} disabled={regenerating}>
+                {regenerating ? "Regenerating..." : "Regenerate Customer Link"}
+              </Button>
+            )}
           <Button size="sm" variant="outline" onClick={handleCopyInternalLink}>
             {copiedInternal ? "Copied!" : "Copy Internal Link"}
           </Button>
@@ -745,7 +791,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                 <p><span className="text-muted-foreground">Rep:</span> <span className="text-foreground">{quote.user.name}</span></p>
                 <p>
                   <span className="text-muted-foreground">Expires:</span>{" "}
-                  <span className="text-foreground">{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "—"}</span>
+                  <span className="text-foreground">{quote.expiresAt ? formatValidUntil(quote.expiresAt) : "—"}</span>
                 </p>
                 <p>
                   <span className="text-muted-foreground">Payment Terms:</span>{" "}
@@ -1030,7 +1076,6 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
           held={quote.pendingEmailPayload?.lastSendError ? quote.pendingEmailPayload : null}
           quoteNumber={quote.quoteNumber}
           version={quote.version}
-          accessToken={quote.accessToken}
           onClose={() => setShowSendModal(false)}
           onSent={() => {
             setShowSendModal(false)
@@ -1070,7 +1115,6 @@ function SendQuoteModal({
   held: heldProp,
   quoteNumber,
   version,
-  accessToken,
   onClose,
   onSent,
 }: {
@@ -1080,13 +1124,12 @@ function SendQuoteModal({
   held: HeldEmailView | null
   quoteNumber: string
   version: number
-  accessToken: string
   onClose: () => void
   onSent: () => void
 }) {
-  const portalLink =
-    typeof window !== "undefined" ? `${window.location.origin}/portal/${accessToken}` : ""
   const displayNumber = version > 1 ? `${quoteNumber} v${version}` : quoteNumber
+  const defaultMessage = (portalLink: string) =>
+    `Hi,\n\nPlease find your quote ${displayNumber} attached. You can also view it and respond online here:\n${portalLink}\n\nLet us know if you have any questions.`
 
   // Fixed for as long as the dialog is open, so a quote reload behind it
   // never resets what the user is editing
@@ -1094,10 +1137,7 @@ function SendQuoteModal({
   const [to, setTo] = useState(held?.to ?? defaultTo)
   const [cc, setCc] = useState(held?.cc ?? "")
   const [subject, setSubject] = useState(held?.subject ?? `Quote ${displayNumber}`)
-  const [message, setMessage] = useState(
-    held?.message ??
-      `Hi,\n\nPlease find your quote ${displayNumber} attached. You can also view it and respond online here:\n${portalLink}\n\nLet us know if you have any questions.`
-  )
+  const [message, setMessage] = useState(held?.message ?? defaultMessage(""))
   const [includePdf, setIncludePdf] = useState(held?.includePdf ?? true)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
@@ -1105,6 +1145,23 @@ function SendQuoteModal({
   const [senderOptions, setSenderOptions] = useState<SendOptions | null>(null)
   const [senderLoadFailed, setSenderLoadFailed] = useState(false)
   const [senderId, setSenderId] = useState<string | null>(null)
+
+  // The customer link is fetched for the message, never kept in the quote
+  // data. It only fills the default message, so nothing the user has typed
+  // is replaced.
+  useEffect(() => {
+    if (held) return
+    fetch(`/api/quotes/${quoteId}/portal-link`)
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || typeof data.url !== "string") throw new Error(data.error || "Please try again.")
+        const blank = defaultMessage("")
+        setMessage((current) => (current === blank ? defaultMessage(data.url) : current))
+      })
+      .catch((err: Error) => toast.error("Couldn't load the customer link", err.message))
+    // defaultMessage only depends on the quote number, fixed while open
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteId, held])
 
   useEffect(() => {
     fetch("/api/quote-settings")
