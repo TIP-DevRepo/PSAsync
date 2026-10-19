@@ -9,6 +9,7 @@ import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { copyText } from "@/lib/clipboard"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
@@ -20,7 +21,9 @@ interface Quote {
   version: number
   status: string
   title: string | null
-  accessToken: string
+  // The internal preview token, for View Portal. The customer link is
+  // fetched on demand (GET /api/quotes/[id]/portal-link).
+  internalAccessToken: string
   flagged: boolean
   templateId: string | null
   clientName: string
@@ -664,7 +667,7 @@ function QuotesTab() {
                       )}
                       <button
                         title="View Portal"
-                        onClick={() => window.open(`/portal/${quote.accessToken}`, "_blank")}
+                        onClick={() => window.open(`/portal/${quote.internalAccessToken}`, "_blank")}
                         className="text-muted-foreground hover:text-foreground"
                       >
                         <Search size={15} />
@@ -953,11 +956,20 @@ function QuoteActionsMenu({
     }
   }
 
-  function handleCopyPublicLink() {
-    const url = `${window.location.origin}/portal/${quote.accessToken}`
-    navigator.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+  async function handleCopyPublicLink() {
+    const res = await fetch(`/api/quotes/${quote.id}/portal-link`)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || typeof data.url !== "string") {
+      toast.error("Couldn't get the client link", data.error)
+      return
+    }
+    if (await copyText(data.url)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } else {
+      // Stays on screen so the link can be copied by hand
+      toast.warning("Couldn't copy the client link", data.url)
+    }
   }
 
   async function handleDelete() {
@@ -1044,12 +1056,14 @@ function QuoteActionsMenu({
               >
                 Quote Template <ExternalLink size={14} className="text-muted-foreground" />
               </button>
-              <button
-                onClick={handleCopyPublicLink}
-                className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
-              >
-                {copied ? "Copied!" : "Public Links"} <Link2 size={14} className="text-muted-foreground" />
-              </button>
+              {(can("quotes.edit") || can("quotes.sendEmail")) && (
+                <button
+                  onClick={handleCopyPublicLink}
+                  className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
+                >
+                  {copied ? "Copied!" : "Public Links"} <Link2 size={14} className="text-muted-foreground" />
+                </button>
+              )}
               <button
                 onClick={() => {
                   onShowRevisions()

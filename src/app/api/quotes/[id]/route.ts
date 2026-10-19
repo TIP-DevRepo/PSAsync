@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { withoutCustomerToken, withoutPortalTokens } from "@/lib/portal-token"
 import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
 import { loadViewableQuote, quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 
@@ -27,10 +28,10 @@ export async function GET(
   // Line item cost (and the margin the builder works out from it) is only
   // sent to users who may see cost
   if (!canSeeCost(ctx)) {
-    return NextResponse.json({ ...quote, lineItems: quote.lineItems.map(omitCost) })
+    return NextResponse.json(withoutCustomerToken({ ...quote, lineItems: quote.lineItems.map(omitCost) }))
   }
 
-  return NextResponse.json(quote)
+  return NextResponse.json(withoutCustomerToken(quote))
 }
 
 export async function PATCH(
@@ -85,7 +86,7 @@ export async function PATCH(
 
   const updated = await prisma.quote.update({ where: quoteWhere(ctx, id), data })
 
-  return NextResponse.json(updated)
+  return NextResponse.json(withoutPortalTokens(updated))
 }
 
 export async function DELETE(

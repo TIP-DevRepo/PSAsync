@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
-import { newAccessToken } from "@/lib/portal-token"
+import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
 
 export async function POST(
   req: NextRequest,
@@ -69,5 +69,5 @@ export async function POST(
     },
   })
 
-  return NextResponse.json(copy)
+  return NextResponse.json(withoutPortalTokens(copy))
 }

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
+import { withoutPortalTokensOrNull, withoutPortalTokens } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 
@@ -70,7 +71,7 @@ export async function POST(
     ])
 
     const updated = await prisma.quote.findUnique({ where: { id } })
-    return NextResponse.json(updated)
+    return NextResponse.json(withoutPortalTokensOrNull(updated))
   }
 
   // No approval needed — send immediately
@@ -88,5 +89,5 @@ export async function POST(
     })
   })
 
-  return NextResponse.json(updated)
+  return NextResponse.json(withoutPortalTokens(updated))
 }

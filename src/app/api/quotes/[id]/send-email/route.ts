@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { sendQuoteEmail } from "@/lib/send-quote-email"
 import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
+import { withoutPortalTokens } from "@/lib/portal-token"
 import { approvalFingerprint, type HeldEmail } from "@/lib/quote-approval"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
@@ -137,7 +138,7 @@ export async function POST(
     ])
 
     const updated = await prisma.quote.findUnique({ where: quoteWhere(ctx, id) })
-    return NextResponse.json({ ...updated, pendingApproval: true })
+    return NextResponse.json({ ...(updated ? withoutPortalTokens(updated) : {}), pendingApproval: true })
   }
 
   // No approval needed, send the email right now
@@ -164,5 +165,5 @@ export async function POST(
     })
   })
 
-  return NextResponse.json(updated)
+  return NextResponse.json(withoutPortalTokens(updated))
 }
