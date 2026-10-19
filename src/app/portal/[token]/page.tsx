@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, use } from "react"
 import { Button as HeroButton } from "@heroui/react"
 import { AcceptFlowModal } from "./AcceptFlowModal"
+import { formatValidUntil } from "@/lib/quote-expiry"
 
 const pdfButtonStyle = `
   .pdf-download-btn {
@@ -470,7 +471,7 @@ export default function PortalPage({
             </p>
             {quote.expiresAt && (
               <p className="text-sm text-zinc-500">
-                Valid until {new Date(quote.expiresAt).toLocaleDateString()}
+                Valid until {formatValidUntil(quote.expiresAt)}
               </p>
             )}
           </div>

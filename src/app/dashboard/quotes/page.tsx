@@ -10,6 +10,7 @@ import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { copyText } from "@/lib/clipboard"
+import { formatValidUntil } from "@/lib/quote-expiry"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
@@ -472,7 +473,7 @@ function QuotesTab() {
       statusLabel(q.status),
       q.total.toFixed(2),
       fmtDate(q.sentAt),
-      fmtDate(q.expiresAt),
+      q.expiresAt ? formatValidUntil(q.expiresAt) : fmtDate(null),
       fmtDate(q.acceptedAt),
     ])
     const csv = [headers, ...rows]
@@ -645,7 +646,7 @@ function QuotesTab() {
                   </td>
                   <td className={`${ROW_PADDING[density]} pr-3 text-right tabular-nums font-medium text-foreground`}>${quote.total.toFixed(2)}</td>
                   <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{fmtDate(quote.sentAt)}</td>
-                  <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{fmtDate(quote.expiresAt)}</td>
+                  <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{quote.expiresAt ? formatValidUntil(quote.expiresAt) : fmtDate(null)}</td>
                   <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{fmtDate(quote.acceptedAt)}</td>
                   <td className={`${ROW_PADDING[density]} pr-3`} onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center gap-2 relative">

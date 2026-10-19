@@ -15,6 +15,7 @@ import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { copyText } from "@/lib/clipboard"
+import { formatValidUntil } from "@/lib/quote-expiry"
 import { promptDialog } from "@/lib/prompt-dialog"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
@@ -790,7 +791,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                 <p><span className="text-muted-foreground">Rep:</span> <span className="text-foreground">{quote.user.name}</span></p>
                 <p>
                   <span className="text-muted-foreground">Expires:</span>{" "}
-                  <span className="text-foreground">{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "—"}</span>
+                  <span className="text-foreground">{quote.expiresAt ? formatValidUntil(quote.expiresAt) : "—"}</span>
                 </p>
                 <p>
                   <span className="text-muted-foreground">Payment Terms:</span>{" "}
