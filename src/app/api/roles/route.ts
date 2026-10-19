@@ -24,10 +24,9 @@ export async function GET() {
   const { ctx, response } = await requireAccess()
   if (response) return response
 
-  // Every company always has exactly one Everyone role, created here on
-  // demand if it is somehow missing so Roles & Permissions can edit it
-  await ensureEveryoneRole(prisma, ctx.companyId)
-
+  // Read only. A missing Everyone role is created by the seed and by the
+  // writes that need it (creating or reordering roles, inviting a user,
+  // changing a user's roles), never by a read.
   const showPermissions = ctx.can("settingsSections.users")
 
   // Highest rank first, ties oldest first: the same order getRegularRolesInOrder

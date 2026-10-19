@@ -3,9 +3,21 @@ import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
 import { getUserRank } from "@/lib/permissions"
 import { requireAccess } from "@/lib/api-access"
-import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
+import {
+  readRoleIdsFromBody,
+  loadRolesForAssignment,
+  setUserRoles,
+  assignsRoleAtOrAboveRank,
+  ROLE_AT_OR_ABOVE_RANK_MESSAGE,
+} from "@/lib/user-roles"
+import { ensureEveryoneRole } from "@/lib/everyone-role"
 import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
 import { usesMicrosoftSso } from "@/lib/sso-account"
+
+// The one answer for an invite email that can't be used, except one that
+// already belongs to a user in the inviter's own company
+const EMAIL_NOT_USABLE_MESSAGE = "This email cannot be used"
+const INVITE_EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
 // Any active user, since pickers on other pages (quote assign, inventory
 // checkout, approval workflows, SO notify rules) list users by name. Email
@@ -86,9 +98,20 @@ export async function POST(req: NextRequest) {
   }
   const roleIds = requestedRoleIds ?? []
 
-  const existing = await prisma.user.findUnique({ where: { email } })
+  // Emails are unique across every company. One already used in this
+  // company says so; every other reason an email can't be used (another
+  // company has it, or it isn't an email at all) gets the same generic
+  // answer, so an invite never reveals who uses PSAsync elsewhere.
+  if (typeof email !== "string" || !INVITE_EMAIL_SHAPE.test(email)) {
+    return NextResponse.json({ error: EMAIL_NOT_USABLE_MESSAGE }, { status: 400 })
+  }
+  const existing = await prisma.user.findFirst({
+    where: { email: { equals: email, mode: "insensitive" } },
+    select: { companyId: true },
+  })
   if (existing) {
-    return NextResponse.json({ error: "A user with that email already exists" }, { status: 400 })
+    const error = existing.companyId === ctx.companyId ? "A user with that email already exists" : EMAIL_NOT_USABLE_MESSAGE
+    return NextResponse.json({ error }, { status: 400 })
   }
 
   const loaded = await loadRolesForAssignment(prisma, ctx.companyId, roleIds)
@@ -96,18 +119,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: loaded.error }, { status: 400 })
   }
 
-  // You can invite someone into roles at or below your own rank, but not
-  // above it, otherwise inviting a fresh user would sidestep the same
-  // hierarchy rule that already governs editing an existing one.
+  // The same rank rule as changing an existing user's roles: only roles
+  // below your own rank, otherwise inviting a fresh user would sidestep it
   if (loaded.roles.length > 0) {
     const actorRank = await getUserRank(ctx.userId)
-    if (loaded.roles.some((role) => role.rank > actorRank)) {
-      return NextResponse.json(
-        { error: "You can't invite a user into a role above your own rank" },
-        { status: 403 }
-      )
+    if (assignsRoleAtOrAboveRank(loaded.roles, actorRank)) {
+      return NextResponse.json({ error: ROLE_AT_OR_ABOVE_RANK_MESSAGE }, { status: 403 })
     }
   }
+
+  // Every company keeps its one Everyone role. GET /api/roles no longer
+  // creates a missing one, so inviting does, outside the transaction so a
+  // lost creation race can't abort it.
+  await ensureEveryoneRole(prisma, ctx.companyId)
 
   const hashedPassword = await bcrypt.hash(tempPassword, 10)
 
