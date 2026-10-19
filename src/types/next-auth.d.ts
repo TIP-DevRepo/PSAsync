@@ -23,5 +23,8 @@ declare module "next-auth/jwt" {
   interface JWT {
     id: string
     companyId: string
+    // When this session signed in, in seconds, for the absolute cap in
+    // src/lib/session-config.ts. Missing on tokens issued before the cap.
+    signedInAt?: number
   }
 }

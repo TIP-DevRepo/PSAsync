@@ -8,6 +8,7 @@ import bcrypt from "bcryptjs"
 import { verifySsoRelayToken } from "@/lib/sso-relay-token"
 import { getEffectiveAccess } from "@/lib/permissions"
 import { MAX_FAILED_ATTEMPTS, LOCKOUT_MINUTES, LOGIN_LOCKED_CODE_PREFIX } from "@/lib/password-rules"
+import { SESSION_IDLE_SECONDS, SESSION_REFRESH_SECONDS, nowInSeconds, sessionAfterCap } from "@/lib/session-config"
 
 const pool = new Pool({
   host: process.env.DB_HOST,
@@ -39,7 +40,9 @@ class LoginLockedError extends CredentialsSignin {
 
 export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: PrismaAdapter(prisma),
-  session: { strategy: "jwt" },
+  // Idle lifetime and refresh time from src/lib/session-config.ts. The
+  // absolute cap is applied in the jwt callback below.
+  session: { strategy: "jwt", maxAge: SESSION_IDLE_SECONDS, updateAge: SESSION_REFRESH_SECONDS },
   pages: {
     signIn: "/login",
   },
@@ -162,7 +165,12 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         token.id = user.id as string
         token.companyId = user.companyId
       }
-      return token
+      // Ends the session SESSION_ABSOLUTE_SECONDS after sign in (password
+      // and SSO both pass user here). Returning null signs the request out:
+      // auth() returns null, so the dashboard redirects to /login and API
+      // routes answer 401, the same as for a deactivated user. No database
+      // query is involved.
+      return sessionAfterCap(token, !!user, nowInSeconds())
     },
     async session({ session, token }) {
       if (token) {
