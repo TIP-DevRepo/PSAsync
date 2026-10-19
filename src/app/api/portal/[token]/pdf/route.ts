@@ -17,7 +17,7 @@ export async function GET(
 
   // A read: works for an accepted quote past its expiry date, and for the
   // staff internal preview
-  const access = await resolvePortalAccess(token, "view", { allowInternal: true })
+  const access = await resolvePortalAccess(token, "view", { allowInternal: true, request: req })
   if (!access.ok) return access.response
   const activeId = access.quoteId
 

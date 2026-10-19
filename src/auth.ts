@@ -7,7 +7,13 @@ import { Pool } from "pg"
 import bcrypt from "bcryptjs"
 import { verifySsoRelayToken } from "@/lib/sso-relay-token"
 import { getEffectiveAccess } from "@/lib/permissions"
-import { MAX_FAILED_ATTEMPTS, LOCKOUT_MINUTES, LOGIN_LOCKED_CODE_PREFIX } from "@/lib/password-rules"
+import {
+  MAX_FAILED_ATTEMPTS,
+  LOCKOUT_MINUTES,
+  LOGIN_LOCKED_CODE_PREFIX,
+  LOGIN_IP_BLOCKED_CODE_PREFIX,
+} from "@/lib/password-rules"
+import { getClientIp, isBlocked, minutesUntil, recordFailure } from "@/lib/rate-limit"
 import { SESSION_IDLE_SECONDS, SESSION_REFRESH_SECONDS, nowInSeconds, sessionAfterCap } from "@/lib/session-config"
 
 const pool = new Pool({
@@ -38,6 +44,15 @@ class LoginLockedError extends CredentialsSignin {
   }
 }
 
+// The same for the IP rate limit, e.g. "ipblocked_12", which the login
+// page turns into "Too many attempts from your network"
+class LoginIpBlockedError extends CredentialsSignin {
+  constructor(retryAfterSeconds: number) {
+    super()
+    this.code = `${LOGIN_IP_BLOCKED_CODE_PREFIX}${minutesUntil(retryAfterSeconds)}`
+  }
+}
+
 export const { handlers, signIn, signOut, auth } = NextAuth({
   adapter: PrismaAdapter(prisma),
   // Idle lifetime and refresh time from src/lib/session-config.ts. The
@@ -54,9 +69,17 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         email: { label: "Email", type: "email" },
         password: { label: "Password", type: "password" },
       },
-      async authorize(credentials) {
+      async authorize(credentials, request) {
         if (!credentials?.email || !credentials?.password) return null
         const password = credentials.password as string
+
+        // IP rate limit, across every account: too many wrong passwords or
+        // unknown emails from one network refuse further attempts for the
+        // rest of the window. Fails open, and is skipped when there's no
+        // usable IP (local development).
+        const ip = getClientIp(request)
+        const ipBlock = await isBlocked("login", ip)
+        if (ipBlock.blocked) throw new LoginIpBlockedError(ipBlock.retryAfterSeconds)
 
         const user = await prisma.user.findUnique({
           where: { email: credentials.email as string },
@@ -68,6 +91,8 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         // password and the two can't be told apart by timing
         if (!user || !user.password) {
           await bcrypt.compare(password, DUMMY_PASSWORD_HASH)
+          // An unknown email counts toward the IP limit like a wrong password
+          await recordFailure("login", ip)
           return null
         }
 
@@ -103,6 +128,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         // increment is a single atomic update, so simultaneous requests
         // can't both read the same count and slip past the limit.
         if (!passwordMatch) {
+          await recordFailure("login", ip)
           const { loginFailedAttempts: attempts } = await prisma.user.update({
             where: { id: user.id },
             data: { loginFailedAttempts: { increment: 1 } },

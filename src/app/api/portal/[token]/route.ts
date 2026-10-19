@@ -15,7 +15,7 @@ export async function GET(
 ) {
   const { token } = await params
 
-  const access = await resolvePortalAccess(token, "view", { allowInternal: true })
+  const access = await resolvePortalAccess(token, "view", { allowInternal: true, request: req })
   if (!access.ok) {
     // An expired link shows only the company's branding. A quote still
     // waiting on the customer is recorded as expired the first time its

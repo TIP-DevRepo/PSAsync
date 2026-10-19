@@ -13,7 +13,7 @@ export async function POST(
   const { token } = await params
   // Only while the quote is waiting on the customer (SENT or VIEWED) and
   // not expired; anything else is refused here
-  const access = await resolvePortalAccess(token, "act")
+  const access = await resolvePortalAccess(token, "act", { request: req })
   if (!access.ok) return access.response
 
   // Acceptance requires a signature, a named signer, and agreeing to

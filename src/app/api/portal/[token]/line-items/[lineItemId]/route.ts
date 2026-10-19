@@ -11,7 +11,7 @@ export async function PATCH(
 ) {
   const { token, lineItemId } = await params
   // Only while the quote is waiting on the customer and not expired
-  const access = await resolvePortalAccess(token, "act")
+  const access = await resolvePortalAccess(token, "act", { request: req })
   if (!access.ok) return access.response
 
   const body = await readPortalBody(req)

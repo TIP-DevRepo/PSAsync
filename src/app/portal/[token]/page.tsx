@@ -152,6 +152,8 @@ export default function PortalPage({
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [expired, setExpired] = useState<ExpiredBranding | null>(null)
+  // Too many links that didn't open from this network (429)
+  const [rateLimited, setRateLimited] = useState<string | null>(null)
   const [showDeclineForm, setShowDeclineForm] = useState(false)
   const [declineReason, setDeclineReason] = useState("")
   const [comment, setComment] = useState("")
@@ -168,14 +170,17 @@ export default function PortalPage({
   }, [token])
 
   // 404 is an invalid or replaced link, 410 an expired quote (branding
-  // only). Anything else that fails reads as an invalid link rather than
-  // an error screen.
+  // only), 429 too many attempts from this network. Anything else that
+  // fails reads as an invalid link rather than an error screen.
   const load = useCallback(() => {
     fetch(`/api/portal/${token}`)
       .then(async (res) => {
         const data = await res.json().catch(() => null)
         if (res.status === 410 && data?.company) {
           setExpired(data.company as ExpiredBranding)
+          setQuote(null)
+        } else if (res.status === 429) {
+          setRateLimited(typeof data?.error === "string" ? data.error : "Too many attempts from your network. Try again later.")
           setQuote(null)
         } else if (!res.ok || !data || !Array.isArray(data.lineItems)) {
           setNotFound(true)
@@ -195,6 +200,7 @@ export default function PortalPage({
 
   if (loading) return <div className="p-10 text-center text-zinc-500">Loading your quote...</div>
   if (expired) return <ExpiredQuote company={expired} />
+  if (rateLimited) return <div className="p-10 text-center text-zinc-500">{rateLimited}</div>
   if (notFound || !quote)
     return <div className="p-10 text-center text-zinc-500">This link is no longer valid.</div>
 

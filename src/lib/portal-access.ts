@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 import type { QuoteStatus } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { isPastExpiry, PORTAL_EXPIRY_TIME_ZONE } from "@/lib/quote-expiry"
+import { getClientIp, isKnownBlocked, rateLimitedResponse, recordFailure } from "@/lib/rate-limit"
 
 // The one set of rules for the customer portal. Every portal route
 // (GET portal/[token], comments, accept, decline, line-items, pdf) starts
@@ -200,21 +201,38 @@ export type PortalAccess =
       expiredQuote?: { id: string; companyId: string; status: QuoteStatus }
     }
 
+// The shared 404, counted toward the "portal" IP limit (src/lib/rate-limit.ts)
+// so one network can't keep guessing links. Past the limit it answers 429
+// instead. Fails open, and counts nothing without a usable IP.
+async function linkInvalidCounted(ip: string | null): Promise<PortalAccess> {
+  const limit = await recordFailure("portal", ip)
+  if (limit.blocked) return { ok: false, response: rateLimitedResponse(limit.retryAfterSeconds) }
+  return { ok: false, response: linkInvalidResponse() }
+}
+
 // The start of every portal route. allowInternal lets the staff preview
-// token through for reads; actions always refuse it.
+// token through for reads; actions always refuse it. request gives the
+// caller's IP for the rate limit: a network this instance already blocked
+// is refused before any lookup (no database read), and every link that
+// doesn't open is counted. A link that opens never touches the limiter's
+// table.
 export async function resolvePortalAccess(
   token: string,
   use: PortalUse,
-  options: { allowInternal?: boolean; now?: Date } = {}
+  options: { allowInternal?: boolean; now?: Date; request?: { headers: Headers } } = {}
 ): Promise<PortalAccess> {
+  const ip = options.request ? getClientIp(options.request) : null
+  const known = isKnownBlocked("portal", ip)
+  if (known.blocked) return { ok: false, response: rateLimitedResponse(known.retryAfterSeconds) }
+
   const found = await findTokenQuote(token, use === "view" && !!options.allowInternal)
-  if (!found) return { ok: false, response: linkInvalidResponse() }
+  if (!found) return linkInvalidCounted(ip)
 
   const { quote, kind } = found
   const superseded = kind === "client" && isSupersededVersion(quote, await findActiveSentVersionId(quote))
   const decision = decidePortalAccess(quote, kind, use, options.now ?? new Date(), superseded)
   if (!decision.ok) {
-    if (decision.status === 404) return { ok: false, response: linkInvalidResponse() }
+    if (decision.status === 404) return linkInvalidCounted(ip)
     return {
       ok: false,
       response: NextResponse.json({ error: decision.error, code: decision.code }, { status: decision.status }),

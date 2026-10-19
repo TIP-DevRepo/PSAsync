@@ -10,7 +10,7 @@ export async function GET(
 ) {
   const { token } = await params
   // Staff may read the thread in the internal preview
-  const access = await resolvePortalAccess(token, "view", { allowInternal: true })
+  const access = await resolvePortalAccess(token, "view", { allowInternal: true, request: req })
   if (!access.ok) return access.response
   const activeId = access.quoteId
 
@@ -29,7 +29,7 @@ export async function POST(
 ) {
   const { token } = await params
   // Only while the quote is waiting on the customer and not expired
-  const access = await resolvePortalAccess(token, "act")
+  const access = await resolvePortalAccess(token, "act", { request: req })
   if (!access.ok) return access.response
   const activeId = access.quoteId
 
