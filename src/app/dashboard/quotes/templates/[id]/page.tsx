@@ -334,6 +334,9 @@ function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
             />
             Use company default Terms &amp; Conditions
           </label>
+          {/* Both HTML branches below only ever render a terms string from an API
+              response, sanitized on the server (src/lib/sanitize-terms.ts). Never
+              render anything else here. */}
           {template.useDefaultTerms ? (
             <div
               className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"

@@ -799,6 +799,8 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                 </p>
                 {(quote.useDefaultTerms ? companyDefaultTerms : quote.terms) && (
                   <CollapsibleField label="Terms & Conditions">
+                    {/* Only ever a terms string from an API response, sanitized on the server
+                        (src/lib/sanitize-terms.ts). Never render anything else here. */}
                     <div
                       className="text-sm text-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
                       dangerouslySetInnerHTML={{ __html: quote.useDefaultTerms ? companyDefaultTerms : (quote.terms ?? "") }}
@@ -891,6 +893,8 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                     />
                     Use company default Terms &amp; Conditions
                   </label>
+                  {/* Only ever a terms string from an API response, sanitized on the server
+                      (src/lib/sanitize-terms.ts). Never render anything else here. */}
                   {quote.useDefaultTerms ? (
                     <div
                       className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"

@@ -630,6 +630,8 @@ export default function PortalPage({
         {quote.terms && (
           <div className="rounded-md border bg-white p-4 text-xs text-zinc-500">
             <p className="font-medium text-zinc-700 mb-1">Terms &amp; Conditions</p>
+            {/* Only ever a terms string from an API response, sanitized on the server
+                (src/lib/sanitize-terms.ts). Never render anything else here. */}
             <div
               className="[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
               dangerouslySetInnerHTML={{ __html: quote.terms }}

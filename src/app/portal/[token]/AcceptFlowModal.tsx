@@ -260,9 +260,12 @@ export function AcceptFlowModal({
         {terms && (
           <div>
             <label className="block text-sm font-medium mb-1">Terms & Conditions</label>
-            <div className="rounded-md border p-3 text-xs text-zinc-600 whitespace-pre-wrap max-h-32 overflow-y-auto bg-zinc-50">
-              {terms}
-            </div>
+            {/* Only ever a terms string from an API response, sanitized on the server
+                (src/lib/sanitize-terms.ts). Never render anything else here. */}
+            <div
+              className="rounded-md border p-3 text-xs text-zinc-600 max-h-32 overflow-y-auto bg-zinc-50 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
+              dangerouslySetInnerHTML={{ __html: terms }}
+            />
           </div>
         )}
 
