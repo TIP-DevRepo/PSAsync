@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { withoutCustomerToken, withoutPortalTokens } from "@/lib/portal-token"
 import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
 import { loadViewableQuote, quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
-import { termsForStorage } from "@/lib/sanitize-terms"
+import { loadCompanyDefaultTerms, quoteTermsView, requestTouchesTerms, termsPatchData } from "@/lib/quote-terms"
 
 export async function GET(
   req: NextRequest,
@@ -26,13 +26,17 @@ export async function GET(
 
   if (!quote) return notFound()
 
+  // The terms to show come from the shared resolver; `terms` stays the
+  // stored text for the editor
+  const termsView = quoteTermsView(quote, await loadCompanyDefaultTerms(ctx.companyId))
+
   // Line item cost (and the margin the builder works out from it) is only
   // sent to users who may see cost
   if (!canSeeCost(ctx)) {
-    return NextResponse.json(withoutCustomerToken({ ...quote, lineItems: quote.lineItems.map(omitCost) }))
+    return NextResponse.json(withoutCustomerToken({ ...quote, ...termsView, lineItems: quote.lineItems.map(omitCost) }))
   }
 
-  return NextResponse.json(withoutCustomerToken(quote))
+  return NextResponse.json(withoutCustomerToken({ ...quote, ...termsView }))
 }
 
 export async function PATCH(
@@ -80,8 +84,16 @@ export async function PATCH(
 
   if (body.title !== undefined) data.title = body.title || null
   if (body.introText !== undefined) data.introText = body.introText || null
-  if (body.terms !== undefined) data.terms = termsForStorage(body.terms)
-  if (body.useDefaultTerms !== undefined) data.useDefaultTerms = !!body.useDefaultTerms
+  // A sent quote keeps the terms the customer received
+  if (requestTouchesTerms(body)) {
+    if (existing.sentAt) {
+      return NextResponse.json(
+        { error: "Terms can't be changed after a quote has been sent. Create a new version to change them." },
+        { status: 400 }
+      )
+    }
+    Object.assign(data, termsPatchData(existing.useDefaultTerms, body, await loadCompanyDefaultTerms(companyId)))
+  }
   if (body.paymentTerms !== undefined) data.paymentTerms = body.paymentTerms || null
   if (body.expiresAt !== undefined) data.expiresAt = body.expiresAt ? new Date(body.expiresAt) : null
 

@@ -71,6 +71,8 @@ export async function POST(
       title: current.title,
       introText: current.introText,
       terms: termsForStorage(current.terms),
+      // The new version is a draft: with the flag ticked it follows the current default
+      useDefaultTerms: current.useDefaultTerms,
       internalNotes: current.internalNotes,
       clientPoNumber: current.clientPoNumber,
       expiresAt: current.expiresAt,

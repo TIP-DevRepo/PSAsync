@@ -44,6 +44,8 @@ export async function POST(
       title: source.title ? `${source.title} (Copy)` : null,
       introText: source.introText,
       terms: termsForStorage(source.terms),
+      // The copy is a draft: with the flag ticked it follows the current default
+      useDefaultTerms: source.useDefaultTerms,
       internalNotes: source.internalNotes,
       clientPoNumber: source.clientPoNumber,
       expiresAt: source.expiresAt,

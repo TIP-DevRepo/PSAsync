@@ -137,6 +137,7 @@ export async function POST(req: NextRequest) {
     isBundleHeader: boolean
   }[] = []
   let templateTerms: string | null = null
+  let templateUsesDefault: boolean | null = null
   let templateSections: string[] = []
 
   if (body.templateId) {
@@ -150,6 +151,7 @@ export async function POST(req: NextRequest) {
 
     if (template) {
       templateTerms = template.terms
+      templateUsesDefault = template.useDefaultTerms
       templateSections = template.sections
       templateLineItems = template.lineItems.map((tli) => ({
         catalogItemId: tli.catalogItemId,
@@ -192,6 +194,21 @@ export async function POST(req: NextRequest) {
     ? new Date(body.expiresAt)
     : new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000)
 
+  // The default terms flag: as the request sets it, else unticked when the
+  // request brings its own terms, else the template's, else ticked. A quote
+  // using the default stores a copy of it, so stored and effective agree;
+  // otherwise each source falls through to the next when it is empty, as
+  // before. Sanitized like every terms write.
+  const useDefaultTerms =
+    typeof body.useDefaultTerms === "boolean"
+      ? body.useDefaultTerms
+      : termsForStorage(body.terms)
+        ? false
+        : (templateUsesDefault ?? true)
+  const terms = useDefaultTerms
+    ? termsForStorage(settings?.quoteTerms)
+    : termsForStorage(body.terms) || termsForStorage(templateTerms) || termsForStorage(settings?.quoteTerms)
+
   const quote = await prisma.quote.create({
     data: {
       companyId,
@@ -204,9 +221,8 @@ export async function POST(req: NextRequest) {
       templateId: body.templateId || null,
       title: body.title || null,
       introText: body.introText || null,
-      // Sanitized like every terms write; each source falls through to the
-      // next when it is empty
-      terms: termsForStorage(body.terms) || termsForStorage(templateTerms) || termsForStorage(settings?.quoteTerms),
+      useDefaultTerms,
+      terms,
       internalNotes: body.internalNotes || null,
       shipAddress: body.shipAddress || null,
       shipAddress2: body.shipAddress2 || null,
