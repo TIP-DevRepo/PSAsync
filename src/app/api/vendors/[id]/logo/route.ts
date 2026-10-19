@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireAccess } from "@/lib/api-access"
-import { readUploadFromRequest, storeUpload } from "@/lib/uploads"
+import { deleteStoredObject, readUploadFromRequest, storeUpload } from "@/lib/uploads"
 
 export async function POST(
   req: NextRequest,
@@ -17,7 +17,7 @@ export async function POST(
 
   const vendor = await prisma.vendor.findUnique({
     where: { id, companyId: ctx.companyId },
-    select: { id: true },
+    select: { id: true, logoUrl: true },
   })
   if (!vendor) {
     return NextResponse.json({ error: "Vendor not found" }, { status: 404 })
@@ -33,6 +33,11 @@ export async function POST(
     where: { id },
     data: { logoUrl },
   })
+
+  // The replaced logo's file, best effort once the new one is saved
+  if (vendor.logoUrl && vendor.logoUrl !== logoUrl) {
+    await deleteStoredObject(vendor.logoUrl, `vendors/${vendor.id}/logo/`)
+  }
 
   return NextResponse.json({ logoUrl: updated.logoUrl })
 }
@@ -51,7 +56,7 @@ export async function DELETE(
 
   const vendor = await prisma.vendor.findUnique({
     where: { id, companyId: ctx.companyId },
-    select: { id: true },
+    select: { id: true, logoUrl: true },
   })
   if (!vendor) {
     return NextResponse.json({ error: "Vendor not found" }, { status: 404 })
@@ -61,6 +66,9 @@ export async function DELETE(
     where: { id },
     data: { logoUrl: null },
   })
+
+  // Best effort once the logo is cleared
+  await deleteStoredObject(vendor.logoUrl, `vendors/${vendor.id}/logo/`)
 
   return NextResponse.json({ deleted: true })
 }

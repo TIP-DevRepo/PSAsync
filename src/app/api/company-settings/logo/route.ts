@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { readUpload, storeUpload } from "@/lib/uploads"
+import { deleteStoredObject, readUpload, storeUpload } from "@/lib/uploads"
 import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
 
@@ -22,10 +22,23 @@ export async function POST(req: NextRequest) {
 
   const logoUrl = await storeUpload(file, { folder: "logos", profile: "LOGO", namePrefix: `${ctx.companyId}-` })
 
+  const before = await prisma.company.findUnique({
+    where: { id: ctx.companyId },
+    select: { logoUrl: true, secondaryLogoUrl: true },
+  })
+
   await prisma.company.update({
     where: { id: ctx.companyId },
     data: slot === "secondary" ? { secondaryLogoUrl: logoUrl } : { logoUrl },
   })
+
+  // The replaced logo's file, best effort once the new one is saved. Kept
+  // when the other slot still shows the same file.
+  const replaced = slot === "secondary" ? before?.secondaryLogoUrl : before?.logoUrl
+  const otherSlot = slot === "secondary" ? before?.logoUrl : before?.secondaryLogoUrl
+  if (replaced && replaced !== logoUrl && replaced !== otherSlot) {
+    await deleteStoredObject(replaced, "logos/")
+  }
 
   return NextResponse.json({ logoUrl, slot })
 }
