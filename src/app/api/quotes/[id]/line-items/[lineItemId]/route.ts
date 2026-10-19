@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { withDeadlockRetry } from "@/lib/withDeadlockRetry"
 import { RecurringInterval } from "@/generated/prisma"
-import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { apiError, isEnumValue, notFound, requireAccess, type AccessContext } from "@/lib/api-access"
+import { mayWriteCost } from "@/lib/line-item-cost"
+import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 
-// Confirms the line item exists and belongs to a quote owned by this company
-async function getOwnedLineItem(lineItemId: string, companyId: string) {
-  const lineItem = await prisma.quoteLineItem.findUnique({
-    where: { id: lineItemId },
+const EDIT_RULE = { permission: "quotes.edit", message: "You do not have permission to edit quotes" }
+
+// The line item, only when it sits on the quote in the URL and the user may
+// open that quote
+function getOwnedLineItem(ctx: AccessContext, quoteId: string, lineItemId: string) {
+  return prisma.quoteLineItem.findFirst({
+    where: { id: lineItemId, quoteId, quote: viewableQuoteWhere(ctx, quoteId) },
     include: { quote: { select: { companyId: true, status: true } } },
   })
-  if (!lineItem || lineItem.quote.companyId !== companyId) return null
-  return lineItem
 }
 
 const LOCK_MESSAGE =
@@ -22,14 +24,12 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess(EDIT_RULE)
   if (response) return response
 
-  const { lineItemId } = await params
-  const existing = await getOwnedLineItem(lineItemId, ctx.companyId)
-  if (!existing) {
-    return NextResponse.json({ error: "Line item not found" }, { status: 404 })
-  }
+  const { id: quoteId, lineItemId } = await params
+  const existing = await getOwnedLineItem(ctx, quoteId, lineItemId)
+  if (!existing) return notFound()
   if (!["DRAFT", "PENDING_APPROVAL"].includes(existing.quote.status)) {
     return NextResponse.json({ error: LOCK_MESSAGE }, { status: 400 })
   }
@@ -55,7 +55,7 @@ export async function PATCH(
   if (body.sku !== undefined) data.sku = body.sku || null
   if (body.quantity !== undefined) data.quantity = Number(body.quantity)
   if (body.unitPrice !== undefined) data.unitPrice = Number(body.unitPrice)
-  if (body.cost !== undefined) data.cost = Number(body.cost)
+  if (mayWriteCost(ctx, body.cost)) data.cost = Number(body.cost)
   if (body.discount !== undefined) data.discount = Number(body.discount)
   if (body.taxable !== undefined) data.taxable = Boolean(body.taxable)
   if (body.isOptional !== undefined) data.isOptional = Boolean(body.isOptional)
@@ -97,7 +97,7 @@ export async function PATCH(
 
   const lineItem = await withDeadlockRetry(async () => {
     const result = await prisma.quoteLineItem.update({
-      where: { id: lineItemId },
+      where: { id: lineItemId, quoteId: existing.quoteId },
       data,
     })
 
@@ -129,21 +129,17 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess(EDIT_RULE)
+  if (response) return response
 
-  const { lineItemId } = await params
-  const existing = await getOwnedLineItem(lineItemId, session.user.companyId)
-  if (!existing) {
-    return NextResponse.json({ error: "Line item not found" }, { status: 404 })
-  }
+  const { id: quoteId, lineItemId } = await params
+  const existing = await getOwnedLineItem(ctx, quoteId, lineItemId)
+  if (!existing) return notFound()
   if (!["DRAFT", "PENDING_APPROVAL"].includes(existing.quote.status)) {
     return NextResponse.json({ error: LOCK_MESSAGE }, { status: 400 })
   }
 
-  await prisma.quoteLineItem.delete({ where: { id: lineItemId } })
+  await prisma.quoteLineItem.delete({ where: { id: lineItemId, quoteId: existing.quoteId } })
 
   return NextResponse.json({ deleted: true })
 }

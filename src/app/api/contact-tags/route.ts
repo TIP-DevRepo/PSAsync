@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
+// Open to any active user: the client contact forms pick tags
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const contactTags = await prisma.contactTag.findMany({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     orderBy: { name: "asc" },
   })
 
@@ -17,10 +16,11 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    settingsSection: "company",
+    message: "You do not have permission to manage company settings",
+  })
+  if (response) return response
 
   const body = await req.json()
   const name = (body.name ?? "").trim()
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
   // approach as Industries — the picker flow can end up calling this with
   // a name that already exists.
   const existing = await prisma.contactTag.findFirst({
-    where: { companyId: session.user.companyId, name },
+    where: { companyId: ctx.companyId, name },
   })
   if (existing) {
     return NextResponse.json(existing)
@@ -41,7 +41,7 @@ export async function POST(req: NextRequest) {
 
   const contactTag = await prisma.contactTag.create({
     data: {
-      companyId: session.user.companyId,
+      companyId: ctx.companyId,
       name,
       color: body.color || null,
     },

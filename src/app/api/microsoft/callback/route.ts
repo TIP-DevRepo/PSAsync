@@ -1,11 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
+
+const RECONNECT_REFUSED =
+  "You can only reconnect your own mailbox. Reconnecting someone else's mailbox, or the shared quote sender, needs Integrations access."
 
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.redirect(new URL("/login", req.url))
+  const { ctx, response: refusal } = await requireAccess()
+  if (refusal) {
+    return refusal.status === 401
+      ? NextResponse.redirect(new URL("/login", req.url))
+      : NextResponse.redirect(
+          new URL(`/dashboard/settings?panel=microsoft&error=${encodeURIComponent("You need to change your password before connecting a mailbox.")}`, req.url)
+        )
   }
 
   const code = req.nextUrl.searchParams.get("code")
@@ -26,7 +33,7 @@ export async function GET(req: NextRequest) {
   }
 
   const settings = await prisma.companySettings.findUnique({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
   })
   if (!settings?.microsoftClientId || !settings?.microsoftTenantId || !settings?.microsoftClientSecret) {
     return NextResponse.redirect(
@@ -73,25 +80,47 @@ export async function GET(req: NextRequest) {
     )
   }
 
+  // Reconnecting a mailbox someone else connected, or the one Quote
+  // Settings sends every quote from, needs Integrations access
+  const existing = await prisma.microsoftConnection.findUnique({
+    where: { companyId_email: { companyId: ctx.companyId, email } },
+    select: { id: true, connectedByUserId: true },
+  })
+  if (existing) {
+    const someoneElses = existing.connectedByUserId !== ctx.userId
+    const isSharedSender = settings.quoteSendFromConnectionId === existing.id
+    if ((someoneElses || isSharedSender) && !ctx.can("settingsSections.integrations")) {
+      const refused = NextResponse.redirect(
+        new URL(`/dashboard/settings?panel=microsoft&error=${encodeURIComponent(RECONNECT_REFUSED)}`, req.url)
+      )
+      refused.cookies.delete("ms_oauth_state")
+      refused.cookies.delete("ms_oauth_label")
+      return refused
+    }
+  }
+
   // One row per connected mailbox — reconnecting the same mailbox updates
-  // its tokens and label rather than creating a duplicate
+  // its tokens and label rather than creating a duplicate. A reconnect keeps
+  // the mailbox's owner, so an admin refreshing a rep's mailbox never takes
+  // it over. Only a mailbox with no owner left is given to whoever
+  // reconnects it.
   await prisma.microsoftConnection.upsert({
     where: {
-      companyId_email: { companyId: session.user.companyId, email },
+      companyId_email: { companyId: ctx.companyId, email },
     },
     update: {
       label,
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
-      connectedByUserId: session.user.id,
+      connectedByUserId: existing?.connectedByUserId ?? ctx.userId,
     },
     create: {
-      companyId: session.user.companyId,
+      companyId: ctx.companyId,
       label,
       email,
       accessToken: tokens.access_token,
       refreshToken: tokens.refresh_token,
-      connectedByUserId: session.user.id,
+      connectedByUserId: ctx.userId,
     },
   })
 

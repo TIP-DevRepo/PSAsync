@@ -20,7 +20,8 @@ export interface POLineItemBuilderItem {
   name: string
   description: string | null
   quantity: number
-  unitCost: number
+  // Left out by the purchase order API for users who can't see cost
+  unitCost?: number
   serialNumber: string | null
   received: boolean
   sortOrder: number
@@ -32,11 +33,17 @@ export interface POCatalogOption {
   name: string
   vendorSku: string | null
   manufacturerSku: string | null
-  cost: number
+  // Left out by the catalog API for users who can't see cost
+  cost?: number
 }
 
+// null when the cost was left out, so the row shows "-" instead of NaN
 function lineTotal(li: POLineItemBuilderItem) {
-  return li.unitCost * li.quantity
+  return typeof li.unitCost === "number" ? li.unitCost * li.quantity : null
+}
+
+function moneyOrDash(n: number | null | undefined) {
+  return typeof n === "number" ? money(n) : "-"
 }
 
 // A line item only goes through Inventory receiving if it's linked to a
@@ -63,6 +70,9 @@ interface POLineItemBuilderProps {
   items: POLineItemBuilderItem[]
   catalog: POCatalogOption[]
   locked?: boolean
+  // False hides the Received checkbox and Receive buttons, for users who
+  // can't edit the purchase order
+  canReceive?: boolean
   shipToClient: boolean
   receivingClientLocationId: string | null
   receivingClientLocationName: string | null
@@ -81,6 +91,7 @@ export function POLineItemBuilder({
   items,
   catalog,
   locked = false,
+  canReceive = true,
   shipToClient,
   receivingClientLocationId,
   receivingClientLocationName,
@@ -164,6 +175,9 @@ export function POLineItemBuilder({
     if (li.received) {
       return <span className="text-xs font-medium text-success">✓ Received</span>
     }
+    if (!canReceive) {
+      return <span className="text-xs text-muted-foreground">-</span>
+    }
     if (!isInventoryTracked(li)) {
       return (
         <input
@@ -207,9 +221,13 @@ export function POLineItemBuilder({
               <input type="number" defaultValue={li.quantity} onBlur={(e) => onUpdate(li.id, { quantity: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
             </td>
             <td className="py-2 pr-2 align-top text-right">
-              <input type="number" step="0.01" defaultValue={li.unitCost} onBlur={(e) => onUpdate(li.id, { unitCost: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
+              {typeof li.unitCost === "number" ? (
+                <input type="number" step="0.01" defaultValue={li.unitCost} onBlur={(e) => onUpdate(li.id, { unitCost: Number(e.target.value) })} className="w-full rounded border border-border bg-background px-2 py-1 text-xs text-right text-foreground tabular-nums" />
+              ) : (
+                <span className="text-xs text-muted-foreground">-</span>
+              )}
             </td>
-            <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
+            <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{moneyOrDash(total)}</td>
             <td className="py-2 pr-2 align-top">{renderSerialCell(li)}</td>
             <td className="py-2 pr-2 align-top text-center">{renderReceivedCell(li)}</td>
             <td className="py-2 pr-4 align-top">
@@ -225,8 +243,8 @@ export function POLineItemBuilder({
             </td>
             <td className="py-2 pr-2 align-top text-muted-foreground"><CopyableCell value={li.vendorSku} /></td>
             <td className="py-2 pr-2 align-top text-right text-foreground tabular-nums">{li.quantity}</td>
-            <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{money(li.unitCost)}</td>
-            <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
+            <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{moneyOrDash(li.unitCost)}</td>
+            <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{moneyOrDash(total)}</td>
             <td className="py-2 pr-2 align-top">{renderSerialCell(li)}</td>
             <td className="py-2 pr-2 align-top text-center">{renderReceivedCell(li)}</td>
             <td className="py-2 pr-4 align-top">
@@ -244,7 +262,7 @@ export function POLineItemBuilder({
     <div className="space-y-3">
       <div className="flex items-center gap-2">
         {!locked && <Button size="sm" variant="outline" onClick={openAdd}>+ Add Line Item</Button>}
-        {!locked && anyUnreceived && (
+        {!locked && canReceive && anyUnreceived && (
           <Button size="sm" onClick={handleReceiveAll}>Receive All</Button>
         )}
       </div>
@@ -261,7 +279,7 @@ export function POLineItemBuilder({
       {showAddModal && (
         <AddLineItemModal
           catalog={catalog}
-          catalogSubtitle={(item) => `${item.manufacturerSku ?? item.vendorSku ?? "No SKU"} · $${item.cost.toFixed(2)}`}
+          catalogSubtitle={(item) => `${item.manufacturerSku ?? item.vendorSku ?? "No SKU"} · ${typeof item.cost === "number" ? `$${item.cost.toFixed(2)}` : "-"}`}
           onClose={() => setShowAddModal(false)}
           onAddCatalog={(item, quantity) =>
             onCreate({ catalogItemId: item.id, name: item.name, partNumber: item.manufacturerSku ?? item.vendorSku ?? undefined, vendorSku: item.vendorSku ?? undefined, unitCost: item.cost, quantity })

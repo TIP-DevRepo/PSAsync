@@ -18,6 +18,44 @@ export interface ProductUpdate {
 // update appears on /updates the moment the release goes live.
 export const PRODUCT_UPDATES: ProductUpdate[] = [
   {
+    version: "v0.9.07",
+    date: "2026-10-19",
+    title: "Roles and Permissions, Enforced Everywhere",
+    sections: [
+      {
+        category: "Added",
+        items: [
+          "A new \"Send quotes as another mailbox\" permission, and a From row in the Send Quote window. If Quote Settings sends every quote from a shared company mailbox, that mailbox is used. Otherwise a quote is sent from the quote owner's mailbox when the owner sends it, or from your own mailbox when you send someone else's quote. Only people with the new permission can choose a different mailbox, and the quote notes when it was sent from someone else's mailbox.",
+          "A banner on a quote when its email could not be sent after approval, with a Send Quote button to try again."
+        ],
+      },
+      {
+        category: "Improved",
+        items: [
+          "Roles and permissions are now enforced across the whole app, not just by hiding buttons and menus, so what each person can see and do matches their roles.",
+          "People only see their own quotes, sales orders, and purchase orders unless they have the matching permission to see everyone's. Quotes waiting on your approval are always visible to you.",
+          "Item cost and margin are shown only to people who have Catalog access or can edit quotes, sales orders, or purchase orders.",
+          "Settings now only shows the sections you have access to.",
+          "Pages and actions you do not have permission for now show a clear message or are hidden.",
+          "Email addresses and role details in the Users and Roles lists are now shown only to people who manage users and roles.",
+          "Anyone can connect or disconnect their own Microsoft mailbox. Reconnecting or disconnecting someone else's mailbox or the shared quote mailbox now needs Integrations access.",
+          "Microsoft sign in now also confirms the account belongs to your organization when your Microsoft directory ID is saved in Settings.",
+          "When an approved quote's email is sent again, the quote only needs approval again if its prices, discounts, quantities, line items, or owner have changed.",
+          "A copy of a quote now belongs to the person who made the copy.",
+          "The Generate purchase orders permission is now required to create a purchase order from a sales order.",
+          "The \"View all clients\" permission was removed. Everyone with access to Clients sees all clients."
+        ],
+      },
+      {
+        category: "Fixed",
+        items: [
+          "If an approved quote's email cannot be sent, the approval is kept, the quote returns to Draft, and the owner can send it again, so a quote can no longer get stuck waiting for approval.",
+          "Signing in with Microsoft no longer changes who a connected mailbox belongs to."
+        ],
+      },
+    ],
+  },
+  {
     version: "v0.9.06",
     date: "2026-10-09",
     title: "Stronger Protection for Your Company's Data",

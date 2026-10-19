@@ -13,6 +13,8 @@ import type { ReceivePayload } from "@/components/purchase-orders/ReceiveModal"
 import { FileUploadZone } from "@/components/attachments/FileUploadZone"
 import { buildLocationPathOptions, type LocationPathOption } from "@/lib/inventory/locationPaths"
 import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Shipment {
@@ -102,15 +104,31 @@ export default function PurchaseOrderDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  const { can } = useAccess()
+  if (!can("pages.purchaseOrders")) {
+    return (
+      <div className="w-full space-y-4">
+        <Breadcrumbs items={breadcrumbItems} current="No access" />
+        <NoAccess />
+      </div>
+    )
+  }
+  return <PurchaseOrderDetail params={params} />
+}
+
+function PurchaseOrderDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  // For hiding controls only: every route checks the same keys itself
+  const { can } = useAccess()
+  const canDelete = can("purchaseOrders.delete")
+  const canEdit = can("purchaseOrders.edit")
+  const canChangeStatus = can("purchaseOrders.changeStatus")
   const router = useRouter()
   const [po, setPo] = useState<PODetail | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [changingStatus, setChangingStatus] = useState(false)
   const [activeTab, setActiveTab] = useState<POTabKey>("details")
-  const [canDelete, setCanDelete] = useState(false)
-  const [canEdit, setCanEdit] = useState(false)
   const [internalClientId, setInternalClientId] = useState("")
 
   const [comments, setComments] = useState<POCommentType[]>([])
@@ -128,7 +146,9 @@ export default function PurchaseOrderDetailPage({
   function loadPO() {
     fetch(`/api/purchase-orders/${id}`)
       .then((res) => {
-        if (res.status === 404) {
+        // Someone else's order, one outside the company, or any other
+        // refusal all land on the same not found state
+        if (!res.ok) {
           setNotFound(true)
           return null
         }
@@ -162,13 +182,6 @@ export default function PurchaseOrderDetailPage({
     fetch("/api/inventory-locations/own-company")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setCompanyLocationOptions(data))
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then((session) => {
-        const access = session?.user?.access
-        setCanDelete(!!access?.isGlobalAdmin || !!access?.permissions?.purchaseOrders?.delete)
-        setCanEdit(!!access?.isGlobalAdmin || !!access?.permissions?.purchaseOrders?.edit)
-      })
     // Resolved up front so the "ships to us" location picker has a client
     // to scope itself to, same lookup the New Purchase Order page does.
     fetch("/api/clients")
@@ -415,12 +428,15 @@ export default function PurchaseOrderDetailPage({
     return (
       <div className="w-full">
         <Breadcrumbs items={breadcrumbItems} current="Not found" />
-        <p className="text-sm text-danger">Purchase Order not found.</p>
+        <p className="text-sm text-muted-foreground">This purchase order was not found, or you do not have access to it.</p>
       </div>
     )
   }
 
-  const total = po.lineItems.reduce((sum, li) => sum + li.unitCost * li.quantity, 0)
+  // Line item cost is left out for users who can't see it, and then the
+  // total shows "-" rather than a partial or NaN sum
+  const costVisible = po.lineItems.every((li) => typeof li.unitCost === "number")
+  const total = po.lineItems.reduce((sum, li) => sum + (li.unitCost ?? 0) * li.quantity, 0)
   const receivedCount = po.lineItems.filter((li) => li.received).length
   // Same line the Delete block already draws: once anything's been
   // received, payment and shipping details stop being editable.
@@ -451,7 +467,7 @@ export default function PurchaseOrderDetailPage({
             <select
               value={po.status}
               onChange={(e) => handleChangeStatus(e.target.value)}
-              disabled={changingStatus}
+              disabled={changingStatus || !canChangeStatus}
               className="rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
             >
               {STATUS_OPTIONS.map((s) => (
@@ -496,13 +512,17 @@ export default function PurchaseOrderDetailPage({
                 <p><span className="text-muted-foreground">Created:</span> <span className="text-foreground">{new Date(po.createdAt).toLocaleDateString()}</span></p>
                 <div className="flex items-center gap-2 pt-1">
                   <span className="text-muted-foreground">Expected:</span>
-                  <input
-                    key={`expected-${po.expectedAt}`}
-                    type="date"
-                    defaultValue={po.expectedAt ? po.expectedAt.slice(0, 10) : ""}
-                    onBlur={(e) => handleUpdateField("expectedAt", e.target.value || null)}
-                    className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                  />
+                  {canEdit ? (
+                    <input
+                      key={`expected-${po.expectedAt}`}
+                      type="date"
+                      defaultValue={po.expectedAt ? po.expectedAt.slice(0, 10) : ""}
+                      onBlur={(e) => handleUpdateField("expectedAt", e.target.value || null)}
+                      className="rounded-md border border-border bg-background px-2 py-1 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                    />
+                  ) : (
+                    <span className="text-foreground">{po.expectedAt ? new Date(po.expectedAt).toLocaleDateString() : "-"}</span>
+                  )}
                 </div>
               </div>
 
@@ -611,7 +631,8 @@ export default function PurchaseOrderDetailPage({
                 <POLineItemBuilder
                   items={po.lineItems}
                   catalog={catalog}
-                  locked={po.status === "CANCELLED" || po.status === "RECEIVED"}
+                  locked={po.status === "CANCELLED" || po.status === "RECEIVED" || !canEdit}
+                  canReceive={canEdit}
                   shipToClient={po.shipToClient}
                   receivingClientLocationId={resolvedClientLocation?.id ?? null}
                   receivingClientLocationName={resolvedClientLocation?.name ?? null}
@@ -629,7 +650,7 @@ export default function PurchaseOrderDetailPage({
                 <div className="flex justify-end">
                   <div className="rounded-lg border border-border bg-card shadow-card p-3 text-sm">
                     <span className="text-muted-foreground mr-3">Total</span>
-                    <span className="font-semibold text-foreground tabular-nums">{money(total)}</span>
+                    <span className="font-semibold text-foreground tabular-nums">{costVisible ? money(total) : "-"}</span>
                   </div>
                 </div>
               </div>
@@ -689,10 +710,12 @@ export default function PurchaseOrderDetailPage({
         {activeTab === "attachments" && (
           <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 max-w-2xl">
             <h2 className="font-semibold text-sm text-foreground">Attachments</h2>
-            <FileUploadZone
-              uploadUrl={`/api/purchase-orders/${id}/attachments`}
-              onUploaded={loadAttachments}
-            />
+            {canEdit && (
+              <FileUploadZone
+                uploadUrl={`/api/purchase-orders/${id}/attachments`}
+                onUploaded={loadAttachments}
+              />
+            )}
             <div className="space-y-2">
               {attachments.length === 0 && (
                 <p className="text-sm text-muted-foreground">No files attached yet.</p>
@@ -704,12 +727,14 @@ export default function PurchaseOrderDetailPage({
                   </a>
                   <div className="flex items-center gap-3">
                     <span className="text-xs text-muted-foreground">{fileSizeLabel(a.fileSize)}</span>
-                    <button
-                      onClick={() => handleDeleteAttachment(a.id)}
-                      className="text-xs text-danger hover:underline"
-                    >
-                      Remove
-                    </button>
+                    {canEdit && (
+                      <button
+                        onClick={() => handleDeleteAttachment(a.id)}
+                        className="text-xs text-danger hover:underline"
+                      >
+                        Remove
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

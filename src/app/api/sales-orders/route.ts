@@ -1,23 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
 import { requireAccess } from "@/lib/api-access"
-import { assertRefs } from "@/lib/scoped-loaders"
+import { assertRefs, salesOrderListWhere } from "@/lib/scoped-loaders"
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "pages.salesOrders",
+    message: "You do not have permission to view sales orders",
+  })
+  if (response) return response
 
-  const canViewAll = await hasPermission(session.user.id, "salesOrders.viewAll")
-
+  // Own orders only, unless the user holds salesOrders.viewAll
   const salesOrders = await prisma.salesOrder.findMany({
-    where: {
-      companyId: session.user.companyId,
-      ...(canViewAll ? {} : { userId: session.user.id }),
-    },
+    where: salesOrderListWhere(ctx),
     include: {
       client: { select: { name: true } },
       user: { select: { id: true, name: true } },
@@ -49,7 +44,10 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "salesOrders.create",
+    message: "You do not have permission to create sales orders",
+  })
   if (response) return response
 
   const body = await req.json()

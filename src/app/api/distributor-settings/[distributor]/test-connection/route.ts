@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
 import { getAdapter } from "@/lib/distributors/registry"
 import { DistributorKey } from "@/lib/distributors/types"
 
@@ -18,13 +17,11 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ distributor: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.integrations"))) {
-    return NextResponse.json({ error: "You don't have permission to test distributor connections" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.integrations",
+    message: "You do not have permission to test distributor connections",
+  })
+  if (response) return response
 
   const { distributor } = await params
   if (!VALID_DISTRIBUTORS.includes(distributor)) {
@@ -37,7 +34,7 @@ export async function POST(
   const testEnv: "SANDBOX" | "PRODUCTION" = body.environment === "PRODUCTION" ? "PRODUCTION" : "SANDBOX"
   const isSandbox = testEnv === "SANDBOX"
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const record = await prisma.distributorIntegration.findUnique({
     where: {

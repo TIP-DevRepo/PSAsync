@@ -1,18 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { uploadFileToS3 } from "@/lib/s3"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.company"))) {
-    return NextResponse.json({ error: "You don't have permission to change the company logo" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.company",
+    message: "You do not have permission to change the company logo",
+  })
+  if (response) return response
 
   const formData = await req.formData()
   const file = formData.get("file") as File | null
@@ -27,7 +23,7 @@ export async function POST(req: NextRequest) {
   const logoUrl = await uploadFileToS3(buffer, file.name, file.type)
 
   await prisma.company.update({
-    where: { id: session.user.companyId },
+    where: { id: ctx.companyId },
     data: slot === "secondary" ? { secondaryLogoUrl: logoUrl } : { logoUrl },
   })
 

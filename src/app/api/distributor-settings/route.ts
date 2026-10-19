@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
 import {
   distributorIntegrationSafeSelect,
   loadDistributorSecretPresence,
@@ -11,15 +10,13 @@ import {
 const DISTRIBUTORS = ["INGRAM_MICRO", "TD_SYNNEX", "DH", "AMAZON_BUSINESS"] as const
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.integrations"))) {
-    return NextResponse.json({ error: "You don't have permission to view distributor settings" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.integrations",
+    message: "You do not have permission to view distributor settings",
+  })
+  if (response) return response
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const [existing, presence] = await Promise.all([
     prisma.distributorIntegration.findMany({
       where: { companyId },

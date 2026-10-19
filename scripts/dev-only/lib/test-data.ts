@@ -25,8 +25,11 @@ export function testNames(letter: TestLetter) {
     client: `Sample Client ${letter}`,
     clientPrefix: `TC${letter}`,
     clientLocation: `Sample Location ${letter}`,
+    clientLocationAddress: "1 Sample Street",
+    clientLocationCity: "Sampleton",
     contactFirstName: "Sample",
     contactLastName: `Contact ${letter}`,
+    contactEmail: `sample-contact-${lower}@example.test`,
     vendor: `Sample Vendor ${letter}`,
     vendorLocation: `Sample Vendor Location ${letter}`,
     vendorContactFirstName: "Sample",
@@ -55,8 +58,89 @@ export function testNames(letter: TestLetter) {
     targetRole: `Test Target Role ${letter}`,
     limitedUserName: `Test Limited ${letter}`,
     limitedUserEmail: `test-limited-${lower}@example.test`,
+    // Permission test users (create-test-companies). Everyone holds only the
+    // Everyone role; Rep holds the Rep role below.
+    everyoneName: `Test Everyone ${letter}`,
+    everyoneEmail: `test-everyone-${lower}@example.test`,
+    repName: `Test Rep ${letter}`,
+    repEmail: `test-rep-${lower}@example.test`,
+    repRole: "Rep",
+    repQuote: `Sample Rep Quote ${letter}`,
+    repQuoteLine: `Sample Rep Quote Line ${letter}`,
+    // Clerk holds the Clerk role below, plus a sales order and purchase
+    // order of its own so the "only your own" filters can be seen
+    clerkName: `Test Clerk ${letter}`,
+    clerkEmail: `test-clerk-${lower}@example.test`,
+    clerkRole: "Clerk",
+    clerkSalesOrder: `Sample Clerk Sales Order ${letter}`,
+    clerkSoLine: `Sample Clerk SO Line ${letter}`,
+    clerkPurchaseOrder: `Sample Clerk Purchase Order ${letter}`,
+    // Pooled stock needs a catalog item that isn't serialized, held in a
+    // container under the sample client location
+    stockItem: `Sample Stock Item ${letter}`,
+    container: `Sample Container ${letter}`,
+    // A mailbox row with placeholder tokens, never usable to send anything
+    adminMailboxEmail: `test-admin-${lower}-mailbox@example.test`,
+    adminMailboxLabel: `Sample Mailbox ${letter}`,
+    // Only created by the check-permissions script, for the sender checks
+    senderRole: `Test Sender Role ${letter}`,
+    senderName: `Test Sender ${letter}`,
+    senderEmail: `test-sender-${lower}@example.test`,
+    senderMailboxEmail: `test-sender-${lower}-mailbox@example.test`,
+    // Orders holds the Orders role below, plus a sales order and purchase
+    // order of its own (each with a line), so the view rules can be seen
+    ordersName: `Test Orders ${letter}`,
+    ordersEmail: `test-orders-${lower}@example.test`,
+    ordersRole: "Orders",
+    ordersSalesOrder: `Sample Orders Sales Order ${letter}`,
+    ordersSoLine: `Sample Orders SO Line ${letter}`,
+    ordersPurchaseOrder: `Sample Orders Purchase Order ${letter}`,
+    ordersPoLine: `Sample Orders PO Line ${letter}`,
+    // Templater holds the Templater role below, and edits this template for
+    // the line item cost checks
+    templaterName: `Test Templater ${letter}`,
+    templaterEmail: `test-templater-${lower}@example.test`,
+    templaterRole: "Templater",
+    costTemplate: `Sample Cost Template ${letter}`,
+    costTemplateLine: `Sample Cost Template Line ${letter}`,
+    // Only created by the check-permissions script: sees every sales order
+    // and purchase order but edits none, so it can't see cost
+    viewerRole: `Test Viewer Role ${letter}`,
+    viewerName: `Test Viewer ${letter}`,
+    viewerEmail: `test-viewer-${lower}@example.test`,
   }
 }
+
+// The sample catalog item's cost, reset on every create run, so the line
+// item cost checks know what the stored cost must be
+export const SAMPLE_ITEM_COST = 60
+
+// Stored in place of real Microsoft tokens on the sample mailbox rows. The
+// test companies have no Microsoft credentials either, so nothing can ever
+// be sent from them.
+export const PLACEHOLDER_TOKEN = "dev-only-not-a-real-token"
+
+// Rep: the quotes page and creating and editing quotes, nothing else
+export const REP_PERMISSIONS = { pages: { quotes: true }, quotes: { create: true, edit: true } }
+
+// Clerk: the Clients, Vendors, Catalog, and Inventory pages, and creating and
+// editing clients, nothing else (no settings, no deletes)
+export const CLERK_PERMISSIONS = {
+  pages: { clients: true, vendors: true, catalog: true, inventory: true },
+  clients: { create: true, edit: true },
+}
+
+// Orders: the Sales Orders and Purchase Orders pages, creating and editing
+// both, nothing else (no viewAll, no generatePO, no status, no deletes)
+export const ORDERS_PERMISSIONS = {
+  pages: { salesOrders: true, purchaseOrders: true },
+  salesOrders: { create: true, edit: true },
+  purchaseOrders: { create: true, edit: true },
+}
+
+// Templater: Quote Settings only, which maintains quote templates. Holds
+// none of the cost permissions, so it can't see or set cost.
+export const TEMPLATER_PERMISSIONS = { settingsSections: { quotes: true } }
 
 // Letters and digits only, so it pastes into any shell without quoting
 const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
@@ -101,6 +185,136 @@ export interface SampleIds {
   assetId: string
   assetAttachmentId: string
   workflowId: string
+}
+
+export interface PermissionFixtureIds {
+  everyoneUserId: string
+  repUserId: string
+  repRoleId: string
+  repQuoteId: string
+  repQuoteLineId: string
+  adminMailboxId: string
+  clerkUserId: string
+  clerkRoleId: string
+  clerkSalesOrderId: string
+  clerkPurchaseOrderId: string
+  stockItemId: string
+  containerId: string
+  stockId: string
+  ordersUserId: string
+  ordersRoleId: string
+  ordersSalesOrderId: string
+  ordersSoLineId: string
+  ordersPurchaseOrderId: string
+  ordersPoLineId: string
+  templaterUserId: string
+  templaterRoleId: string
+  costTemplateId: string
+  costTemplateLineId: string
+}
+
+// The permission test records for one test company (check-permissions).
+// Kept apart from loadSampleIds so check-cross-company doesn't depend on
+// them. Throws naming whatever is missing.
+export async function loadPermissionFixtureIds(prisma: PrismaClient, letter: TestLetter): Promise<PermissionFixtureIds> {
+  const n = testNames(letter)
+  const company = await prisma.company.findFirst({ where: { name: n.company }, select: { id: true } })
+  if (!company) {
+    throw new Error(`${n.company} doesn't exist yet. Run create-test-companies first.`)
+  }
+  const companyId = company.id
+  const id = (row: { id: string } | null) => row?.id ?? ""
+
+  const [
+    everyoneUser,
+    repUser,
+    repRole,
+    repQuote,
+    adminMailbox,
+    clerkUser,
+    clerkRole,
+    clerkSalesOrder,
+    clerkPurchaseOrder,
+    stockItem,
+    container,
+  ] = await Promise.all([
+    prisma.user.findFirst({ where: { email: n.everyoneEmail, companyId }, select: { id: true } }),
+    prisma.user.findFirst({ where: { email: n.repEmail, companyId }, select: { id: true } }),
+    prisma.role.findFirst({ where: { companyId, name: n.repRole }, select: { id: true } }),
+    prisma.quote.findFirst({ where: { companyId, title: n.repQuote }, select: { id: true } }),
+    prisma.microsoftConnection.findFirst({ where: { companyId, email: n.adminMailboxEmail }, select: { id: true } }),
+    prisma.user.findFirst({ where: { email: n.clerkEmail, companyId }, select: { id: true } }),
+    prisma.role.findFirst({ where: { companyId, name: n.clerkRole }, select: { id: true } }),
+    prisma.salesOrder.findFirst({ where: { companyId, internalNotes: n.clerkSalesOrder }, select: { id: true } }),
+    prisma.purchaseOrder.findFirst({ where: { companyId, internalNotes: n.clerkPurchaseOrder }, select: { id: true } }),
+    prisma.catalogItem.findFirst({ where: { companyId, name: n.stockItem }, select: { id: true } }),
+    prisma.inventoryLocation.findFirst({ where: { companyId, name: n.container }, select: { id: true } }),
+  ])
+  const [ordersUser, ordersRole, ordersSalesOrder, ordersPurchaseOrder, templaterUser, templaterRole, costTemplate] =
+    await Promise.all([
+      prisma.user.findFirst({ where: { email: n.ordersEmail, companyId }, select: { id: true } }),
+      prisma.role.findFirst({ where: { companyId, name: n.ordersRole }, select: { id: true } }),
+      prisma.salesOrder.findFirst({ where: { companyId, internalNotes: n.ordersSalesOrder }, select: { id: true } }),
+      prisma.purchaseOrder.findFirst({ where: { companyId, internalNotes: n.ordersPurchaseOrder }, select: { id: true } }),
+      prisma.user.findFirst({ where: { email: n.templaterEmail, companyId }, select: { id: true } }),
+      prisma.role.findFirst({ where: { companyId, name: n.templaterRole }, select: { id: true } }),
+      prisma.quoteTemplate.findFirst({ where: { companyId, name: n.costTemplate }, select: { id: true } }),
+    ])
+  const [stock, repQuoteLine, ordersSoLine, ordersPoLine, costTemplateLine] = await Promise.all([
+    prisma.inventoryStock.findFirst({
+      where: { companyId, catalogItemId: id(stockItem), locationId: id(container) },
+      select: { id: true },
+    }),
+    prisma.quoteLineItem.findFirst({
+      where: { name: n.repQuoteLine, quoteId: id(repQuote), quote: { companyId } },
+      select: { id: true },
+    }),
+    prisma.sOLineItem.findFirst({
+      where: { name: n.ordersSoLine, salesOrderId: id(ordersSalesOrder), salesOrder: { companyId } },
+      select: { id: true },
+    }),
+    prisma.pOLineItem.findFirst({
+      where: { name: n.ordersPoLine, purchaseOrderId: id(ordersPurchaseOrder), purchaseOrder: { companyId } },
+      select: { id: true },
+    }),
+    prisma.quoteTemplateLineItem.findFirst({
+      where: { name: n.costTemplateLine, templateId: id(costTemplate), template: { companyId } },
+      select: { id: true },
+    }),
+  ])
+
+  const ids: PermissionFixtureIds = {
+    everyoneUserId: id(everyoneUser),
+    repUserId: id(repUser),
+    repRoleId: id(repRole),
+    repQuoteId: id(repQuote),
+    repQuoteLineId: id(repQuoteLine),
+    adminMailboxId: id(adminMailbox),
+    clerkUserId: id(clerkUser),
+    clerkRoleId: id(clerkRole),
+    clerkSalesOrderId: id(clerkSalesOrder),
+    clerkPurchaseOrderId: id(clerkPurchaseOrder),
+    stockItemId: id(stockItem),
+    containerId: id(container),
+    stockId: id(stock),
+    ordersUserId: id(ordersUser),
+    ordersRoleId: id(ordersRole),
+    ordersSalesOrderId: id(ordersSalesOrder),
+    ordersSoLineId: id(ordersSoLine),
+    ordersPurchaseOrderId: id(ordersPurchaseOrder),
+    ordersPoLineId: id(ordersPoLine),
+    templaterUserId: id(templaterUser),
+    templaterRoleId: id(templaterRole),
+    costTemplateId: id(costTemplate),
+    costTemplateLineId: id(costTemplateLine),
+  }
+  const missing = Object.entries(ids)
+    .filter(([, value]) => !value)
+    .map(([key]) => key)
+  if (missing.length > 0) {
+    throw new Error(`${n.company} is missing permission test records (${missing.join(", ")}). Run create-test-companies again to top them up.`)
+  }
+  return ids
 }
 
 // Finds every sample record for one test company. Throws naming whatever

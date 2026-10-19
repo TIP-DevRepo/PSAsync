@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 
 // Every company always has exactly one shared Default dashboard. It's
@@ -14,24 +14,22 @@ async function ensureDefaultDashboard(companyId: string) {
 }
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   await ensureDefaultDashboard(companyId)
 
   const [dashboards, user] = await Promise.all([
     prisma.dashboard.findMany({
       where: {
         companyId,
-        OR: [{ isDefault: true }, { userId: session.user.id }],
+        OR: [{ isDefault: true }, { userId: ctx.userId }],
       },
       select: { id: true, name: true, isDefault: true, userId: true },
       orderBy: [{ isDefault: "desc" }, { name: "asc" }],
     }),
-    prisma.user.findUnique({ where: { id: session.user.id }, select: { defaultDashboardId: true } }),
+    prisma.user.findUnique({ where: { id: ctx.userId }, select: { defaultDashboardId: true } }),
   ])
 
   const withMyDefault = dashboards.map((d) => ({ ...d, isMyDefault: d.id === user?.defaultDashboardId }))
@@ -39,10 +37,8 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const body = await req.json()
   const name = (body.name ?? "").trim()
@@ -51,7 +47,7 @@ export async function POST(req: NextRequest) {
   }
 
   const dashboard = await prisma.dashboard.create({
-    data: { companyId: session.user.companyId, userId: session.user.id, name, isDefault: false },
+    data: { companyId: ctx.companyId, userId: ctx.userId, name, isDefault: false },
   })
 
   return NextResponse.json(dashboard)

@@ -1,18 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { ItemType } from "@/generated/prisma"
-import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { apiError, canSeeCost, isEnumValue, omitCost, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
 
+// Open to any active user: the quote, sales order, purchase order, template,
+// and inventory forms pick items from this list. Cost is left out for users
+// who can't see it.
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const items = await prisma.catalogItem.findMany({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     select: {
       id: true,
       name: true,
@@ -35,11 +35,14 @@ export async function GET() {
     orderBy: { name: "asc" },
   })
 
-  return NextResponse.json(items)
+  return NextResponse.json(canSeeCost(ctx) ? items : items.map(omitCost))
 }
 
 export async function POST(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    page: "catalog",
+    message: "You do not have permission to edit the catalog",
+  })
   if (response) return response
 
   const body = await req.json()

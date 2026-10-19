@@ -96,7 +96,8 @@ export interface LineItemBuilderItem {
   sku: string | null
   quantity: number
   unitPrice: number
-  cost: number
+  // Left out by the API for users who can't see cost
+  cost?: number
   discount: number
   taxable: boolean
   isRecurring: boolean
@@ -116,7 +117,8 @@ export interface CatalogOption {
   vendorSku: string | null
   manufacturerSku: string | null
   msrp: number
-  cost: number
+  // Left out by the catalog API for users who can't see cost
+  cost?: number
   taxable: boolean
   active: boolean
 }
@@ -159,8 +161,9 @@ function marginColor(marginPct: number) {
 }
 
 function marginModifierPct(li: LineItemBuilderItem) {
-  if (li.cost <= 0 || li.unitPrice <= 0) return 0
-  return ((li.unitPrice - li.cost) / li.unitPrice) * 100
+  const cost = li.cost ?? 0
+  if (cost <= 0 || li.unitPrice <= 0) return 0
+  return ((li.unitPrice - cost) / li.unitPrice) * 100
 }
 
 function isBundleChild(li: LineItemBuilderItem) {
@@ -430,6 +433,9 @@ interface LineItemBuilderProps {
   onDelete: (id: string) => void | Promise<void>
   onMove: (section: string | null, itemId: string, direction: "up" | "down") => void | Promise<void>
   onDuplicate: (li: LineItemBuilderItem) => void | Promise<void>
+  // False for users who can't see cost: the cost, markup, and margin cells
+  // show "-" and keep their width
+  showCost?: boolean
 }
 
 export function LineItemBuilder({
@@ -444,7 +450,9 @@ export function LineItemBuilder({
   onDelete,
   onMove,
   onDuplicate,
+  showCost = true,
 }: LineItemBuilderProps) {
+  const costVisible = showCost && items.every((li) => typeof li.cost === "number")
   const [addModalSection, setAddModalSection] = useState<string | null>(null)
   const [addToBundleName, setAddToBundleName] = useState<string | null>(null)
   const [newSectionName, setNewSectionName] = useState("")
@@ -848,7 +856,7 @@ export function LineItemBuilder({
 
                 function renderRow(li: LineItemBuilderItem, indent: boolean) {
                   const total = lineTotal(li)
-                  const margin = total - li.cost * li.quantity
+                  const margin = total - (li.cost ?? 0) * li.quantity
                   const marginPct = total > 0 ? (margin / total) * 100 : 0
 
                   if (li.isBundleHeader) {
@@ -998,30 +1006,40 @@ export function LineItemBuilder({
                             />
                           </Cell>
                           <Cell className={`${pad} pr-2 align-top text-right`}>
-                            <input
-                              key={`cost-${li.id}-${li.cost}`}
-                              type="number"
-                              step="0.01"
-                              defaultValue={li.cost}
-                              onBlur={(e) => onUpdate(li.id, { cost: Number(e.target.value) })}
-                              className="w-20 rounded border px-2 py-1 text-xs text-right tabular-nums"
-                            />
+                            {costVisible ? (
+                              <input
+                                key={`cost-${li.id}-${li.cost}`}
+                                type="number"
+                                step="0.01"
+                                defaultValue={li.cost}
+                                onBlur={(e) => onUpdate(li.id, { cost: Number(e.target.value) })}
+                                className="w-20 rounded border px-2 py-1 text-xs text-right tabular-nums"
+                              />
+                            ) : (
+                              <span className="text-xs text-zinc-400">-</span>
+                            )}
                           </Cell>
                           <Cell className={`${pad} pr-2 align-top text-right`}>
-                            <input
-                              key={`mod-${li.id}-${li.cost}-${li.unitPrice}`}
-                              type="number"
-                              step="0.1"
-                              defaultValue={marginModifierPct(li).toFixed(1)}
-                              onBlur={(e) => {
-                                const mod = Number(e.target.value)
-                                if (!Number.isFinite(mod) || mod >= 100) return
-                                const newPrice = Math.round((li.cost / (1 - mod / 100)) * 100) / 100
-                                onUpdate(li.id, { unitPrice: newPrice })
-                              }}
-                              className="w-16 rounded border px-2 py-1 text-xs text-right tabular-nums"
-                            />
-                            <span className="text-zinc-400"> %</span>
+                            {costVisible ? (
+                              <>
+                                <input
+                                  key={`mod-${li.id}-${li.cost}-${li.unitPrice}`}
+                                  type="number"
+                                  step="0.1"
+                                  defaultValue={marginModifierPct(li).toFixed(1)}
+                                  onBlur={(e) => {
+                                    const mod = Number(e.target.value)
+                                    if (!Number.isFinite(mod) || mod >= 100) return
+                                    const newPrice = Math.round(((li.cost ?? 0) / (1 - mod / 100)) * 100) / 100
+                                    onUpdate(li.id, { unitPrice: newPrice })
+                                  }}
+                                  className="w-16 rounded border px-2 py-1 text-xs text-right tabular-nums"
+                                />
+                                <span className="text-zinc-400"> %</span>
+                              </>
+                            ) : (
+                              <span className="text-xs text-zinc-400">-</span>
+                            )}
                           </Cell>
                           <Cell className={`${pad} pr-2 align-top text-right`}>
                             <input
@@ -1050,11 +1068,17 @@ export function LineItemBuilder({
                           </Cell>
                           <Cell className={`${pad} pr-2 align-top font-medium text-right tabular-nums`}>{money(total)}</Cell>
                           <Cell className={`${pad} pr-2 align-top text-xs text-right tabular-nums`}>
-                            {money(margin)}
-                            <br />
-                            <span className={marginColor(marginPct)}>
-                              {total > 0 ? `${marginPct.toFixed(0)}%` : "—"}
-                            </span>
+                            {costVisible ? (
+                              <>
+                                {money(margin)}
+                                <br />
+                                <span className={marginColor(marginPct)}>
+                                  {total > 0 ? `${marginPct.toFixed(0)}%` : "—"}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="text-zinc-400">-</span>
+                            )}
                           </Cell>
                           <Cell className={`${pad} pr-4 align-top`}>
                             <div className="flex items-center gap-2 relative">
@@ -1589,7 +1613,7 @@ function AddLineItemModal({
                         )}
                         <div className="mt-1 flex items-center gap-3">
                           <span className="text-lg font-bold">
-                            {selected ? money(selected.price) : "—"}
+                            {selected ? (typeof selected.price === "number" ? money(selected.price) : "-") : "—"}
                           </span>
                           {selected && (
                             <span
@@ -1647,7 +1671,9 @@ function AddLineItemModal({
                                 : "hover:border-zinc-400"
                             }`}
                           >
-                            <span className="text-sm font-semibold">{money(offer.price)}</span>
+                            <span className="text-sm font-semibold">
+                              {typeof offer.price === "number" ? money(offer.price) : "-"}
+                            </span>
                             <span className="text-xs text-zinc-500">{offer.distributorLabel}</span>
                             {isSelected ? (
                               <span className="absolute -bottom-1.5 -right-1.5 rounded-full bg-green-500 p-0.5 text-white">

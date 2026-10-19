@@ -1,20 +1,33 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { canSeeCost, requireAccess } from "@/lib/api-access"
 import { getAdapter } from "@/lib/distributors/registry"
 import {
   DistributorKey,
   DISTRIBUTOR_LABELS,
+  DistributorOffer,
   DistributorProductGroup,
   DistributorSearchResult,
 } from "@/lib/distributors/types"
 import { generateMockResults, generateMockOffer } from "@/lib/distributors/mock-data"
 
+// An offer without the dealer price and cost, for users who can't see cost.
+// Availability and SKU are kept.
+function withoutPricing(offer: DistributorOffer): DistributorOffer {
+  const rest: DistributorOffer = { ...offer }
+  delete rest.price
+  delete rest.cost
+  return rest
+}
+
+// Shared by every line item picker: quotes, catalog, sales orders, and
+// purchase orders
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: ["pages.quotes", "pages.catalog", "pages.purchaseOrders", "pages.salesOrders"],
+    message: "You do not have permission to search distributors",
+  })
+  if (response) return response
 
   const query = req.nextUrl.searchParams.get("q")?.trim()
   if (!query) {
@@ -27,7 +40,7 @@ export async function GET(req: NextRequest) {
     : null
 
   const allEnabled = await prisma.distributorIntegration.findMany({
-    where: { companyId: session.user.companyId, enabled: true },
+    where: { companyId: ctx.companyId, enabled: true },
     orderBy: { priority: "asc" },
   })
 
@@ -224,5 +237,9 @@ export async function GET(req: NextRequest) {
       ? "Live results from connected distributors, mixed with mock data for distributors still pending API approval."
       : "These are mock results — real distributor pricing/availability will replace this once your distributors approve API access."
 
-  return NextResponse.json({ products, message })
+  const visible = canSeeCost(ctx)
+    ? products
+    : products.map((p) => ({ ...p, offers: p.offers.map(withoutPricing) }))
+
+  return NextResponse.json({ products: visible, message })
 }

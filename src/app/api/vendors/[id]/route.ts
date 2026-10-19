@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { VendorStatus, VendorType } from "@/generated/prisma"
 import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
@@ -9,15 +8,16 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "vendors",
+    message: "You do not have permission to view vendors",
+  })
+  if (response) return response
 
   const { id } = await params
 
   const vendor = await prisma.vendor.findUnique({
-    where: { id, companyId: session.user.companyId },
+    where: { id, companyId: ctx.companyId },
     include: {
       locations: true,
       contacts: true,
@@ -35,7 +35,10 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    page: "vendors",
+    message: "You do not have permission to edit vendors",
+  })
   if (response) return response
 
   const { id } = await params

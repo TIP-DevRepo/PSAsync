@@ -1,25 +1,25 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { RecurringInterval } from "@/generated/prisma"
-import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
-import { assertRefs } from "@/lib/scoped-loaders"
+import { apiError, isEnumValue, notFound, requireAccess } from "@/lib/api-access"
+import { assertRefs, loadViewableQuote } from "@/lib/scoped-loaders"
+import { newLineItemCost } from "@/lib/line-item-cost"
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.edit",
+    message: "You do not have permission to edit quotes",
+  })
   if (response) return response
 
   const { id: quoteId } = await params
 
-  // Confirm the quote belongs to this company before touching it
-  const quote = await prisma.quote.findUnique({
-    where: { id: quoteId, companyId: ctx.companyId },
-  })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  // Confirm the user may open this quote before touching it
+  const quote = await loadViewableQuote(ctx, quoteId)
+  if (!quote) return notFound()
   if (!["DRAFT", "PENDING_APPROVAL"].includes(quote.status)) {
     return NextResponse.json(
       { error: "This quote has been sent and is locked. Create a new version to make changes." },
@@ -57,7 +57,7 @@ export async function POST(
       sku: body.sku || null,
       quantity: isContentOnly ? 0 : Number(body.quantity) || 1,
       unitPrice: isContentOnly ? 0 : Number(body.unitPrice) || 0,
-      cost: isContentOnly ? 0 : Number(body.cost) || 0,
+      cost: isContentOnly ? 0 : await newLineItemCost(ctx, body.catalogItemId, body.cost),
       discount: isContentOnly ? 0 : Number(body.discount) || 0,
       taxable: isContentOnly ? false : body.taxable ?? true,
       isRecurring: isContentOnly ? false : body.isRecurring ?? false,

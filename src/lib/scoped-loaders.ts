@@ -129,10 +129,39 @@ export function loadInventoryAssetAttachment(ctx: Scope, assetId: string, attach
   })
 }
 
+// Sales and purchase orders share one view rule: the user needs the page,
+// and then an order is theirs (its userId, which for an order created when
+// a quote is accepted is the quote's owner) or they hold the viewAll key.
+// Global Admin sees all.
+type OrderViewer = Pick<AccessContext, "companyId" | "userId" | "can">
+
 // Sales orders
 
+// Matches no row, for callers who may not open any sales order
+const NO_SALES_ORDERS = { id: { in: [] as string[] } } satisfies Prisma.SalesOrderWhereInput
+
+// Which of the company's sales orders a user may open (VSO)
+export function salesOrderVisibilityWhere(ctx: OrderViewer): Prisma.SalesOrderWhereInput {
+  if (!ctx.can("pages.salesOrders")) return NO_SALES_ORDERS
+  if (ctx.can("salesOrders.viewAll")) return {}
+  return { userId: ctx.userId }
+}
+
+// The list filter for every sales order the user may open
+export const salesOrderListWhere = (ctx: OrderViewer) =>
+  ({ companyId: ctx.companyId, AND: [salesOrderVisibilityWhere(ctx)] }) satisfies Prisma.SalesOrderWhereInput
+
+// Company scoping only, for writes after loadViewableSalesOrder has passed
 export const salesOrderWhere = (ctx: Scope, salesOrderId: string) =>
   ({ id: salesOrderId, companyId: ctx.companyId }) satisfies Prisma.SalesOrderWhereUniqueInput
+
+// One sales order the user may open, for reads that need their own include
+export const viewableSalesOrderWhere = (ctx: OrderViewer, salesOrderId: string) =>
+  ({
+    id: salesOrderId,
+    companyId: ctx.companyId,
+    AND: [salesOrderVisibilityWhere(ctx)],
+  }) satisfies Prisma.SalesOrderWhereUniqueInput
 
 export const salesOrderLineItemWhere = (ctx: Scope, salesOrderId: string, lineItemId: string) =>
   ({
@@ -148,29 +177,109 @@ export const salesOrderAttachmentWhere = (ctx: Scope, salesOrderId: string, atta
     salesOrder: { id: salesOrderId, companyId: ctx.companyId },
   }) satisfies Prisma.SOAttachmentWhereUniqueInput
 
-export function loadSalesOrder(ctx: Scope, salesOrderId: string) {
-  return prisma.salesOrder.findFirst({ where: salesOrderWhere(ctx, salesOrderId), select: { id: true } })
+// The sales order view check (VSO) every sales order route runs on its URL
+// id. An order the user can't open is a miss, same as one that doesn't exist.
+export function loadViewableSalesOrder(ctx: OrderViewer, salesOrderId: string) {
+  if (!ctx.can("pages.salesOrders")) return Promise.resolve(null)
+  return prisma.salesOrder.findFirst({
+    where: viewableSalesOrderWhere(ctx, salesOrderId),
+    select: { id: true, userId: true },
+  })
 }
 
-// Also selects what deleting a bundle header needs
-export function loadSalesOrderLineItem(ctx: Scope, salesOrderId: string, lineItemId: string) {
+// Also selects what deleting a bundle header needs. Runs the VSO check on
+// the parent order.
+export function loadSalesOrderLineItem(ctx: OrderViewer, salesOrderId: string, lineItemId: string) {
+  if (!ctx.can("pages.salesOrders")) return Promise.resolve(null)
   return prisma.sOLineItem.findFirst({
-    where: salesOrderLineItemWhere(ctx, salesOrderId, lineItemId),
+    where: { id: lineItemId, salesOrderId, salesOrder: viewableSalesOrderWhere(ctx, salesOrderId) },
     select: { id: true, salesOrderId: true, isBundleHeader: true, bundleName: true },
   })
 }
 
-export function loadSalesOrderAttachment(ctx: Scope, salesOrderId: string, attachmentId: string) {
+// Runs the VSO check on the parent order
+export function loadSalesOrderAttachment(ctx: OrderViewer, salesOrderId: string, attachmentId: string) {
+  if (!ctx.can("pages.salesOrders")) return Promise.resolve(null)
   return prisma.sOAttachment.findFirst({
-    where: salesOrderAttachmentWhere(ctx, salesOrderId, attachmentId),
+    where: { id: attachmentId, salesOrderId, salesOrder: viewableSalesOrderWhere(ctx, salesOrderId) },
     select: { id: true },
+  })
+}
+
+// Quotes
+
+type QuoteViewer = Pick<AccessContext, "companyId" | "userId" | "access" | "can">
+
+// Matches no row, for callers who may not open any quote
+const NO_QUOTES = { id: { in: [] as string[] } } satisfies Prisma.QuoteWhereInput
+
+// Which of the company's quotes a user may open: they need the Quotes page,
+// and then a quote is theirs, they see everyone's (quotes.viewAllUsersQuotes),
+// or it is waiting on an approval they can decide (quotes.approve and a
+// rank at or above the approval's required role). Global Admin sees all.
+export function quoteVisibilityWhere(ctx: QuoteViewer): Prisma.QuoteWhereInput {
+  if (!ctx.can("pages.quotes")) return NO_QUOTES
+  if (ctx.can("quotes.viewAllUsersQuotes")) return {}
+  const visible: Prisma.QuoteWhereInput[] = [{ userId: ctx.userId }]
+  if (ctx.can("quotes.approve")) {
+    visible.push({
+      approvals: {
+        some: { status: "PENDING", workflow: { requiredRole: { rank: { lte: ctx.access.rank } } } },
+      },
+    })
+  }
+  return { OR: visible }
+}
+
+// The list filter for every quote the user may open
+export const quoteListWhere = (ctx: QuoteViewer) =>
+  ({ companyId: ctx.companyId, AND: [quoteVisibilityWhere(ctx)] }) satisfies Prisma.QuoteWhereInput
+
+// Company scoping only, for writes after loadViewableQuote has passed
+export const quoteWhere = (ctx: Scope, quoteId: string) =>
+  ({ id: quoteId, companyId: ctx.companyId }) satisfies Prisma.QuoteWhereUniqueInput
+
+// One quote the user may open, for reads that need their own include
+export const viewableQuoteWhere = (ctx: QuoteViewer, quoteId: string) =>
+  ({ id: quoteId, companyId: ctx.companyId, AND: [quoteVisibilityWhere(ctx)] }) satisfies Prisma.QuoteWhereUniqueInput
+
+// The quote view check (VQ) every quote route runs on its URL id. A quote
+// the user can't open is a miss, same as one that doesn't exist.
+export function loadViewableQuote(ctx: QuoteViewer, quoteId: string) {
+  if (!ctx.can("pages.quotes")) return Promise.resolve(null)
+  return prisma.quote.findFirst({
+    where: viewableQuoteWhere(ctx, quoteId),
+    select: { id: true, userId: true, status: true, quoteNumber: true },
   })
 }
 
 // Purchase orders
 
+// Matches no row, for callers who may not open any purchase order
+const NO_PURCHASE_ORDERS = { id: { in: [] as string[] } } satisfies Prisma.PurchaseOrderWhereInput
+
+// Which of the company's purchase orders a user may open (VPO)
+export function purchaseOrderVisibilityWhere(ctx: OrderViewer): Prisma.PurchaseOrderWhereInput {
+  if (!ctx.can("pages.purchaseOrders")) return NO_PURCHASE_ORDERS
+  if (ctx.can("purchaseOrders.viewAll")) return {}
+  return { userId: ctx.userId }
+}
+
+// The list filter for every purchase order the user may open
+export const purchaseOrderListWhere = (ctx: OrderViewer) =>
+  ({ companyId: ctx.companyId, AND: [purchaseOrderVisibilityWhere(ctx)] }) satisfies Prisma.PurchaseOrderWhereInput
+
+// Company scoping only, for writes after loadViewablePurchaseOrder has passed
 export const purchaseOrderWhere = (ctx: Scope, purchaseOrderId: string) =>
   ({ id: purchaseOrderId, companyId: ctx.companyId }) satisfies Prisma.PurchaseOrderWhereUniqueInput
+
+// One purchase order the user may open, for reads that need their own include
+export const viewablePurchaseOrderWhere = (ctx: OrderViewer, purchaseOrderId: string) =>
+  ({
+    id: purchaseOrderId,
+    companyId: ctx.companyId,
+    AND: [purchaseOrderVisibilityWhere(ctx)],
+  }) satisfies Prisma.PurchaseOrderWhereUniqueInput
 
 export const purchaseOrderLineItemWhere = (ctx: Scope, purchaseOrderId: string, lineItemId: string) =>
   ({
@@ -186,22 +295,32 @@ export const purchaseOrderAttachmentWhere = (ctx: Scope, purchaseOrderId: string
     purchaseOrder: { id: purchaseOrderId, companyId: ctx.companyId },
   }) satisfies Prisma.POAttachmentWhereUniqueInput
 
-export function loadPurchaseOrder(ctx: Scope, purchaseOrderId: string) {
-  return prisma.purchaseOrder.findFirst({ where: purchaseOrderWhere(ctx, purchaseOrderId), select: { id: true } })
+// The purchase order view check (VPO) every purchase order route runs on
+// its URL id. An order the user can't open is a miss.
+export function loadViewablePurchaseOrder(ctx: OrderViewer, purchaseOrderId: string) {
+  if (!ctx.can("pages.purchaseOrders")) return Promise.resolve(null)
+  return prisma.purchaseOrder.findFirst({
+    where: viewablePurchaseOrderWhere(ctx, purchaseOrderId),
+    select: { id: true, userId: true },
+  })
 }
 
 // Returns the line item's own purchaseOrderId, verified against the URL's
-// purchase order and the caller's company, for follow up queries to use
-export function loadPurchaseOrderLineItem(ctx: Scope, purchaseOrderId: string, lineItemId: string) {
+// purchase order, the caller's company, and the VPO check, for follow up
+// queries to use
+export function loadPurchaseOrderLineItem(ctx: OrderViewer, purchaseOrderId: string, lineItemId: string) {
+  if (!ctx.can("pages.purchaseOrders")) return Promise.resolve(null)
   return prisma.pOLineItem.findFirst({
-    where: purchaseOrderLineItemWhere(ctx, purchaseOrderId, lineItemId),
+    where: { id: lineItemId, purchaseOrderId, purchaseOrder: viewablePurchaseOrderWhere(ctx, purchaseOrderId) },
     select: { id: true, purchaseOrderId: true },
   })
 }
 
-export function loadPurchaseOrderAttachment(ctx: Scope, purchaseOrderId: string, attachmentId: string) {
+// Runs the VPO check on the parent order
+export function loadPurchaseOrderAttachment(ctx: OrderViewer, purchaseOrderId: string, attachmentId: string) {
+  if (!ctx.can("pages.purchaseOrders")) return Promise.resolve(null)
   return prisma.pOAttachment.findFirst({
-    where: purchaseOrderAttachmentWhere(ctx, purchaseOrderId, attachmentId),
+    where: { id: attachmentId, purchaseOrderId, purchaseOrder: viewablePurchaseOrderWhere(ctx, purchaseOrderId) },
     select: { id: true },
   })
 }

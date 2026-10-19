@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
 import {
   DISTRIBUTOR_SECRET_FIELDS,
   distributorIntegrationSafeSelect,
@@ -23,13 +22,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ distributor: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.integrations"))) {
-    return NextResponse.json({ error: "You don't have permission to change distributor settings" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.integrations",
+    message: "You do not have permission to change distributor settings",
+  })
+  if (response) return response
 
   const { distributor } = await params
   if (!VALID_DISTRIBUTORS.includes(distributor)) {
@@ -37,7 +34,7 @@ export async function PATCH(
   }
 
   const body = await req.json()
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   // Two independent things a save can do: update the credential fields for
   // ONE environment (body.environment says which), and/or switch which

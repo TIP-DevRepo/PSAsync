@@ -1,15 +1,16 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
+import { quoteListWhere } from "@/lib/scoped-loaders"
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({ page: "quotes", message: "You do not have permission to view quotes" })
+  if (response) return response
 
+  // Totals cover the quotes this user may open: their own plus ones waiting
+  // on their approval, or every quote with quotes.viewAllUsersQuotes
   const quotes = await prisma.quote.findMany({
-    where: { companyId: session.user.companyId, isActive: true },
+    where: { ...quoteListWhere(ctx), isActive: true },
     include: {
       lineItems: { select: { unitPrice: true, quantity: true, discount: true } },
     },

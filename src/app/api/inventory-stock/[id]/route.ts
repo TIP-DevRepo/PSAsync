@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
 
 // A stock row's quantity represents real physical units sitting in a
 // container — deleting it while quantity is still positive would silently
@@ -11,17 +10,14 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "inventory.delete"))) {
-    return NextResponse.json({ error: "You don't have permission to delete inventory stock" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "inventory.delete",
+    message: "You do not have permission to delete inventory stock",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const stock = await prisma.inventoryStock.findUnique({ where: { id, companyId } })
   if (!stock) {

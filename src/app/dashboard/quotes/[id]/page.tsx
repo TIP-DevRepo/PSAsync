@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, use } from "react"
 import Link from "next/link"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
-import { Button as HeroButton } from "@heroui/react"
+import { Button as HeroButton, Label, ListBox, Select } from "@heroui/react"
 import {
   LineItemBuilder,
   type LineItemBuilderItem,
@@ -18,6 +18,9 @@ import { promptDialog } from "@/lib/prompt-dialog"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
 import { RolePill } from "@/components/roles/RolePill"
+import { useAccess } from "@/components/AccessProvider"
+import { canSeeCostWith } from "@/lib/access-check"
+import { NoAccess } from "@/components/NoAccess"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface QuoteDetail {
@@ -44,6 +47,19 @@ interface QuoteDetail {
   contact: { id: string; firstName: string; lastName: string; email: string | null } | null
   user: { id: string; name: string }
   lineItems: LineItemBuilderItem[]
+  pendingEmailPayload: HeldEmailView | null
+}
+
+// The email composed in the Send Quote dialog and held on the quote. When
+// lastSendError is set, it was approved but couldn't be sent.
+interface HeldEmailView {
+  to: string
+  cc: string | null
+  subject: string
+  message?: string
+  includePdf: boolean
+  connectionId?: string
+  lastSendError?: string
 }
 
 interface VersionSummary {
@@ -74,14 +90,6 @@ interface Comment {
   authorName: string
   message: string
   createdAt: string
-}
-
-interface MyAccess {
-  rank: number
-  isGlobalAdmin?: boolean
-  permissions: {
-    quotes?: { changeStatus?: boolean; delete?: boolean; edit?: boolean }
-  }
 }
 
 interface ClientOption {
@@ -131,7 +139,21 @@ export default function QuoteDetailPage({
 }: {
   params: Promise<{ id: string }>
 }) {
+  const { can } = useAccess()
+  if (!can("pages.quotes")) {
+    return (
+      <div className="w-full space-y-4">
+        <Breadcrumbs items={breadcrumbItems} current="No access" />
+        <NoAccess />
+      </div>
+    )
+  }
+  return <QuoteDetail params={params} />
+}
+
+function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params)
+  const { access: myAccess, can } = useAccess()
   const [quote, setQuote] = useState<QuoteDetail | null>(null)
   const [catalog, setCatalog] = useState<CatalogOption[]>([])
   const [loading, setLoading] = useState(true)
@@ -144,7 +166,6 @@ export default function QuoteDetailPage({
   const [creatingVersion, setCreatingVersion] = useState(false)
   const [reactivatingId, setReactivatingId] = useState<string | null>(null)
   const [approvals, setApprovals] = useState<ApprovalRequirement[]>([])
-  const [myAccess, setMyAccess] = useState<MyAccess | null>(null)
   const [decidingId, setDecidingId] = useState<string | null>(null)
   const [deleting, setDeleting] = useState(false)
   const [changingStatus, setChangingStatus] = useState(false)
@@ -203,13 +224,14 @@ export default function QuoteDetailPage({
     fetch("/api/quote-settings")
       .then((res) => res.json())
       .then((json) => setCompanyDefaultTerms(json.quoteTerms ?? ""))
-    fetch("/api/auth/session")
-      .then((res) => res.json())
-      .then((session) => setMyAccess(session?.user?.access ?? null))
-    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("send") === "1") {
+    if (
+      typeof window !== "undefined" &&
+      new URLSearchParams(window.location.search).get("send") === "1" &&
+      can("quotes.sendEmail")
+    ) {
       setShowSendModal(true)
     }
-  }, [loadQuote, loadVersions, loadApprovals, loadComments])
+  }, [loadQuote, loadVersions, loadApprovals, loadComments, can])
 
   useEffect(() => {
     if (!quote?.client?.id) return
@@ -257,9 +279,20 @@ export default function QuoteDetailPage({
 
   async function handleApprove(approvalId: string) {
     setDecidingId(approvalId)
-    await fetch(`/api/quotes/${id}/approvals/${approvalId}/approve`, { method: "POST" })
+    const res = await fetch(`/api/quotes/${id}/approvals/${approvalId}/approve`, { method: "POST" })
+    const data = await res.json().catch(() => ({}))
     setDecidingId(null)
-    toast.success("Approval granted")
+    if (!res.ok) {
+      toast.error("Couldn't approve", data.error)
+    } else if (data.warning) {
+      // The approval stands even though the held email didn't go out
+      toast.warning(
+        "Approved, but the email could not be sent",
+        `${data.warning}. The quote owner can send it from the quote.`
+      )
+    } else {
+      toast.success("Approval granted")
+    }
     loadQuote()
     loadVersions()
     loadApprovals()
@@ -517,15 +550,20 @@ export default function QuoteDetailPage({
       recurringByInterval[li.recurringInterval as RecurringInterval] += lineTotal(li)
     })
 
-  const totalCost = pricedItems.reduce((sum, li) => sum + li.cost * li.quantity, 0)
+  // Cost is left out of the quote for users who can't see it
+  const costVisible = canSeeCostWith(can) && pricedItems.every((li) => typeof li.cost === "number")
+  const totalCost = pricedItems.reduce((sum, li) => sum + (li.cost ?? 0) * li.quantity, 0)
   const totalRevenue = pricedItems.reduce((sum, li) => sum + lineTotal(li), 0)
   const totalMargin = totalRevenue - totalCost
   const marginPct = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0
 
   const isLocked = quote.status !== "DRAFT"
-  const canChangeStatus = myAccess?.isGlobalAdmin || !!myAccess?.permissions?.quotes?.changeStatus
-  const canDeleteQuote = myAccess?.isGlobalAdmin || !!myAccess?.permissions?.quotes?.delete
-  const canEditQuote = myAccess?.isGlobalAdmin || !!myAccess?.permissions?.quotes?.edit
+  const canChangeStatus = can("quotes.changeStatus")
+  const canDeleteQuote = can("quotes.delete")
+  const canEditQuote = can("quotes.edit")
+  const canSendEmail = can("quotes.sendEmail")
+  const canCreateQuote = can("quotes.create")
+  const canApprove = can("quotes.approve")
   const showEditableHeader = !isLocked && canEditQuote
 
   return (
@@ -548,12 +586,16 @@ export default function QuoteDetailPage({
           <div className="flex items-center gap-3">
             {quote.status === "DRAFT" && (
               <>
-                <Button size="sm" onClick={() => setShowSendModal(true)}>
-                  Send Quote
-                </Button>
-                <Button size="sm" variant="outline" onClick={handleMarkSent} disabled={sending}>
-                  {sending ? "Marking..." : "Mark as Sent (no email)"}
-                </Button>
+                {canSendEmail && (
+                  <Button size="sm" onClick={() => setShowSendModal(true)}>
+                    Send Quote
+                  </Button>
+                )}
+                {canChangeStatus && (
+                  <Button size="sm" variant="outline" onClick={handleMarkSent} disabled={sending}>
+                    {sending ? "Marking..." : "Mark as Sent (no email)"}
+                  </Button>
+                )}
               </>
             )}
             <Button size="sm" variant="outline" onClick={handleCopyLink}>
@@ -596,14 +638,30 @@ export default function QuoteDetailPage({
         </div>
       </div>
 
+      {quote.status === "DRAFT" && quote.pendingEmailPayload?.lastSendError && (
+        <div className="rounded-lg border border-warning/30 bg-warning-bg p-4 flex items-center justify-between gap-4">
+          <p className="text-sm text-warning">
+            This quote was approved, but its email could not be sent: {quote.pendingEmailPayload.lastSendError}. The email is
+            still waiting to be sent.
+          </p>
+          {canSendEmail && (
+            <Button size="sm" onClick={() => setShowSendModal(true)}>
+              Send Quote
+            </Button>
+          )}
+        </div>
+      )}
+
       {isLocked && quote.status !== "PENDING_APPROVAL" && (
         <div className="rounded-lg border border-warning/30 bg-warning-bg p-4 flex items-center justify-between">
           <p className="text-sm text-warning">
             This quote has been sent and is locked. Create a new version to make changes.
           </p>
-          <Button size="sm" onClick={handleCreateVersion} disabled={creatingVersion}>
-            {creatingVersion ? "Creating..." : "Create New Version"}
-          </Button>
+          {canCreateQuote && (
+            <Button size="sm" onClick={handleCreateVersion} disabled={creatingVersion}>
+              {creatingVersion ? "Creating..." : "Create New Version"}
+            </Button>
+          )}
         </div>
       )}
 
@@ -620,7 +678,7 @@ export default function QuoteDetailPage({
                 const requiredRank = a.workflow.requiredRole?.rank ?? 999
                 const requiredRole = a.workflow.requiredRole
                 const requiredRoleName = requiredRole ? <RolePill role={requiredRole} /> : "sufficient permission"
-                const canDecide = myRank >= requiredRank
+                const canDecide = canApprove && myRank >= requiredRank
 
                 return (
                   <div
@@ -664,9 +722,11 @@ export default function QuoteDetailPage({
           <p className="text-sm text-muted-foreground">
             This is an archived version. Another version is currently the active one shown to the client.
           </p>
-          <Button size="sm" variant="outline" onClick={() => handleReactivate(id)} disabled={reactivatingId === id}>
-            {reactivatingId === id ? "Reactivating..." : "Reactivate This Version"}
-          </Button>
+          {canEditQuote && (
+            <Button size="sm" variant="outline" onClick={() => handleReactivate(id)} disabled={reactivatingId === id}>
+              {reactivatingId === id ? "Reactivating..." : "Reactivate This Version"}
+            </Button>
+          )}
         </div>
       )}
 
@@ -808,7 +868,7 @@ export default function QuoteDetailPage({
             <LineItemBuilder
               items={quote.lineItems}
               catalog={catalog}
-              locked={isLocked}
+              locked={isLocked || !canEditQuote}
               persistedSections={quote.sections}
               onAddSection={handleAddSection}
               onRemoveSection={handleRemoveSection}
@@ -817,6 +877,7 @@ export default function QuoteDetailPage({
               onDelete={deleteLineItem}
               onMove={moveItem}
               onDuplicate={duplicateLineItem}
+              showCost={costVisible}
             />
           </div>
 
@@ -854,15 +915,15 @@ export default function QuoteDetailPage({
             <div className="border-t border-border mt-2 pt-2 space-y-1 text-muted-foreground">
               <div className="flex justify-between">
                 <span>Internal: Total Cost</span>
-                <span className="tabular-nums">{money(totalCost)}</span>
+                <span className="tabular-nums">{costVisible ? money(totalCost) : "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span>Internal: Total Margin $</span>
-                <span className="tabular-nums">{money(totalMargin)}</span>
+                <span className="tabular-nums">{costVisible ? money(totalMargin) : "-"}</span>
               </div>
               <div className="flex justify-between">
                 <span>Internal: Margin %</span>
-                <span className="tabular-nums">{marginPct.toFixed(1)}%</span>
+                <span className="tabular-nums">{costVisible ? `${marginPct.toFixed(1)}%` : "-"}</span>
               </div>
             </div>
           </div>
@@ -890,7 +951,7 @@ export default function QuoteDetailPage({
                     </a>
                     {v.isActive ? (
                       <span className="text-xs font-medium text-success">Active</span>
-                    ) : v.sentAt ? (
+                    ) : v.sentAt && canEditQuote ? (
                       <Button
                         size="sm"
                         variant="outline"
@@ -899,7 +960,7 @@ export default function QuoteDetailPage({
                       >
                         {reactivatingId === v.id ? "..." : "Reactivate"}
                       </Button>
-                    ) : (
+                    ) : v.sentAt ? null : (
                       <span className="text-xs text-muted-foreground">Draft in progress</span>
                     )}
                       </div>
@@ -962,10 +1023,11 @@ export default function QuoteDetailPage({
         </div>
       )}
 
-      {showSendModal && (
+      {showSendModal && canSendEmail && (
         <SendQuoteModal
           quoteId={id}
           defaultTo={quote.contact?.email || quote.client.email || ""}
+          held={quote.pendingEmailPayload?.lastSendError ? quote.pendingEmailPayload : null}
           quoteNumber={quote.quoteNumber}
           version={quote.version}
           accessToken={quote.accessToken}
@@ -983,9 +1045,29 @@ export default function QuoteDetailPage({
 }
 
 // ─── Send Quote Modal ───────────────────────────────────────────────────
+interface SenderOption {
+  connectionId: string
+  email: string
+  ownerName: string | null
+  isShared: boolean
+}
+
+interface SendOptions {
+  defaultConnectionId: string | null
+  defaultError: string | null
+  canChooseSender: boolean
+  options: SenderOption[]
+}
+
+function senderLabel(o: SenderOption) {
+  const who = o.ownerName ? `${o.ownerName}, ${o.email}` : o.email
+  return o.isShared ? `${who} (shared)` : who
+}
+
 function SendQuoteModal({
   quoteId,
   defaultTo,
+  held: heldProp,
   quoteNumber,
   version,
   accessToken,
@@ -994,6 +1076,8 @@ function SendQuoteModal({
 }: {
   quoteId: string
   defaultTo: string
+  // An approved email that couldn't be sent, to start the dialog from
+  held: HeldEmailView | null
   quoteNumber: string
   version: number
   accessToken: string
@@ -1004,24 +1088,52 @@ function SendQuoteModal({
     typeof window !== "undefined" ? `${window.location.origin}/portal/${accessToken}` : ""
   const displayNumber = version > 1 ? `${quoteNumber} v${version}` : quoteNumber
 
-  const [to, setTo] = useState(defaultTo)
-  const [cc, setCc] = useState("")
-  const [subject, setSubject] = useState(`Quote ${displayNumber}`)
+  // Fixed for as long as the dialog is open, so a quote reload behind it
+  // never resets what the user is editing
+  const [held] = useState(heldProp)
+  const [to, setTo] = useState(held?.to ?? defaultTo)
+  const [cc, setCc] = useState(held?.cc ?? "")
+  const [subject, setSubject] = useState(held?.subject ?? `Quote ${displayNumber}`)
   const [message, setMessage] = useState(
-    `Hi,\n\nPlease find your quote ${displayNumber} attached. You can also view it and respond online here:\n${portalLink}\n\nLet us know if you have any questions.`
+    held?.message ??
+      `Hi,\n\nPlease find your quote ${displayNumber} attached. You can also view it and respond online here:\n${portalLink}\n\nLet us know if you have any questions.`
   )
-  const [includePdf, setIncludePdf] = useState(true)
+  const [includePdf, setIncludePdf] = useState(held?.includePdf ?? true)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
   const [pendingApprovalMessage, setPendingApprovalMessage] = useState("")
+  const [senderOptions, setSenderOptions] = useState<SendOptions | null>(null)
+  const [senderLoadFailed, setSenderLoadFailed] = useState(false)
+  const [senderId, setSenderId] = useState<string | null>(null)
 
   useEffect(() => {
     fetch("/api/quote-settings")
       .then((res) => res.json())
       .then((json) => {
-        if (json.quoteDefaultCc) setCc(json.quoteDefaultCc)
+        if (json.quoteDefaultCc && !held) setCc(json.quoteDefaultCc)
       })
-  }, [])
+  }, [held])
+
+  // Who the email goes out from. If this fails the dialog still works and
+  // the server picks the default sender on Send.
+  useEffect(() => {
+    fetch(`/api/quotes/${quoteId}/send-options`)
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok) throw new Error(data.error || "Please try again.")
+        setSenderOptions(data)
+        // A held email starts from the mailbox it was going to go out from,
+        // when this user may pick it
+        const heldSender = (data as SendOptions).options.find((o) => o.connectionId === held?.connectionId)
+        setSenderId(data.canChooseSender && heldSender ? heldSender.connectionId : data.defaultConnectionId ?? null)
+      })
+      .catch((err: Error) => {
+        setSenderLoadFailed(true)
+        toast.error("Couldn't load sending mailboxes", err.message)
+      })
+  }, [quoteId, held])
+
+  const defaultSender = senderOptions?.options.find((o) => o.connectionId === senderOptions.defaultConnectionId)
 
   async function handleSend() {
     if (!to.trim() || !subject.trim() || !message.trim()) {
@@ -1031,15 +1143,21 @@ function SendQuoteModal({
     setSending(true)
     setError("")
 
-    const bodyHtml = message
-      .split("\n")
-      .map((line) => (line ? line : "<br/>"))
-      .join("<br/>")
-
+    // The message goes as plain text; the server escapes it and keeps the
+    // line breaks when it builds the email
     const res = await fetch(`/api/quotes/${quoteId}/send-email`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ to, cc: cc || null, subject, bodyHtml, includePdf }),
+      body: JSON.stringify({
+        to,
+        cc: cc || null,
+        subject,
+        message,
+        includePdf,
+        // Only someone allowed to choose sends a pick, anyone else always
+        // sends from their default
+        ...(senderOptions?.canChooseSender && senderId ? { sendAsConnectionId: senderId } : {}),
+      }),
     })
     const data = await res.json()
     setSending(false)
@@ -1076,6 +1194,49 @@ function SendQuoteModal({
               {error}
             </div>
           )}
+
+          <div>
+            {senderOptions?.canChooseSender ? (
+              <Select
+                value={senderId}
+                onChange={(key) => setSenderId(key === null ? null : String(key))}
+                placeholder="Choose a mailbox"
+                fullWidth
+              >
+                <Label className="block text-sm font-medium mb-1 text-foreground">From</Label>
+                <Select.Trigger>
+                  <Select.Value />
+                  <Select.Indicator />
+                </Select.Trigger>
+                <Select.Popover>
+                  <ListBox>
+                    {senderOptions.options.map((o) => (
+                      <ListBox.Item key={o.connectionId} id={o.connectionId} textValue={senderLabel(o)}>
+                        {senderLabel(o)}
+                        <ListBox.ItemIndicator />
+                      </ListBox.Item>
+                    ))}
+                  </ListBox>
+                </Select.Popover>
+              </Select>
+            ) : (
+              <>
+                <p className="block text-sm font-medium mb-1 text-foreground">From</p>
+                <p className="text-sm text-muted-foreground">
+                  {senderOptions === null && !senderLoadFailed
+                    ? "Loading..."
+                    : defaultSender
+                      ? `Sending from ${defaultSender.email}`
+                      : senderLoadFailed
+                        ? "Your default mailbox"
+                        : "No mailbox available"}
+                </p>
+              </>
+            )}
+            {senderOptions?.defaultError && !senderId && (
+              <p className="mt-1 text-xs text-danger">{senderOptions.defaultError}</p>
+            )}
+          </div>
 
           <div>
             <label className="block text-sm font-medium mb-1 text-foreground">To</label>

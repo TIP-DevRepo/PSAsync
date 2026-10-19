@@ -1,19 +1,23 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { soPoSettingsSelect } from "@/lib/safe-selects"
 import { apiError, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
 import { readSoStatusNotifyRules } from "@/lib/so-status-notify-rules"
 
+// Only the Sales Order and Purchase Order settings panel reads or writes
+// these. The order routes read the prefixes on the server themselves.
+const SETTINGS_RULE = {
+  permission: "settingsSections.salesOrders",
+  message: "You do not have permission to manage sales order and purchase order settings",
+}
+
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess(SETTINGS_RULE)
+  if (response) return response
 
   const settings = await prisma.companySettings.findUnique({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
   })
 
   return NextResponse.json({
@@ -25,11 +29,8 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess(SETTINGS_RULE)
   if (response) return response
-  if (!ctx.can("settingsSections.salesOrders")) {
-    return NextResponse.json({ error: "You don't have permission to edit these settings" }, { status: 403 })
-  }
 
   const body = await req.json()
   const companyId = ctx.companyId

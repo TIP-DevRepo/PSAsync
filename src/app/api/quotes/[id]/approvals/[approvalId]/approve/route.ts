@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
-import { sendQuoteEmail } from "@/lib/send-quote-email"
-import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
-import { getUserRank } from "@/lib/permissions"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { loadViewableQuote } from "@/lib/scoped-loaders"
+import { completeApprovedQuote, recordApproval } from "@/lib/quote-approval"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
@@ -12,20 +11,28 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; approvalId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.approve",
+    message: "You do not have permission to approve quotes",
+  })
+  if (response) return response
 
   const { id, approvalId } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
+
+  // The approver must be able to open the quote. A pending approval they
+  // can decide counts, so this only refuses approvals for other companies,
+  // missing quotes, or ones above their rank.
+  const viewable = await loadViewableQuote(ctx, id)
+  if (!viewable) return notFound()
+
 
   const approval = await prisma.quoteApproval.findUnique({
     where: { id: approvalId },
     include: { workflow: { include: { requiredRole: true } }, quote: true },
   })
   if (!approval || approval.quoteId !== id || approval.quote.companyId !== companyId) {
-    return NextResponse.json({ error: "Approval not found" }, { status: 404 })
+    return notFound()
   }
   if (approval.status !== "PENDING") {
     return NextResponse.json({ error: "This approval has already been decided" }, { status: 400 })
@@ -33,7 +40,7 @@ export async function POST(
 
   // Highest rank across every role the user holds, resolved fresh from the
   // database (Global Admin always outranks any requirement)
-  const userRank = await getUserRank(session.user.id)
+  const userRank = ctx.access.rank
   const requiredRank = approval.workflow.requiredRole?.rank ?? 999
   if (userRank < requiredRank) {
     return NextResponse.json(
@@ -42,51 +49,25 @@ export async function POST(
     )
   }
 
-  await prisma.quoteApproval.update({
-    where: { id: approvalId },
-    data: { status: "APPROVED", approvedByUserId: session.user.id, decidedAt: new Date() },
-  })
+  // The decision is recorded first and only once: a repeat request finds it
+  // already decided and stops here, so it can never send anything again
+  if (!(await recordApproval(approvalId, id, ctx.userId))) {
+    return NextResponse.json({ error: "This approval has already been decided" }, { status: 400 })
+  }
 
-  // If every requirement on this quote is now approved, complete the send
+  // If every requirement on this quote is now approved, complete the send.
+  // A failed send leaves the approval standing and the quote in DRAFT with
+  // the email still held for the owner to send, and comes back as a warning.
   const remaining = await prisma.quoteApproval.count({
     where: { quoteId: id, status: "PENDING" },
   })
-
-  if (remaining === 0) {
-    const quote = await prisma.quote.findUnique({ where: { id } })
-    if (quote) {
-      // If this quote was submitted through the Send Quote dialog, the
-      // composed email was held until now — send it before going live
-      if (quote.pendingEmailPayload) {
-        const payload = quote.pendingEmailPayload as {
-          to: string
-          cc: string | null
-          subject: string
-          bodyHtml: string
-          includePdf: boolean
-        }
-        const result = await sendQuoteEmail({ quoteId: id, ...payload })
-        if (!result.success) {
-          return NextResponse.json(
-            { error: `Approved, but sending the email failed: ${result.error}` },
-            { status: 500 }
-          )
-        }
-      }
-
-      await prisma.$transaction(async (tx) => {
-        await tx.quote.updateMany({
-          where: { companyId, quoteNumber: quote.quoteNumber, id: { not: id } },
-          data: { isActive: false },
-        })
-        await tx.quote.update({
-          where: { id },
-          data: { status: "SENT", sentAt: new Date(), isActive: true, pendingEmailPayload: Prisma.JsonNull },
-        })
-      })
-    }
-  }
+  const completion = remaining === 0 ? await completeApprovedQuote(id, companyId) : null
 
   const updatedQuote = await prisma.quote.findUnique({ where: { id } })
-  return NextResponse.json({ quote: updatedQuote, allApproved: remaining === 0 })
+  return NextResponse.json({
+    quote: updatedQuote,
+    allApproved: remaining === 0,
+    emailSent: completion?.outcome === "sent",
+    ...(completion?.outcome === "send_failed" ? { warning: completion.warning } : {}),
+  })
 }

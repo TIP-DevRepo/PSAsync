@@ -1,21 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
 
   // Confirm this notification belongs to the requesting user before touching it
   const existing = await prisma.notification.findUnique({ where: { id } })
-  if (!existing || existing.userId !== session.user.id) {
+  if (!existing || existing.userId !== ctx.userId) {
     return NextResponse.json({ error: "Notification not found" }, { status: 404 })
   }
 
@@ -31,15 +29,13 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
 
   const existing = await prisma.notification.findUnique({ where: { id } })
-  if (!existing || existing.userId !== session.user.id) {
+  if (!existing || existing.userId !== ctx.userId) {
     return NextResponse.json({ error: "Notification not found" }, { status: 404 })
   }
 

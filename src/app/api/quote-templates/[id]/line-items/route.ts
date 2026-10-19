@@ -1,14 +1,21 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { RecurringInterval } from "@/generated/prisma"
-import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
+import { apiError, canSeeCost, isEnumValue, notFound, omitCost, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
+import { newLineItemCost } from "@/lib/line-item-cost"
+
+// Templates are maintained from Quote Settings
+const TEMPLATE_WRITE_RULE = {
+  settingsSection: "quotes",
+  message: "You do not have permission to edit quote templates",
+} as const
 
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess(TEMPLATE_WRITE_RULE)
   if (response) return response
 
   const { id: templateId } = await params
@@ -17,9 +24,7 @@ export async function POST(
   const template = await prisma.quoteTemplate.findUnique({
     where: { id: templateId, companyId: ctx.companyId },
   })
-  if (!template) {
-    return NextResponse.json({ error: "Template not found" }, { status: 404 })
-  }
+  if (!template) return notFound()
 
   const body = await req.json()
 
@@ -51,7 +56,7 @@ export async function POST(
       sku: body.sku || null,
       quantity: isContentOnly ? 0 : Number(body.quantity) || 1,
       unitPrice: isContentOnly ? 0 : Number(body.unitPrice) || 0,
-      cost: isContentOnly ? 0 : Number(body.cost) || 0,
+      cost: isContentOnly ? 0 : await newLineItemCost(ctx, body.catalogItemId, body.cost),
       discount: isContentOnly ? 0 : Number(body.discount) || 0,
       taxable: isContentOnly ? false : body.taxable ?? true,
       isRecurring: isContentOnly ? false : body.isRecurring ?? false,
@@ -67,5 +72,6 @@ export async function POST(
     },
   })
 
-  return NextResponse.json(lineItem)
+  // The stored cost may come from the catalog, which this caller may not see
+  return NextResponse.json(canSeeCost(ctx) ? lineItem : omitCost(lineItem))
 }

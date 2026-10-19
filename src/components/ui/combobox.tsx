@@ -12,7 +12,8 @@ interface ComboboxProps {
   options: ComboboxOption[]
   value: string
   onChange: (id: string) => void
-  onCreate: (label: string) => Promise<ComboboxOption>
+  // Left out when the user may not add options, which hides creating one
+  onCreate?: (label: string) => Promise<ComboboxOption>
   placeholder?: string
   emptyLabel?: string
 }
@@ -57,7 +58,7 @@ export function Combobox({ options, value, onChange, onCreate, placeholder, empt
 
   async function handleCreate() {
     const label = query.trim()
-    if (!label) return
+    if (!label || !onCreate) return
     setCreating(true)
     try {
       const created = await onCreate(label)
@@ -97,7 +98,7 @@ export function Combobox({ options, value, onChange, onCreate, placeholder, empt
               e.preventDefault()
               if (filtered.length === 1) {
                 handleSelect(filtered[0].id)
-              } else if (!exactMatch && query.trim()) {
+              } else if (onCreate && !exactMatch && query.trim()) {
                 handleCreate()
               }
             }
@@ -129,9 +130,11 @@ export function Combobox({ options, value, onChange, onCreate, placeholder, empt
             </button>
           ))}
           {filtered.length === 0 && !query && (
-            <p className="px-3 py-2 text-xs text-muted-foreground">No options yet — type to create one.</p>
+            <p className="px-3 py-2 text-xs text-muted-foreground">
+              {onCreate ? "No options yet — type to create one." : "No options yet."}
+            </p>
           )}
-          {query.trim() && !exactMatch && (
+          {onCreate && query.trim() && !exactMatch && (
             <button
               type="button"
               onClick={handleCreate}

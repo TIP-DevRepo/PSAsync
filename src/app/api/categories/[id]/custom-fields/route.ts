@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
 // Walks upward from a category to the root, collecting every ancestor's id.
 async function getAncestorIds(companyId: string, categoryId: string): Promise<string[]> {
@@ -30,15 +30,16 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    settingsSection: "company",
+    message: "You do not have permission to manage company settings",
+  })
+  if (response) return response
 
   const { id: categoryId } = await params
 
   const fields = await prisma.inventoryCustomField.findMany({
-    where: { categoryId, companyId: session.user.companyId },
+    where: { categoryId, companyId: ctx.companyId },
     orderBy: [{ sortOrder: "asc" }, { name: "asc" }],
   })
 
@@ -49,13 +50,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    settingsSection: "company",
+    message: "You do not have permission to manage company settings",
+  })
+  if (response) return response
 
   const { id: categoryId } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
   const name = (body.name ?? "").trim()
 

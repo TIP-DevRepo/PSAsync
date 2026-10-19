@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
 import { prisma } from "@/lib/prisma"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 
 // PDF rendering needs the Node.js runtime (not Edge) and more time than the
 // default serverless timeout allows
@@ -14,15 +15,13 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
 
-  const quote = await prisma.quote.findUnique({
-    where: { id, companyId: session.user.companyId },
+  const quote = await prisma.quote.findFirst({
+    where: viewableQuoteWhere(ctx, id),
     include: {
       client: { select: { name: true } },
       contact: { select: { firstName: true, lastName: true } },
@@ -38,9 +37,7 @@ export async function GET(
     },
   })
 
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  if (!quote) return notFound()
 
   const html = buildQuotePdfHtml(quote, {
     name: quote.company.name,

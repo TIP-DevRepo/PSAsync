@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
-import { hasPermission, getUserRank, type RolePermissions } from "@/lib/permissions"
+import { getUserRank, type RolePermissions } from "@/lib/permissions"
 import { syncLegacyRoleId } from "@/lib/user-roles"
 import { readRoleColor } from "@/lib/role-colors"
 import { validateRolePermissions, findPermissionEscalations } from "@/lib/role-permission-rules"
@@ -10,17 +10,15 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.users"))) {
-    return NextResponse.json({ error: "You don't have permission to edit roles" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.users",
+    message: "You do not have permission to edit roles",
+  })
+  if (response) return response
 
   const { id } = await params
   const existing = await prisma.role.findUnique({ where: { id } })
-  if (!existing || existing.companyId !== session.user.companyId) {
+  if (!existing || existing.companyId !== ctx.companyId) {
     return NextResponse.json({ error: "Role not found" }, { status: 404 })
   }
 
@@ -30,7 +28,7 @@ export async function PATCH(
 
   // Hierarchy: you can only edit roles ranked below your own, and can't
   // raise a role's rank to your own level or above.
-  const actorRank = await getUserRank(session.user.id)
+  const actorRank = await getUserRank(ctx.userId)
   if (existing.rank >= actorRank) {
     return NextResponse.json(
       { error: "You can only edit roles below your own in the hierarchy" },
@@ -65,7 +63,7 @@ export async function PATCH(
     }
     permissions = validated.permissions
 
-    const actorAccess = session.user.access
+    const actorAccess = ctx.access
     if (!actorAccess) {
       return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
     }
@@ -100,7 +98,7 @@ export async function PATCH(
     const hadUsersAccess = !!(existing.permissions as RolePermissions)?.settingsSections?.users
     if (hadUsersAccess && !willHaveUsersAccess) {
       const otherRolesWithAccess = await prisma.role.findMany({
-        where: { companyId: session.user.companyId, id: { not: id } },
+        where: { companyId: ctx.companyId, id: { not: id } },
       })
       const stillCovered = otherRolesWithAccess.some(
         (r) => !!(r.permissions as RolePermissions)?.settingsSections?.users
@@ -128,17 +126,15 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.users"))) {
-    return NextResponse.json({ error: "You don't have permission to delete roles" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.users",
+    message: "You do not have permission to delete roles",
+  })
+  if (response) return response
 
   const { id } = await params
   const existing = await prisma.role.findUnique({ where: { id } })
-  if (!existing || existing.companyId !== session.user.companyId) {
+  if (!existing || existing.companyId !== ctx.companyId) {
     return NextResponse.json({ error: "Role not found" }, { status: 404 })
   }
 
@@ -150,7 +146,7 @@ export async function DELETE(
     return NextResponse.json({ error: "The Everyone role cannot be deleted" }, { status: 403 })
   }
 
-  const actorRank = await getUserRank(session.user.id)
+  const actorRank = await getUserRank(ctx.userId)
   if (existing.rank >= actorRank) {
     return NextResponse.json(
       { error: "You can only delete roles below your own in the hierarchy" },
@@ -183,7 +179,7 @@ export async function DELETE(
   const permissions = existing.permissions as RolePermissions
   if (permissions?.settingsSections?.users) {
     const otherRoles = await prisma.role.findMany({
-      where: { companyId: session.user.companyId, id: { not: id } },
+      where: { companyId: ctx.companyId, id: { not: id } },
     })
     const stillCovered = otherRoles.some(
       (r) => !!(r.permissions as RolePermissions)?.settingsSections?.users
@@ -206,7 +202,7 @@ export async function DELETE(
     // Sales order status notification rules that point at this role would
     // be left targeting nothing, so clear just those statuses
     const settings = await tx.companySettings.findUnique({
-      where: { companyId: session.user.companyId },
+      where: { companyId: ctx.companyId },
       select: { id: true, soStatusNotifyRules: true },
     })
     const rules = settings?.soStatusNotifyRules as Record<string, { type: string; id: string } | null> | null | undefined

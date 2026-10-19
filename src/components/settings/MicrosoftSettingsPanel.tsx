@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { useAccess } from "@/components/AccessProvider"
 
 interface CredSettings {
   microsoftClientId: string
@@ -16,11 +17,20 @@ interface Connection {
   id: string
   label: string
   email: string
+  connectedByUserId: string | null
   connectedByUser: { name: string } | null
   createdAt: string
+  // The mailbox Quote Settings sends every quote from
+  isSharedSender?: boolean
 }
 
 export function MicrosoftSettingsPanel() {
+  // Without Integrations access a user only manages their own mailbox: no
+  // app credentials, no SSO switch, and no other user's mailboxes. The API
+  // enforces the same rules, this only keeps the panel clear.
+  const { access, can } = useAccess()
+  const managesIntegration = can("settingsSections.integrations")
+  const myUserId = access?.userId ?? null
   const [settings, setSettings] = useState<CredSettings | null>(null)
   const [connections, setConnections] = useState<Connection[]>([])
   const [loading, setLoading] = useState(true)
@@ -155,15 +165,29 @@ export function MicrosoftSettingsPanel() {
 
   const readyToConnect = !!(settings.microsoftClientId && settings.microsoftTenantId && settings.hasClientSecret)
 
+  // Users without Integrations access only see and manage their own
+  // mailboxes, and never the shared quote sender's Disconnect
+  const visibleConnections = managesIntegration
+    ? connections
+    : connections.filter((c) => c.connectedByUserId === myUserId)
+  const canDisconnect = (c: Connection) =>
+    managesIntegration || (c.connectedByUserId === myUserId && !c.isSharedSender)
+
   return (
     <div className="space-y-6">
-      <p className="text-sm text-zinc-500">
-        Connect your own Microsoft 365 tenant so PSAsync can send and receive email through
-        Outlook. This uses your own Azure App Registration — PSAsync never has access to any
-        Microsoft account beyond what's explicitly connected here. You can connect more than
-        one mailbox (e.g. a shared "quotes@" inbox alongside individual reps), and choose which
-        one to use in other settings pages later (like which mailbox quotes get sent from).
-      </p>
+      {managesIntegration ? (
+        <p className="text-sm text-zinc-500">
+          Connect your own Microsoft 365 tenant so PSAsync can send and receive email through
+          Outlook. This uses your own Azure App Registration — PSAsync never has access to any
+          Microsoft account beyond what's explicitly connected here. You can connect more than
+          one mailbox (e.g. a shared "quotes@" inbox alongside individual reps), and choose which
+          one to use in other settings pages later (like which mailbox quotes get sent from).
+        </p>
+      ) : (
+        <p className="text-sm text-zinc-500">
+          Connect your own Microsoft 365 mailbox so PSAsync can send email as you through Outlook.
+        </p>
+      )}
 
       {justConnected && (
         <div className="rounded-md border border-green-300 bg-green-50 dark:bg-green-950 p-3 text-sm text-green-800 dark:text-green-200">
@@ -177,74 +201,82 @@ export function MicrosoftSettingsPanel() {
         </div>
       )}
 
-      <div className="rounded-md border p-4 space-y-3">
-        <h2 className="font-semibold text-sm">Step 1: Redirect URI</h2>
-        <p className="text-xs text-zinc-500">
-          In your Azure App Registration, under Authentication, add this exact URL as a Web
-          redirect URI (add it again with your local dev URL if you also want to test locally):
-        </p>
-        <div className="flex gap-2">
-          <input
-            type="text"
-            readOnly
-            value={redirectUri}
-            className="flex-1 rounded-md border px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-900"
-          />
-          <Button variant="outline" size="sm" onClick={copyRedirectUri}>
-            Copy
-          </Button>
-        </div>
-      </div>
+      {managesIntegration && (
+        <>
+          <div className="rounded-md border p-4 space-y-3">
+            <h2 className="font-semibold text-sm">Step 1: Redirect URI</h2>
+            <p className="text-xs text-zinc-500">
+              In your Azure App Registration, under Authentication, add this exact URL as a Web
+              redirect URI (add it again with your local dev URL if you also want to test locally):
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                readOnly
+                value={redirectUri}
+                className="flex-1 rounded-md border px-3 py-2 text-sm bg-zinc-50 dark:bg-zinc-900"
+              />
+              <Button variant="outline" size="sm" onClick={copyRedirectUri}>
+                Copy
+              </Button>
+            </div>
+          </div>
 
-      <div className="rounded-md border p-4 space-y-3">
-        <h2 className="font-semibold text-sm">Step 2: Your Azure App Credentials</h2>
-        <div>
-          <label className="block text-sm font-medium mb-1">Application (Client) ID</label>
-          <input
-            type="text"
-            value={form.microsoftClientId}
-            onChange={(e) => setForm({ ...form, microsoftClientId: e.target.value })}
-            className="w-full rounded-md border px-3 py-2 text-sm"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">Directory (Tenant) ID</label>
-          <input
-            type="text"
-            value={form.microsoftTenantId}
-            onChange={(e) => setForm({ ...form, microsoftTenantId: e.target.value })}
-            className="w-full rounded-md border px-3 py-2 text-sm"
-          />
-        </div>
-        <div>
-          <label className="block text-sm font-medium mb-1">
-            Client Secret {settings.hasClientSecret && <span className="text-zinc-400 font-normal">(already saved — leave blank to keep it)</span>}
-          </label>
-          <input
-            type="password"
-            value={form.microsoftClientSecret}
-            onChange={(e) => setForm({ ...form, microsoftClientSecret: e.target.value })}
-            placeholder={settings.hasClientSecret ? "••••••••••••" : ""}
-            className="w-full rounded-md border px-3 py-2 text-sm"
-          />
-        </div>
-        <div className="flex justify-end">
-          <Button onClick={handleSaveCredentials} disabled={saving}>
-            {saving ? "Saving..." : "Save Credentials"}
-          </Button>
-        </div>
-      </div>
+          <div className="rounded-md border p-4 space-y-3">
+            <h2 className="font-semibold text-sm">Step 2: Your Azure App Credentials</h2>
+            <div>
+              <label className="block text-sm font-medium mb-1">Application (Client) ID</label>
+              <input
+                type="text"
+                value={form.microsoftClientId}
+                onChange={(e) => setForm({ ...form, microsoftClientId: e.target.value })}
+                className="w-full rounded-md border px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">Directory (Tenant) ID</label>
+              <input
+                type="text"
+                value={form.microsoftTenantId}
+                onChange={(e) => setForm({ ...form, microsoftTenantId: e.target.value })}
+                className="w-full rounded-md border px-3 py-2 text-sm"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium mb-1">
+                Client Secret {settings.hasClientSecret && <span className="text-zinc-400 font-normal">(already saved — leave blank to keep it)</span>}
+              </label>
+              <input
+                type="password"
+                value={form.microsoftClientSecret}
+                onChange={(e) => setForm({ ...form, microsoftClientSecret: e.target.value })}
+                placeholder={settings.hasClientSecret ? "••••••••••••" : ""}
+                className="w-full rounded-md border px-3 py-2 text-sm"
+              />
+            </div>
+            <div className="flex justify-end">
+              <Button onClick={handleSaveCredentials} disabled={saving}>
+                {saving ? "Saving..." : "Save Credentials"}
+              </Button>
+            </div>
+          </div>
+        </>
+      )}
 
       <div className="rounded-md border p-4 space-y-3">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm">Step 3: Connected Mailboxes</h2>
+          <h2 className="font-semibold text-sm">{managesIntegration ? "Step 3: Connected Mailboxes" : "Your Mailboxes"}</h2>
           <Button size="sm" onClick={() => setShowAddForm(!showAddForm)} disabled={!readyToConnect}>
             {showAddForm ? "Cancel" : "+ Connect a Mailbox"}
           </Button>
         </div>
 
         {!readyToConnect && (
-          <p className="text-xs text-zinc-500">Save your Client ID, Tenant ID, and Client Secret above first.</p>
+          <p className="text-xs text-zinc-500">
+            {managesIntegration
+              ? "Save your Client ID, Tenant ID, and Client Secret above first."
+              : "An administrator needs to finish the Microsoft setup before you can connect a mailbox."}
+          </p>
         )}
 
         {showAddForm && (
@@ -267,12 +299,12 @@ export function MicrosoftSettingsPanel() {
           </div>
         )}
 
-        {connections.length === 0 && !showAddForm && (
+        {visibleConnections.length === 0 && !showAddForm && (
           <p className="text-sm text-zinc-500">No mailboxes connected yet.</p>
         )}
 
         <div className="space-y-2">
-          {connections.map((c) => (
+          {visibleConnections.map((c) => (
             <div key={c.id} className="flex items-center justify-between rounded-md border p-3 text-sm">
               <div>
                 <p className="font-medium">{c.label}</p>
@@ -281,50 +313,54 @@ export function MicrosoftSettingsPanel() {
                   {c.connectedByUser && ` · connected by ${c.connectedByUser.name}`}
                 </p>
               </div>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => handleRemove(c.id)}
-                disabled={removingId === c.id}
-              >
-                {removingId === c.id ? "Removing..." : "Disconnect"}
-              </Button>
+              {canDisconnect(c) && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handleRemove(c.id)}
+                  disabled={removingId === c.id}
+                >
+                  {removingId === c.id ? "Removing..." : "Disconnect"}
+                </Button>
+              )}
             </div>
           ))}
         </div>
       </div>
 
-      <div className="rounded-md border p-4 space-y-3">
-        <h2 className="font-semibold text-sm">Step 4: Single Sign-On</h2>
-        <p className="text-xs text-zinc-500">
-          Once turned on, every user in your company signs into PSAsync with their Microsoft
-          account instead of a password. Their PSAsync account must already exist (an admin
-          invites them under Settings → Users) — SSO links to that account by matching email, it
-          doesn't create new accounts on its own.
-        </p>
-        <div className="flex items-center justify-between rounded-md border p-3">
-          <div>
-            <p className="text-sm font-medium">
-              {settings.ssoEnabled ? "SSO is ON" : "SSO is OFF"}
-            </p>
-            <p className="text-xs text-zinc-500">
-              {settings.ssoEnabled
-                ? "Password login is disabled for everyone in your company."
-                : "Users currently sign in with email and password."}
-            </p>
+      {managesIntegration && (
+        <div className="rounded-md border p-4 space-y-3">
+          <h2 className="font-semibold text-sm">Step 4: Single Sign-On</h2>
+          <p className="text-xs text-zinc-500">
+            Once turned on, every user in your company signs into PSAsync with their Microsoft
+            account instead of a password. Their PSAsync account must already exist (an admin
+            invites them under Settings → Users) — SSO links to that account by matching email, it
+            doesn't create new accounts on its own.
+          </p>
+          <div className="flex items-center justify-between rounded-md border p-3">
+            <div>
+              <p className="text-sm font-medium">
+                {settings.ssoEnabled ? "SSO is ON" : "SSO is OFF"}
+              </p>
+              <p className="text-xs text-zinc-500">
+                {settings.ssoEnabled
+                  ? "Password login is disabled for everyone in your company."
+                  : "Users currently sign in with email and password."}
+              </p>
+            </div>
+            <Button
+              variant={settings.ssoEnabled ? "outline" : "default"}
+              onClick={handleToggleSso}
+              disabled={togglingSso || !readyToConnect}
+            >
+              {togglingSso ? "Saving..." : settings.ssoEnabled ? "Turn Off SSO" : "Turn On SSO"}
+            </Button>
           </div>
-          <Button
-            variant={settings.ssoEnabled ? "outline" : "default"}
-            onClick={handleToggleSso}
-            disabled={togglingSso || !readyToConnect}
-          >
-            {togglingSso ? "Saving..." : settings.ssoEnabled ? "Turn Off SSO" : "Turn On SSO"}
-          </Button>
+          {!readyToConnect && (
+            <p className="text-xs text-zinc-500">Save your Azure credentials above before enabling SSO.</p>
+          )}
         </div>
-        {!readyToConnect && (
-          <p className="text-xs text-zinc-500">Save your Azure credentials above before enabling SSO.</p>
-        )}
-      </div>
+      )}
     </div>
   )
 }

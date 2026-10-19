@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 import { auth } from "@/auth"
 import { checkAccess, type EffectiveAccess, type RolePermissions } from "@/lib/permissions"
+import { canSeeCostWith } from "@/lib/access-check"
 
 // The one JSON error shape every API route returns
 export interface ApiError {
@@ -38,6 +39,9 @@ export interface AccessRule {
   // Only for the routes the forced password change screen needs. Everything
   // else refuses a user still on an admin's temporary password.
   allowPasswordGate?: boolean
+  // The 403 message when a rule fails, e.g. "You do not have permission to
+  // edit quotes". Defaults to a generic one.
+  message?: string
 }
 
 export interface AccessContext {
@@ -48,6 +52,29 @@ export interface AccessContext {
   userName: string | null
   access: EffectiveAccess
   can: (path: string) => boolean
+}
+
+// Whether line item cost (and the margins worked out from it) may be shown.
+// Anyone who maintains the catalog or edits quotes, sales orders, or
+// purchase orders already works with cost (see COST_PERMISSIONS). Global
+// Admin always can.
+export function canSeeCost(ctx: Pick<AccessContext, "can">): boolean {
+  return canSeeCostWith(ctx.can)
+}
+
+// A line item without its cost field, for responses to callers who can't
+// see cost. Everything else on the row is kept as is.
+export function omitCost<T extends { cost?: unknown }>(item: T): Omit<T, "cost"> {
+  const rest: Partial<T> = { ...item }
+  delete rest.cost
+  return rest as Omit<T, "cost">
+}
+
+// The same for a purchase order line item, whose cost field is unitCost
+export function omitUnitCost<T extends { unitCost?: unknown }>(item: T): Omit<T, "unitCost"> {
+  const rest: Partial<T> = { ...item }
+  delete rest.unitCost
+  return rest as Omit<T, "unitCost">
 }
 
 export type AccessResult =
@@ -87,7 +114,7 @@ export async function requireAccess(rule: AccessRule = {}): Promise<AccessResult
     (rule.settingsSection !== undefined && !can(`settingsSections.${rule.settingsSection}`)) ||
     (permissions.length > 0 && !permissions.some((p) => can(p)))
   if (refused) {
-    return { response: apiError(403, "You don't have permission to do this", "FORBIDDEN") }
+    return { response: apiError(403, rule.message ?? "You don't have permission to do this", "FORBIDDEN") }
   }
 
   return {

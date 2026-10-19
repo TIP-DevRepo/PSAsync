@@ -7,7 +7,10 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    page: "catalog",
+    message: "You do not have permission to view the catalog",
+  })
   if (response) return response
 
   const { id } = await params

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { sendQuoteNotificationEmail } from "@/lib/send-quote-email"
 import { prisma } from "@/lib/prisma"
 import { escapeHtml, escapeHtmlWithBreaks } from "@/lib/html"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { loadViewableQuote, viewableQuoteWhere } from "@/lib/scoped-loaders"
 
 export const runtime = "nodejs"
 export const maxDuration = 30
@@ -11,18 +12,12 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
-  const quote = await prisma.quote.findUnique({
-    where: { id, companyId: session.user.companyId },
-  })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  const quote = await loadViewableQuote(ctx, id)
+  if (!quote) return notFound()
 
   const comments = await prisma.quoteComment.findMany({
     where: { quoteId: id },
@@ -36,10 +31,8 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
   const body = await req.json()
@@ -47,23 +40,21 @@ export async function POST(
     return NextResponse.json({ error: "Message is required" }, { status: 400 })
   }
 
-  const quote = await prisma.quote.findUnique({
-    where: { id, companyId: session.user.companyId },
+  const quote = await prisma.quote.findFirst({
+    where: viewableQuoteWhere(ctx, id),
     include: {
       client: { select: { name: true } },
       contact: { select: { firstName: true, lastName: true, email: true } },
     },
   })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  if (!quote) return notFound()
 
   const comment = await prisma.quoteComment.create({
     data: {
       quoteId: id,
       authorType: "INTERNAL",
-      authorUserId: session.user.id,
-      authorName: session.user.name || "Team",
+      authorUserId: ctx.userId,
+      authorName: ctx.userName || "Team",
       message: body.message.trim(),
     },
   })

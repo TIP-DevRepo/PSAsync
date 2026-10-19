@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 
 // Walks up the tree from a candidate parent to make sure `targetId`
 // (the category being moved) never appears among its own ancestors,
@@ -22,13 +22,14 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    settingsSection: "company",
+    message: "You do not have permission to manage company settings",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const existing = await prisma.category.findUnique({ where: { id, companyId } })
   if (!existing) {
@@ -82,13 +83,14 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    settingsSection: "company",
+    message: "You do not have permission to manage company settings",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const existing = await prisma.category.findUnique({
     where: { id, companyId },

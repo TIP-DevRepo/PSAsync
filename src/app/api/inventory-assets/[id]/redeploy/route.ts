@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
 
 // Changes who currently holds an already-deployed asset (Internal user,
@@ -11,13 +11,14 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to edit inventory",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
 
   const asset = await prisma.inventoryAsset.findUnique({ where: { id, companyId } })
@@ -38,7 +39,7 @@ export async function POST(
       where: { id },
       data: { assignedUserId: user.id },
     })
-    await logAssetEvent(id, "MOVED", `Redeployed internally to ${user.name}`, session.user.id)
+    await logAssetEvent(id, "MOVED", `Redeployed internally to ${user.name}`, ctx.userId)
     return NextResponse.json(updated)
   }
 
@@ -62,7 +63,7 @@ export async function POST(
         ...(body.loanExpectedReturnDate ? { loanExpectedReturnDate: new Date(body.loanExpectedReturnDate) } : {}),
       },
     })
-    await logAssetEvent(id, "MOVED", `Redeployed to ${contact.firstName} ${contact.lastName}`, session.user.id)
+    await logAssetEvent(id, "MOVED", `Redeployed to ${contact.firstName} ${contact.lastName}`, ctx.userId)
     return NextResponse.json(updated)
   }
 
@@ -85,7 +86,7 @@ export async function POST(
         ...(contact.locationId ? { clientLocationId: contact.locationId } : {}),
       },
     })
-    await logAssetEvent(id, "MOVED", `Redeployed to ${contact.firstName} ${contact.lastName}`, session.user.id)
+    await logAssetEvent(id, "MOVED", `Redeployed to ${contact.firstName} ${contact.lastName}`, ctx.userId)
     return NextResponse.json(updated)
   }
 

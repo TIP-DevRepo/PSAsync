@@ -6,6 +6,8 @@ import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { formatPhoneDisplay } from "@/lib/phone"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface Vendor {
   id: string
@@ -80,6 +82,12 @@ function SortableHeader({
 }
 
 export default function VendorsListPage() {
+  const { can } = useAccess()
+  if (!can("pages.vendors")) return <NoAccess />
+  return <VendorsListPageContent />
+}
+
+function VendorsListPageContent() {
   const router = useRouter()
   const [vendors, setVendors] = useState<Vendor[]>([])
   const [loading, setLoading] = useState(true)

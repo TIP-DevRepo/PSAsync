@@ -1,56 +1,61 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
 import { readRoleColor } from "@/lib/role-colors"
 import { getRegularRolesInOrder, applyRegularRoleOrder } from "@/lib/role-order"
 
 const DEFAULT_PERMISSIONS = {
   pages: { clients: false, catalog: false, vendors: false, inventory: false, quotes: false, settings: false, salesOrders: false, purchaseOrders: false },
-  quotes: { create: false, edit: false, delete: false, changeStatus: false, approve: false, sendEmail: false, viewAllUsersQuotes: false },
-  clients: { create: false, edit: false, delete: false, viewAllClients: false },
+  quotes: { create: false, edit: false, delete: false, changeStatus: false, approve: false, sendEmail: false, viewAllUsersQuotes: false, sendAsOthers: false },
+  clients: { create: false, edit: false, delete: false },
   salesOrders: { create: false, edit: false, delete: false, changeStatus: false, generatePO: false, viewAll: false },
-  purchaseOrders: { create: false, edit: false, delete: false, changeStatus: false, send: false },
+  purchaseOrders: { create: false, edit: false, delete: false, changeStatus: false, send: false, viewAll: false },
   catalog: { delete: false },
   inventory: { delete: false },
   settingsSections: { company: false, users: false, quotes: false, approvalWorkflows: false, notifications: false, integrations: false, salesOrders: false },
   dashboards: { manage: false },
 }
 
+// Any active user, since pickers on other pages (approval workflows, SO
+// notify rules, Manage Users) list roles by name, rank, and color. Each
+// role's permissions only go to users who manage users and roles.
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   // Every company always has exactly one Everyone role, created here on
   // demand if it is somehow missing so Roles & Permissions can edit it
-  await ensureEveryoneRole(prisma, session.user.companyId)
+  await ensureEveryoneRole(prisma, ctx.companyId)
+
+  const showPermissions = ctx.can("settingsSections.users")
 
   // Highest rank first, ties oldest first: the same order getRegularRolesInOrder
   // uses, so what the Roles & Permissions list shows is what a reorder saves.
   // userCount is how many users hold the role (Everyone is implicit, so 0).
   const roles = await prisma.role.findMany({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     orderBy: [{ rank: "desc" }, { createdAt: "asc" }],
     include: { _count: { select: { userRoles: true } } },
   })
 
-  return NextResponse.json(roles.map(({ _count, ...role }) => ({ ...role, userCount: _count.userRoles })))
+  return NextResponse.json(
+    roles.map(({ _count, permissions, ...role }) => ({
+      ...role,
+      ...(showPermissions ? { permissions } : {}),
+      userCount: _count.userRoles,
+    }))
+  )
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.users",
+    message: "You do not have permission to create roles",
+  })
+  if (response) return response
 
-  if (!(await hasPermission(session.user.id, "settingsSections.users"))) {
-    return NextResponse.json({ error: "You don't have permission to create roles" }, { status: 403 })
-  }
-
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json()
   if (!body.name?.trim()) {
     return NextResponse.json({ error: "Name is required" }, { status: 400 })

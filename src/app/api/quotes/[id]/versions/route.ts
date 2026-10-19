@@ -1,27 +1,24 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { quoteListWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
 
-  const current = await prisma.quote.findUnique({ where: { id, companyId } })
-  if (!current) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  const current = await prisma.quote.findFirst({ where: viewableQuoteWhere(ctx, id) })
+  if (!current) return notFound()
 
-  // All versions of a quote share the same quote number
+  // All versions of a quote share the same quote number. Only the ones
+  // this user may open are listed.
   const versions = await prisma.quote.findMany({
-    where: { companyId, quoteNumber: current.quoteNumber },
+    where: { ...quoteListWhere(ctx), quoteNumber: current.quoteNumber },
     select: { id: true, version: true, status: true, createdAt: true, sentAt: true, isActive: true },
     orderBy: { version: "asc" },
   })
@@ -33,21 +30,20 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "quotes.create",
+    message: "You do not have permission to create quotes",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
-  const current = await prisma.quote.findUnique({
-    where: { id, companyId },
+  const current = await prisma.quote.findFirst({
+    where: viewableQuoteWhere(ctx, id),
     include: { lineItems: true },
   })
-  if (!current) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  if (!current) return notFound()
 
   const highest = await prisma.quote.findFirst({
     where: { companyId, quoteNumber: current.quoteNumber },

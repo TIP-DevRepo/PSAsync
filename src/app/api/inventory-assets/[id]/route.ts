@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
 import { requireAccess } from "@/lib/api-access"
 import { assertRefs, inventoryAssetWhere } from "@/lib/scoped-loaders"
@@ -27,13 +25,14 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to view inventory",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const asset = await prisma.inventoryAsset.findUnique({
     where: { id, companyId },
@@ -74,12 +73,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to edit inventory",
+  })
   if (response) return response
-
-  if (!ctx.can("pages.inventory")) {
-    return NextResponse.json({ error: "You don't have access to Inventory" }, { status: 403 })
-  }
 
   const { id } = await params
   const companyId = ctx.companyId
@@ -159,17 +157,14 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "inventory.delete"))) {
-    return NextResponse.json({ error: "You don't have permission to delete inventory assets" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "inventory.delete",
+    message: "You do not have permission to delete inventory assets",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const asset = await prisma.inventoryAsset.findUnique({ where: { id, companyId } })
   if (!asset) {

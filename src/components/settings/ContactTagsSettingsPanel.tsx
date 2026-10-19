@@ -4,13 +4,23 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { useAccess } from "@/components/AccessProvider"
+import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
 
 interface ContactTag {
   id: string
   name: string
 }
 
+// Its list loads for anyone (pickers elsewhere read it), so the section is
+// gated here rather than on a refused load
 export function ContactTagsSettingsPanel() {
+  const { can } = useAccess()
+  if (!can("settingsSections.company")) return <SettingsNoAccess />
+  return <ContactTagsSettingsPanelContent />
+}
+
+function ContactTagsSettingsPanelContent() {
   const [tags, setTags] = useState<ContactTag[]>([])
   const [loading, setLoading] = useState(true)
   const [newName, setNewName] = useState("")

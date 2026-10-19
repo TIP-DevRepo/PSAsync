@@ -1,24 +1,27 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
-import { hasPermission, getUserRank, getEffectiveAccess } from "@/lib/permissions"
+import { getUserRank } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
 import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
 import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
 import { usesMicrosoftSso } from "@/lib/sso-account"
 
+// Any active user, since pickers on other pages (quote assign, inventory
+// checkout, approval workflows, SO notify rules) list users by name. Email
+// addresses only go to users who manage users.
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
+
+  const showContact = ctx.can("settingsSections.users")
 
   const users = await prisma.user.findMany({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     select: {
       id: true,
       name: true,
-      email: true,
+      email: showContact,
       active: true,
       createdAt: true,
       loginLockedUntil: true,
@@ -32,8 +35,7 @@ export async function GET() {
 
   // Only a Global Admin can unlock a login, so only they are told who is
   // locked. The attempt counter itself is never sent to anyone.
-  const access = await getEffectiveAccess(session.user.id)
-  const showLocks = !!access?.isGlobalAdmin
+  const showLocks = ctx.access.isGlobalAdmin
   const now = Date.now()
 
   // roles is every role the user holds (highest rank first), with the rank
@@ -50,14 +52,11 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "settingsSections.users"))) {
-    return NextResponse.json({ error: "You don't have permission to invite users" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.users",
+    message: "You do not have permission to invite users",
+  })
+  if (response) return response
 
   const body = await req.json()
   const { name, email } = body
@@ -92,7 +91,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A user with that email already exists" }, { status: 400 })
   }
 
-  const loaded = await loadRolesForAssignment(prisma, session.user.companyId, roleIds)
+  const loaded = await loadRolesForAssignment(prisma, ctx.companyId, roleIds)
   if (loaded.error !== undefined) {
     return NextResponse.json({ error: loaded.error }, { status: 400 })
   }
@@ -101,7 +100,7 @@ export async function POST(req: NextRequest) {
   // above it, otherwise inviting a fresh user would sidestep the same
   // hierarchy rule that already governs editing an existing one.
   if (loaded.roles.length > 0) {
-    const actorRank = await getUserRank(session.user.id)
+    const actorRank = await getUserRank(ctx.userId)
     if (loaded.roles.some((role) => role.rank > actorRank)) {
       return NextResponse.json(
         { error: "You can't invite a user into a role above your own rank" },
@@ -115,14 +114,14 @@ export async function POST(req: NextRequest) {
   // A company that signs in with Microsoft never uses this password, so
   // only password companies make the new user replace it on first sign in
   const company = await prisma.company.findUnique({
-    where: { id: session.user.companyId },
+    where: { id: ctx.companyId },
     select: { settings: { select: { ssoEnabled: true } } },
   })
 
   const user = await prisma.$transaction(async (tx) => {
     const created = await tx.user.create({
       data: {
-        companyId: session.user.companyId,
+        companyId: ctx.companyId,
         name,
         email,
         password: hashedPassword,

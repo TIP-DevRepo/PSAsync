@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { buildLocationPathOptions } from "@/lib/inventory/locationPaths"
 import { generateAssetTag } from "@/lib/inventory/generateAssetTag"
@@ -14,12 +13,13 @@ const VALID_STATUSES = ["IN_STOCK", "INTERNAL", "LOANED", "SOLD", "PENDING_OFFBO
 // page's Assets tab. Filtering/sorting all happens client-side against
 // this array, matching every other list page in the app.
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to view inventory",
+  })
+  if (response) return response
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   const assets = await prisma.inventoryAsset.findMany({
     where: { companyId },
@@ -71,12 +71,11 @@ const VALID_REMOVED_REASONS = ["BROKEN_SCRAPPED", "LOST", "DONATED", "RETURNED_T
 //               no location tracking at all
 //   REMOVED  -> same Owner/Location flow as IN_STOCK, plus removedReason
 export async function POST(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    page: "inventory",
+    message: "You do not have permission to edit inventory",
+  })
   if (response) return response
-
-  if (!ctx.can("pages.inventory")) {
-    return NextResponse.json({ error: "You don't have access to Inventory" }, { status: 403 })
-  }
 
   const companyId = ctx.companyId
   const body = await req.json()

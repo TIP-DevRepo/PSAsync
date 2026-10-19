@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { requireAccess } from "@/lib/api-access"
+import { purchaseOrderListWhere, quoteListWhere } from "@/lib/scoped-loaders"
 import type { QuoteStatus, POStatus } from "@/generated/prisma"
 import { computeStatusLabel } from "@/lib/inventory/statusLabel"
 import { canViewWidgetType, type WidgetType } from "@/lib/dashboards/widgetTypes"
@@ -32,22 +33,23 @@ async function countTrend(model: { count: (args: { where: Record<string, unknown
 }
 
 export async function GET(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const type = req.nextUrl.searchParams.get("type") as WidgetType | null
   if (!type) {
     return NextResponse.json({ error: "type is required" }, { status: 400 })
   }
 
-  const pagePermissions = resolvePagePermissions(session.user.access)
+  // A widget on a shared dashboard (the company Default) may be one this
+  // user can't see. It gets no data at all, and the tile shows a quiet no
+  // access note instead of an error.
+  const pagePermissions = resolvePagePermissions(ctx.access)
   if (!canViewWidgetType(pagePermissions, type)) {
-    return NextResponse.json({ error: "You don't have permission to view this widget's data" }, { status: 403 })
+    return NextResponse.json({ type, noAccess: true })
   }
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
 
   if (type === "INVENTORY_BY_STATUS") {
     const assets = await prisma.inventoryAsset.findMany({
@@ -79,18 +81,24 @@ export async function GET(req: NextRequest) {
 
   if (type === "OPEN_QUOTES") {
     const openStatuses: QuoteStatus[] = ["DRAFT", "PENDING_APPROVAL", "SENT", "VIEWED"]
+    // Same scoping as the quotes list: the user's own quotes and ones
+    // waiting on their approval, unless they see everyone's
+    const visible = quoteListWhere(ctx)
     const [count, trend] = await Promise.all([
-      prisma.quote.count({ where: { companyId, status: { in: openStatuses } } }),
-      countTrend(prisma.quote, { companyId }),
+      prisma.quote.count({ where: { ...visible, status: { in: openStatuses } } }),
+      countTrend(prisma.quote, visible),
     ])
     return NextResponse.json({ type, count, ...trend })
   }
 
   if (type === "OPEN_POS") {
     const openStatuses: POStatus[] = ["DRAFT", "PARTS_ORDERED", "ON_HOLD", "BACKORDERED"]
+    // Same scoping as the purchase orders list: the user's own purchase
+    // orders, unless they hold purchaseOrders.viewAll
+    const visible = purchaseOrderListWhere(ctx)
     const [count, trend] = await Promise.all([
-      prisma.purchaseOrder.count({ where: { companyId, status: { in: openStatuses } } }),
-      countTrend(prisma.purchaseOrder, { companyId }),
+      prisma.purchaseOrder.count({ where: { ...visible, status: { in: openStatuses } } }),
+      countTrend(prisma.purchaseOrder, visible),
     ])
     return NextResponse.json({ type, count, ...trend })
   }

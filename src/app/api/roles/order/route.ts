@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
-import { hasPermission, getUserRank } from "@/lib/permissions"
+import { getUserRank } from "@/lib/permissions"
 import { getRegularRolesInOrder, applyRegularRoleOrder } from "@/lib/role-order"
 
 // Saves a new rank order from the drag to reorder list in Roles &
@@ -9,15 +9,13 @@ import { getRegularRolesInOrder, applyRegularRoleOrder } from "@/lib/role-order"
 // Everyone, which stay pinned top and bottom), highest first, exactly as
 // the list shows it. Ranks are renumbered N down to 1 in one transaction.
 export async function PUT(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.users"))) {
-    return NextResponse.json({ error: "You don't have permission to reorder roles" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.users",
+    message: "You do not have permission to reorder roles",
+  })
+  if (response) return response
 
-  const companyId = session.user.companyId
+  const companyId = ctx.companyId
   const body = await req.json().catch(() => ({}))
   const roleIds: unknown = body.roleIds
   if (!Array.isArray(roleIds) || !roleIds.every((r) => typeof r === "string") || new Set(roleIds).size !== roleIds.length) {
@@ -34,7 +32,7 @@ export async function PUT(req: NextRequest) {
     )
   }
 
-  const actorRank = await getUserRank(session.user.id)
+  const actorRank = await getUserRank(ctx.userId)
 
   const result = await prisma.$transaction(async (tx) => {
     const current = await getRegularRolesInOrder(tx, companyId)
