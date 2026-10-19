@@ -29,8 +29,17 @@
 // that a quote PATCH stores sanitized terms. The PDF body is compressed, so
 // its text is checked on the HTML the route renders it from
 // (buildQuotePdfHtml with the stored quote). The terms are put back too.
+//
+// The default terms scenes set Test Company B's default terms, store a
+// draft with the "use default terms" box ticked over different custom
+// text, and check that the internal preview, the staff and portal PDFs, and
+// the quote detail show the default (the customer link does not open a
+// draft yet). Test Admin B then marks it sent with POST quotes/[id]/send,
+// which sends no email, the default is changed in the database, and the
+// sent quote must still show the text frozen at the send on the customer
+// link and in the PDF. The company default terms are put back at the end.
 
-import type { PrismaClient } from "@/generated/prisma"
+import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import { loadPermissionFixtureIds, loadSampleIds, testNames, type SampleIds } from "./lib/test-data"
 import { HarnessBroken, Session, errorText, isJsonError, printTable, readBaseUrl, type Method, type Row } from "./lib/harness"
@@ -52,7 +61,9 @@ type Scene =
   | "declined" // B DECLINED, not expired
   | "backToDraft" // B sent, then moved back to DRAFT
   | "terms" // B VIEWED, not expired, with HOSTILE_TERMS stored as its terms
-  | "termsPatch" // B DRAFT with no terms, for the PATCH step
+  | "termsPatch" // B DRAFT, never sent, box unticked, no terms, for the PATCH step
+  | "defaultDraft" // B DRAFT, never sent, box ticked over CUSTOM_OLD, company default DEFAULT_ONE
+  | "defaultFrozen" // B VIEWED after the send froze DEFAULT_ONE, company default changed to DEFAULT_TWO
   | "regenerate" // B VIEWED, not expired, for the regenerate steps
 
 // ─── ATTEMPTS ───────────────────────────────────────────────────────────────
@@ -134,8 +145,30 @@ function termsProblem(text: string, what: string): string | null {
   return present.length > 0 ? `${what} still contains ${present.join(", ")}` : null
 }
 
-// The HTML the quote PDF route renders, built the same way from the stored quote
-async function pdfHtmlTermsProblem(prisma: PrismaClient, quoteId: string): Promise<string | null> {
+// Company default terms and custom text for the default terms scenes
+const DEFAULT_ONE = "<p>Dev only company default terms one</p>"
+const DEFAULT_TWO = "<p>Dev only company default terms two</p>"
+const CUSTOM_OLD = "<p>Dev only old custom terms</p>"
+const DEFAULT_ONE_TEXT = "Dev only company default terms one"
+const DEFAULT_TWO_TEXT = "Dev only company default terms two"
+const CUSTOM_OLD_TEXT = "Dev only old custom terms"
+
+function textsProblem(text: string, what: string, must: string[], mustNot: string[]): string | null {
+  const missing = must.filter((t) => !text.includes(t))
+  if (missing.length > 0) return `${what} is missing ${missing.join(", ")}`
+  const present = mustNot.filter((t) => text.includes(t))
+  return present.length > 0 ? `${what} still contains ${present.join(", ")}` : null
+}
+
+// The quote detail's effective terms
+function effectiveTermsProblem(res: { text: string }, must: string[], mustNot: string[]): string | null {
+  const body = JSON.parse(res.text) as { effectiveTerms?: string | null }
+  return textsProblem(body.effectiveTerms ?? "", "effectiveTerms", must, mustNot)
+}
+
+// The HTML the quote PDF routes render, built the same way from the stored
+// quote and the company default
+async function pdfHtml(prisma: PrismaClient, quoteId: string): Promise<string> {
   const { buildQuotePdfHtml } = await import("@/lib/quote-pdf-template")
   const { loadCompanyDefaultTerms, resolveQuoteTerms } = await import("@/lib/quote-terms")
   const quote = await prisma.quote.findUniqueOrThrow({
@@ -148,8 +181,11 @@ async function pdfHtmlTermsProblem(prisma: PrismaClient, quoteId: string): Promi
     },
   })
   const effectiveTerms = resolveQuoteTerms(quote, await loadCompanyDefaultTerms(quote.companyId))
-  const html = buildQuotePdfHtml({ ...quote, effectiveTerms }, { name: B.company, logoUrl: null, primaryColor: "#1B3A5C", accentColor: "#2E86AB" })
-  return termsProblem(html, "the PDF HTML")
+  return buildQuotePdfHtml({ ...quote, effectiveTerms }, { name: B.company, logoUrl: null, primaryColor: "#1B3A5C", accentColor: "#2E86AB" })
+}
+
+async function pdfHtmlTermsProblem(prisma: PrismaClient, quoteId: string): Promise<string | null> {
+  return termsProblem(await pdfHtml(prisma, quoteId), "the PDF HTML")
 }
 
 const ATTEMPTS: Attempt[] = [
@@ -247,6 +283,40 @@ const ATTEMPTS: Attempt[] = [
       return termsProblem(q?.terms ?? "", "the stored terms")
     } },
 
+  // ── A draft using the company default shows the current default everywhere ──
+  { scene: "defaultDraft", name: "internal preview shows the default, not old custom text", kind: "allowed", method: "GET",
+    path: (ctx) => `/api/portal/${ctx.bInternal}`, expect: 200, contains: () => [DEFAULT_ONE_TEXT, '"isInternalPreview":true'],
+    notContains: () => [CUSTOM_OLD_TEXT, '"useDefaultTerms"', '"quoteTerms"'] },
+  { scene: "defaultDraft", name: "customer link does not open the unsent draft", kind: "refused", method: "GET", path: p(bClient),
+    expect: 404, expectError: LINK_INVALID },
+  { scene: "defaultDraft", name: "internal preview PDF uses the default", kind: "allowed", method: "GET",
+    path: (ctx) => `/api/portal/${ctx.bInternal}/pdf`, expect: 200, contains: () => ["%PDF"],
+    check: async (_res, ctx, prisma) => textsProblem(await pdfHtml(prisma, ctx.b.quoteId), "the PDF HTML", [DEFAULT_ONE_TEXT], [CUSTOM_OLD_TEXT]) },
+  { scene: "defaultDraft", as: "admin", name: "staff PDF renders for the draft", kind: "allowed", method: "GET",
+    path: (ctx) => `/api/quotes/${ctx.b.quoteId}/pdf`, expect: 200, contains: () => ["%PDF"] },
+  { scene: "defaultDraft", as: "admin", name: "quote detail effective terms are the default", kind: "allowed", method: "GET",
+    path: (ctx) => `/api/quotes/${ctx.b.quoteId}`, expect: 200, contains: () => ['"termsDifferFromDefault":true'],
+    check: async (res) => effectiveTermsProblem(res, [DEFAULT_ONE_TEXT], [CUSTOM_OLD_TEXT]) },
+  // POST send marks it sent without any email (no approval workflow is
+  // active for the test companies, so it is not held)
+  { scene: "defaultDraft", as: "admin", name: "mark as sent freezes the default", kind: "allowed", method: "POST",
+    path: (ctx) => `/api/quotes/${ctx.b.quoteId}/send`, expect: 200,
+    check: async (_res, ctx, prisma) => {
+      const q = await prisma.quote.findUniqueOrThrow({ where: { id: ctx.b.quoteId }, select: { status: true, sentAt: true, terms: true } })
+      if (q.status !== "SENT" || !q.sentAt) return `the quote is ${q.status}, not sent (is an approval workflow active?)`
+      return textsProblem(q.terms ?? "", "the stored terms", [DEFAULT_ONE_TEXT], [CUSTOM_OLD_TEXT])
+    } },
+
+  // ── After the send, a change to the company default changes nothing ──
+  { scene: "defaultFrozen", name: "customer link keeps the frozen terms", kind: "allowed", method: "GET", path: p(bClient), expect: 200,
+    contains: () => [DEFAULT_ONE_TEXT], notContains: () => [DEFAULT_TWO_TEXT, CUSTOM_OLD_TEXT] },
+  { scene: "defaultFrozen", name: "customer PDF keeps the frozen terms", kind: "allowed", method: "GET", path: p(bClient, "/pdf"), expect: 200,
+    contains: () => ["%PDF"],
+    check: async (_res, ctx, prisma) => textsProblem(await pdfHtml(prisma, ctx.b.quoteId), "the PDF HTML", [DEFAULT_ONE_TEXT], [DEFAULT_TWO_TEXT]) },
+  { scene: "defaultFrozen", as: "admin", name: "quote detail keeps the frozen terms", kind: "allowed", method: "GET",
+    path: (ctx) => `/api/quotes/${ctx.b.quoteId}`, expect: 200,
+    check: async (res) => effectiveTermsProblem(res, [DEFAULT_ONE_TEXT], [DEFAULT_TWO_TEXT]) },
+
   // ── Staff responses and regenerate ──
   { scene: "regenerate", as: "admin", name: "quote detail has no customer token", kind: "control", method: "GET", path: (ctx) => `/api/quotes/${ctx.b.quoteId}`,
     expect: 200, contains: () => ['"internalAccessToken"'], notContains: (ctx) => ['"accessToken"', ctx.bClient] },
@@ -283,6 +353,8 @@ const SCENE_ORDER: Scene[] = [
   "backToDraft",
   "terms",
   "termsPatch",
+  "defaultDraft",
+  "defaultFrozen",
   "regenerate",
 ]
 
@@ -303,9 +375,10 @@ const quoteFields = {
   accessToken: true,
   internalNotes: true,
   terms: true,
+  useDefaultTerms: true,
 } as const
 
-async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; rep: string; c: string }) {
+async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; rep: string; c: string; companyB: string }) {
   const now = Date.now()
   const sent = new Date(now - 2 * DAY)
   const nextWeek = new Date(now + 7 * DAY)
@@ -320,13 +393,32 @@ async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; re
     declined: { ...base, status: "DECLINED" as const, declinedAt: sent },
     backToDraft: { ...base, status: "DRAFT" as const },
     terms: { ...base, status: "VIEWED" as const },
-    termsPatch: { ...base, status: "DRAFT" as const },
+    termsPatch: { ...base, status: "DRAFT" as const, sentAt: null, viewedAt: null },
+    defaultDraft: { ...base, status: "DRAFT" as const, sentAt: null, viewedAt: null },
+    // Keeps the terms the send froze
+    defaultFrozen: { ...base, status: "VIEWED" as const },
     regenerate: { ...base, status: "VIEWED" as const },
   }[scene]
   // Written straight to the database, past the sanitizer, the way terms
   // saved before it would look
-  const terms = scene === "terms" ? { terms: HOSTILE_TERMS } : scene === "termsPatch" ? { terms: null } : {}
+  const terms =
+    scene === "terms"
+      ? { terms: HOSTILE_TERMS }
+      : scene === "termsPatch"
+        ? { terms: null, useDefaultTerms: false }
+        : scene === "defaultDraft"
+          ? { terms: CUSTOM_OLD, useDefaultTerms: true }
+          : {}
   await prisma.quote.update({ where: { id: ids.b }, data: { ...b, ...terms } })
+  // Company B's default terms, put back at the end
+  const companyDefault = scene === "defaultDraft" ? DEFAULT_ONE : scene === "defaultFrozen" ? DEFAULT_TWO : null
+  if (companyDefault) {
+    await prisma.companySettings.upsert({
+      where: { companyId: ids.companyB },
+      update: { quoteTerms: companyDefault },
+      create: { companyId: ids.companyB, quoteTerms: companyDefault },
+    })
+  }
   await prisma.quote.update({ where: { id: ids.rep }, data: { status: "DRAFT", sentAt: null, viewedAt: null } })
   await prisma.quote.update({ where: { id: ids.c }, data: { ...base, status: "VIEWED" } })
 }
@@ -417,7 +509,12 @@ async function main() {
     select: quoteFields,
   })
   const familyIds = familyRows.map((q) => q.id)
-  const original = await prisma.quote.findMany({ where: { id: { in: familyIds } }, select: { ...quoteFields, lineItems: { select: { id: true, quantity: true, optionalSelected: true } } } })
+  const original = await prisma.quote.findMany({
+    where: { id: { in: familyIds } },
+    select: { ...quoteFields, pendingEmailPayload: true, lineItems: { select: { id: true, quantity: true, optionalSelected: true } } },
+  })
+  // Company B's default terms, changed by the default terms scenes
+  const originalSettings = await prisma.companySettings.findUnique({ where: { companyId: b.companyId }, select: { quoteTerms: true } })
   if (familyRows.length !== 3) {
     throw new HarnessBroken("The sample quotes have extra versions. Run create-test-companies again to reset them.")
   }
@@ -446,7 +543,7 @@ async function main() {
     console.log(`Calling the portal on ${baseUrl} without signing in. Test Admin B is signed in for the staff checks only.`)
 
     for (const scene of SCENE_ORDER) {
-      await setScene(prisma, scene, { b: b.quoteId, rep: fx.repQuoteId, c: c.quoteId })
+      await setScene(prisma, scene, { b: b.quoteId, rep: fx.repQuoteId, c: c.quoteId, companyB: b.companyId })
       let before = await snapshot(prisma, familyIds, [b.companyId, c.companyId])
       for (const a of ATTEMPTS.filter((x) => x.scene === scene)) {
         const label = `[${scene}${a.as === "admin" ? ", Admin B" : ""}] ${a.name}`
@@ -481,8 +578,11 @@ async function main() {
   } finally {
     // Put every version back exactly as it was, tokens, notes, and terms included
     for (const q of original) {
-      const { id, lineItems, ...fields } = q
-      await prisma.quote.update({ where: { id }, data: fields })
+      const { id, lineItems, pendingEmailPayload, ...fields } = q
+      await prisma.quote.update({
+        where: { id },
+        data: { ...fields, pendingEmailPayload: pendingEmailPayload === null ? Prisma.DbNull : (pendingEmailPayload as Prisma.InputJsonValue) },
+      })
       for (const li of lineItems) {
         await prisma.quoteLineItem.update({ where: { id: li.id }, data: { quantity: li.quantity, optionalSelected: li.optionalSelected } })
       }
@@ -492,7 +592,13 @@ async function main() {
     await prisma.notification.deleteMany({
       where: { companyId: { in: [b.companyId, c.companyId] }, createdAt: { gte: startedAt }, link: { in: familyIds.map((id) => `/dashboard/quotes/${id}`) } },
     })
-    console.log("Sample quotes put back the way they were.")
+    // Company B's default terms as they were, or no settings row if it had none
+    if (originalSettings) {
+      await prisma.companySettings.update({ where: { companyId: b.companyId }, data: { quoteTerms: originalSettings.quoteTerms } })
+    } else {
+      await prisma.companySettings.deleteMany({ where: { companyId: b.companyId } })
+    }
+    console.log("Sample quotes and Company B's default terms put back the way they were.")
     await prisma.$disconnect()
   }
 }
