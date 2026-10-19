@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { withoutCustomerToken, withoutPortalTokens } from "@/lib/portal-token"
 import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
 import { loadViewableQuote, quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
+import { termsForStorage } from "@/lib/sanitize-terms"
 
 export async function GET(
   req: NextRequest,
@@ -79,7 +80,7 @@ export async function PATCH(
 
   if (body.title !== undefined) data.title = body.title || null
   if (body.introText !== undefined) data.introText = body.introText || null
-  if (body.terms !== undefined) data.terms = body.terms || null
+  if (body.terms !== undefined) data.terms = termsForStorage(body.terms)
   if (body.useDefaultTerms !== undefined) data.useDefaultTerms = !!body.useDefaultTerms
   if (body.paymentTerms !== undefined) data.paymentTerms = body.paymentTerms || null
   if (body.expiresAt !== undefined) data.expiresAt = body.expiresAt ? new Date(body.expiresAt) : null

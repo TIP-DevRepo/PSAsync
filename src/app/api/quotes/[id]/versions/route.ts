@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { quoteListWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
+import { termsForStorage } from "@/lib/sanitize-terms"
 
 export async function GET(
   req: NextRequest,
@@ -69,7 +70,7 @@ export async function POST(
       status: "DRAFT",
       title: current.title,
       introText: current.introText,
-      terms: current.terms,
+      terms: termsForStorage(current.terms),
       internalNotes: current.internalNotes,
       clientPoNumber: current.clientPoNumber,
       expiresAt: current.expiresAt,

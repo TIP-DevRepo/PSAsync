@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
 import { assertRefs, quoteListWhere } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
+import { termsForStorage } from "@/lib/sanitize-terms"
 
 export async function GET() {
   const { ctx, response } = await requireAccess({ page: "quotes", message: "You do not have permission to view quotes" })
@@ -203,7 +204,9 @@ export async function POST(req: NextRequest) {
       templateId: body.templateId || null,
       title: body.title || null,
       introText: body.introText || null,
-      terms: body.terms || templateTerms || settings?.quoteTerms || null,
+      // Sanitized like every terms write; each source falls through to the
+      // next when it is empty
+      terms: termsForStorage(body.terms) || termsForStorage(templateTerms) || termsForStorage(settings?.quoteTerms),
       internalNotes: body.internalNotes || null,
       shipAddress: body.shipAddress || null,
       shipAddress2: body.shipAddress2 || null,

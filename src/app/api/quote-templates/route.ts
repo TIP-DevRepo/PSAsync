@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { canSeeCost, omitCost, requireAccess } from "@/lib/api-access"
+import { termsForStorage } from "@/lib/sanitize-terms"
 
 // Templates are maintained from Quote Settings
 const TEMPLATE_WRITE_RULE = {
@@ -37,7 +38,7 @@ export async function POST(req: NextRequest) {
       name: body.name,
       description: body.description || null,
       introText: body.introText || null,
-      terms: body.terms || null,
+      terms: termsForStorage(body.terms),
       expiryDays: Number(body.expiryDays) || 30,
       active: body.active ?? true,
     },

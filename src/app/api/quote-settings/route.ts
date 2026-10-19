@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { quoteSettingsSelect } from "@/lib/safe-selects"
 import { apiError, requireAccess } from "@/lib/api-access"
+import { termsForStorage } from "@/lib/sanitize-terms"
 
 // Any active user, since the quote pages read these defaults
 export async function GET() {
@@ -66,7 +67,7 @@ export async function PATCH(req: NextRequest) {
   const data = {
     quotePrefix: body.quotePrefix,
     quoteExpiryDays,
-    quoteTerms: body.quoteTerms || null,
+    quoteTerms: termsForStorage(body.quoteTerms),
     quoteDefaultCc: body.quoteDefaultCc || null,
     quoteApprovalThreshold: approvalThreshold ?? null,
     quoteSendFromMode: body.quoteSendFromMode === "SPECIFIC" ? "SPECIFIC" : "CREATOR",

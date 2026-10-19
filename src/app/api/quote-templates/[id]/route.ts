@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
+import { termsForStorage } from "@/lib/sanitize-terms"
 
 // Templates are maintained from Quote Settings
 const TEMPLATE_WRITE_RULE = {
@@ -56,7 +57,7 @@ export async function PATCH(
   if (body.name !== undefined) data.name = body.name
   if (body.description !== undefined) data.description = body.description || null
   if (body.introText !== undefined) data.introText = body.introText || null
-  if (body.terms !== undefined) data.terms = body.terms || null
+  if (body.terms !== undefined) data.terms = termsForStorage(body.terms)
   if (body.useDefaultTerms !== undefined) data.useDefaultTerms = Boolean(body.useDefaultTerms)
   if (body.expiryDays !== undefined) data.expiryDays = Number(body.expiryDays) || 30
   if (body.active !== undefined) data.active = Boolean(body.active)
