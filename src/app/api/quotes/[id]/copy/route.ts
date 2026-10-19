@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
+import { newAccessToken } from "@/lib/portal-token"
 
 export async function POST(
   req: NextRequest,
@@ -36,6 +37,8 @@ export async function POST(
       // The copy belongs to whoever made it, so they can always open it
       userId: ctx.userId,
       quoteNumber,
+      accessToken: newAccessToken(),
+      internalAccessToken: newAccessToken(),
       templateId: source.templateId,
       title: source.title ? `${source.title} (Copy)` : null,
       introText: source.introText,

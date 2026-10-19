@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
 import { assertRefs, quoteListWhere } from "@/lib/scoped-loaders"
+import { newAccessToken } from "@/lib/portal-token"
 
 export async function GET() {
   const { ctx, response } = await requireAccess({ page: "quotes", message: "You do not have permission to view quotes" })
@@ -196,6 +197,8 @@ export async function POST(req: NextRequest) {
       contactId: body.contactId || null,
       userId: body.userId || ctx.userId,
       quoteNumber,
+      accessToken: newAccessToken(),
+      internalAccessToken: newAccessToken(),
       templateId: body.templateId || null,
       title: body.title || null,
       introText: body.introText || null,
