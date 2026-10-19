@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { canSeeCost, omitCost, requireAccess } from "@/lib/api-access"
-import { termsForStorage } from "@/lib/sanitize-terms"
+import { termsForStorage, withSafeTerms } from "@/lib/sanitize-terms"
 
 // Templates are maintained from Quote Settings
 const TEMPLATE_WRITE_RULE = {
@@ -20,10 +20,10 @@ export async function GET() {
   })
 
   if (!canSeeCost(ctx)) {
-    return NextResponse.json(templates.map((t) => ({ ...t, lineItems: t.lineItems.map(omitCost) })))
+    return NextResponse.json(templates.map((t) => ({ ...withSafeTerms(t), lineItems: t.lineItems.map(omitCost) })))
   }
 
-  return NextResponse.json(templates)
+  return NextResponse.json(templates.map(withSafeTerms))
 }
 
 export async function POST(req: NextRequest) {
@@ -44,5 +44,5 @@ export async function POST(req: NextRequest) {
     },
   })
 
-  return NextResponse.json(template)
+  return NextResponse.json(withSafeTerms(template))
 }

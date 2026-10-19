@@ -1,4 +1,5 @@
 import type { Prisma } from "@/generated/prisma"
+import { withSafeTerms } from "@/lib/sanitize-terms"
 
 // The only quote fields the customer portal ever sends to the browser.
 // Every portal route that returns quote data selects through these, so
@@ -70,6 +71,8 @@ export const portalQuoteSelect = {
 
 export type PortalQuoteRow = Prisma.QuoteGetPayload<{ select: typeof portalQuoteSelect }>
 
+// Terms are sanitized here, on the way out, so every portal response that
+// carries them is safe to render whatever is stored
 export function toPortalQuote(row: PortalQuoteRow, isInternalPreview: boolean) {
-  return { ...row, isInternalPreview }
+  return { ...withSafeTerms(row), isInternalPreview }
 }

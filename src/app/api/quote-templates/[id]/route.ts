@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
-import { termsForStorage } from "@/lib/sanitize-terms"
+import { termsForStorage, withSafeTerms } from "@/lib/sanitize-terms"
 
 // Templates are maintained from Quote Settings
 const TEMPLATE_WRITE_RULE = {
@@ -27,7 +27,7 @@ export async function GET(
 
   if (!canSeeCost(ctx)) {
     return NextResponse.json({
-      ...template,
+      ...withSafeTerms(template),
       lineItems: template.lineItems.map((li) => ({
         ...omitCost(li),
         catalogItem: li.catalogItem ? omitCost(li.catalogItem) : null,
@@ -35,7 +35,7 @@ export async function GET(
     })
   }
 
-  return NextResponse.json(template)
+  return NextResponse.json(withSafeTerms(template))
 }
 
 export async function PATCH(
@@ -64,5 +64,5 @@ export async function PATCH(
 
   const template = await prisma.quoteTemplate.update({ where: { id, companyId: ctx.companyId }, data })
 
-  return NextResponse.json(template)
+  return NextResponse.json(withSafeTerms(template))
 }
