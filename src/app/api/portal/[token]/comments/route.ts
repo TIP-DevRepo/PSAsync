@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteComment } from "@/lib/notify"
-import { resolveClientQuoteId } from "@/lib/portal-quote"
+import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { prisma } from "@/lib/prisma"
 
 export async function GET(
@@ -8,10 +8,10 @@ export async function GET(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params
-  const activeId = await resolveClientQuoteId(token)
-  if (!activeId) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  // Staff may read the thread in the internal preview
+  const access = await resolvePortalAccess(token, "view", { allowInternal: true })
+  if (!access.ok) return access.response
+  const activeId = access.quoteId
 
   const comments = await prisma.quoteComment.findMany({
     where: { quoteId: activeId },
@@ -27,14 +27,14 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params
-  const body = await req.json()
-  if (!body.message || !body.message.trim()) {
-    return NextResponse.json({ error: "Message is required" }, { status: 400 })
-  }
+  // Only while the quote is waiting on the customer and not expired
+  const access = await resolvePortalAccess(token, "act")
+  if (!access.ok) return access.response
+  const activeId = access.quoteId
 
-  const activeId = await resolveClientQuoteId(token)
-  if (!activeId) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+  const body = await req.json().catch(() => ({}))
+  if (typeof body.message !== "string" || !body.message.trim()) {
+    return NextResponse.json({ error: "Message is required" }, { status: 400 })
   }
 
   const quote = await prisma.quote.findUnique({
@@ -45,9 +45,7 @@ export async function POST(
       user: { select: { name: true, email: true } },
     },
   })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  if (!quote) return linkInvalidResponse()
 
   const authorName = quote.contact
     ? `${quote.contact.firstName} ${quote.contact.lastName}`

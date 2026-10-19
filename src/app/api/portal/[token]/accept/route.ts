@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteEvent } from "@/lib/notify"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
-import { resolveClientQuoteId } from "@/lib/portal-quote"
+import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
 
@@ -10,23 +10,15 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params
+  // Only while the quote is waiting on the customer (SENT or VIEWED) and
+  // not expired; anything else is refused here
+  const access = await resolvePortalAccess(token, "act")
+  if (!access.ok) return access.response
+
   const body = await req.json().catch(() => ({}))
 
-  const activeId = await resolveClientQuoteId(token)
-  if (!activeId) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
-
-  const quote = await prisma.quote.findUnique({ where: { id: activeId } })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
-  if (quote.status === "ACCEPTED" || quote.status === "DECLINED") {
-    return NextResponse.json({ error: "This quote has already been responded to" }, { status: 400 })
-  }
-  if (quote.status === "EXPIRED") {
-    return NextResponse.json({ error: "This quote has expired" }, { status: 400 })
-  }
+  const quote = await prisma.quote.findUnique({ where: { id: access.quoteId } })
+  if (!quote) return linkInvalidResponse()
 
   // Acceptance requires a signature, a named signer, and agreeing to terms
   if (!body.signatureType || (body.signatureType !== "TYPED" && body.signatureType !== "DRAWN")) {

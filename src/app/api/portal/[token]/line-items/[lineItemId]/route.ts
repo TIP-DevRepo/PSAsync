@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { resolveClientQuoteId } from "@/lib/portal-quote"
+import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { prisma } from "@/lib/prisma"
 import { portalLineItemSelect } from "@/lib/portal-public"
 import { withDeadlockRetry } from "@/lib/withDeadlockRetry"
@@ -9,20 +9,14 @@ export async function PATCH(
   { params }: { params: Promise<{ token: string; lineItemId: string }> }
 ) {
   const { token, lineItemId } = await params
-  const body = await req.json()
+  // Only while the quote is waiting on the customer and not expired
+  const access = await resolvePortalAccess(token, "act")
+  if (!access.ok) return access.response
 
-  const activeId = await resolveClientQuoteId(token)
-  if (!activeId) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  const body = await req.json().catch(() => ({}))
 
-  const quote = await prisma.quote.findUnique({ where: { id: activeId } })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
-  if (["ACCEPTED", "DECLINED", "EXPIRED"].includes(quote.status)) {
-    return NextResponse.json({ error: "This quote can no longer be modified" }, { status: 400 })
-  }
+  const quote = await prisma.quote.findUnique({ where: { id: access.quoteId } })
+  if (!quote) return linkInvalidResponse()
 
   const lineItem = await prisma.quoteLineItem.findUnique({ where: { id: lineItemId } })
   if (!lineItem || lineItem.quoteId !== quote.id) {

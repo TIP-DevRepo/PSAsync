@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
-import { resolveClientQuoteId } from "@/lib/portal-quote"
+import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { prisma } from "@/lib/prisma"
 
 export const runtime = "nodejs"
@@ -14,10 +14,11 @@ export async function GET(
 ) {
   const { token } = await params
 
-  const activeId = await resolveClientQuoteId(token)
-  if (!activeId) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  // A read: works for an accepted quote past its expiry date, and for the
+  // staff internal preview
+  const access = await resolvePortalAccess(token, "view", { allowInternal: true })
+  if (!access.ok) return access.response
+  const activeId = access.quoteId
 
   const quote = await prisma.quote.findUnique({
     where: { id: activeId },
@@ -36,9 +37,7 @@ export async function GET(
     },
   })
 
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  if (!quote) return linkInvalidResponse()
 
   const html = buildQuotePdfHtml(quote, {
     name: quote.company.name,
