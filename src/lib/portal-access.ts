@@ -31,6 +31,7 @@ export const VIEW_AFTER_EXPIRY_STATUSES: readonly QuoteStatus[] = ["ACCEPTED"]
 
 export const LINK_INVALID_MESSAGE = "This link is no longer valid"
 export const QUOTE_EXPIRED_MESSAGE = "This quote has expired"
+export const SUPERSEDED_MESSAGE = "A newer version of this quote has been sent"
 
 // "view" reads (the page, its comments, the PDF); "act" changes something
 // (accept, decline, comment, line item updates)
@@ -62,8 +63,17 @@ export type PortalDecision =
   | { ok: true; expired: boolean }
   | { ok: false; status: 400 | 403 | 404 | 410; error: string; code: string }
 
-// Pure decision for one quote, one token kind, and one use
-export function decidePortalAccess(quote: PortalQuoteState, kind: TokenKind, use: PortalUse, now: Date): PortalDecision {
+// Pure decision for one quote, one token kind, and one use. superseded
+// (see isSupersededVersion) only refuses actions, after every other rule,
+// so an older version keeps its view, its PDF, and its expiry and status
+// answers.
+export function decidePortalAccess(
+  quote: PortalQuoteState,
+  kind: TokenKind,
+  use: PortalUse,
+  now: Date,
+  superseded = false
+): PortalDecision {
   if (kind === "internal") {
     if (use === "view") return { ok: true, expired: isExpired(quote, now) }
     return { ok: false, status: 403, code: "INTERNAL_PREVIEW", error: "Actions are turned off in the internal preview" }
@@ -86,6 +96,10 @@ export function decidePortalAccess(quote: PortalQuoteState, kind: TokenKind, use
     }
   }
 
+  if (use === "act" && superseded) {
+    return { ok: false, status: 400, code: "SUPERSEDED", error: SUPERSEDED_MESSAGE }
+  }
+
   return { ok: true, expired: false }
 }
 
@@ -98,9 +112,42 @@ export function linkInvalidResponse() {
 // database lookup.
 const TOKEN_SHAPE = /^[A-Za-z0-9_-]{20,64}$/
 
-const stateSelect = { id: true, companyId: true, quoteNumber: true, status: true, sentAt: true, expiresAt: true } as const
+const stateSelect = {
+  id: true,
+  companyId: true,
+  quoteNumber: true,
+  status: true,
+  sentAt: true,
+  expiresAt: true,
+  isActive: true,
+} as const
 
-type StateRow = PortalQuoteState & { id: string; companyId: string; quoteNumber: string }
+type StateRow = PortalQuoteState & { id: string; companyId: string; quoteNumber: string; isActive: boolean }
+
+// Each version of a quote is its own row with its own client token. The
+// family's active version (isActive, moved by every send and by
+// reactivate) is the live one. A version the customer opens is superseded
+// when it is not active and a different version is active and was sent, so
+// an older link can still be read but not acted on. A family whose active
+// version was never sent (reactivating a draft) supersedes nothing, so
+// those links keep working as before.
+export function isSupersededVersion(
+  version: { id: string; isActive: boolean },
+  activeSentVersionId: string | null
+): boolean {
+  return !version.isActive && !!activeSentVersionId && activeSentVersionId !== version.id
+}
+
+// Only looked up for a version that is not the active one, so the link to
+// the live version never pays for this query
+async function findActiveSentVersionId(quote: StateRow): Promise<string | null> {
+  if (quote.isActive) return null
+  const active = await prisma.quote.findFirst({
+    where: { companyId: quote.companyId, quoteNumber: quote.quoteNumber, isActive: true, sentAt: { not: null } },
+    select: { id: true },
+  })
+  return active?.id ?? null
+}
 
 // Which version a token opens, before the rules are applied.
 // A client token opens its own version when that version was sent. A
@@ -135,7 +182,16 @@ async function findTokenQuote(token: string, allowInternal: boolean): Promise<{ 
 }
 
 export type PortalAccess =
-  | { ok: true; quoteId: string; status: QuoteStatus; isInternal: boolean; expired: boolean; response?: undefined }
+  | {
+      ok: true
+      quoteId: string
+      status: QuoteStatus
+      isInternal: boolean
+      expired: boolean
+      // A newer version was sent: reads still work, actions are refused
+      superseded: boolean
+      response?: undefined
+    }
   | {
       ok: false
       response: NextResponse
@@ -155,7 +211,8 @@ export async function resolvePortalAccess(
   if (!found) return { ok: false, response: linkInvalidResponse() }
 
   const { quote, kind } = found
-  const decision = decidePortalAccess(quote, kind, use, options.now ?? new Date())
+  const superseded = kind === "client" && isSupersededVersion(quote, await findActiveSentVersionId(quote))
+  const decision = decidePortalAccess(quote, kind, use, options.now ?? new Date(), superseded)
   if (!decision.ok) {
     if (decision.status === 404) return { ok: false, response: linkInvalidResponse() }
     return {
@@ -164,7 +221,14 @@ export async function resolvePortalAccess(
       ...(decision.status === 410 ? { expiredQuote: { id: quote.id, companyId: quote.companyId, status: quote.status } } : {}),
     }
   }
-  return { ok: true, quoteId: quote.id, status: quote.status, isInternal: kind === "internal", expired: decision.expired }
+  return {
+    ok: true,
+    quoteId: quote.id,
+    status: quote.status,
+    isInternal: kind === "internal",
+    expired: decision.expired,
+    superseded,
+  }
 }
 
 // The only quote related data an expired link returns: the company's
