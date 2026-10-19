@@ -16,7 +16,7 @@
 
 import bcrypt from "bcryptjs"
 import type { PrismaClient } from "@/generated/prisma"
-import { enforceDevGuard } from "./lib/guard"
+import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import { BCRYPT_COST, generatePassword, loadSampleIds, testNames, type SampleIds, type TestLetter } from "./lib/test-data"
 // Only imports Prisma types, so loading it can't reach the database
 import { setUserRoles } from "@/lib/user-roles"
@@ -124,6 +124,28 @@ const ATTEMPTS: Attempt[] = [
   { name: "DELETE own PO line item under own second PO", directions: "both", sameCompany: true, method: "DELETE", path: (c) => `/api/purchase-orders/${c.own.purchaseOrder2Id}/line-items/${c.own.poLineId}`, expect: 404 },
 
   { name: "PATCH other company's Everyone role", directions: "both", method: "PATCH", path: (c) => `/api/roles/${c.other.everyoneRoleId}`, body: () => ({ permissions: { quotes: { delete: true } } }), expect: 404 },
+  { name: "DELETE other company's role", directions: "both", method: "DELETE", path: (c) => `/api/roles/${c.other.globalAdminRoleId}`, expect: 404 },
+  { name: "PATCH other company's user", directions: "both", method: "PATCH", path: (c) => `/api/users/${c.other.adminId}`, body: () => ({ name: "Changed" }), expect: 404 },
+  { name: "Unlock other company's user", directions: "both", method: "POST", path: (c) => `/api/users/${c.other.adminId}/unlock`, expect: 404 },
+  { name: "DELETE other company's approval workflow", directions: "both", method: "DELETE", path: (c) => `/api/approval-workflows/${c.other.workflowId}`, expect: 404 },
+  { name: "PATCH other company's catalog item", directions: "both", method: "PATCH", path: (c) => `/api/catalog/${c.other.catalogItemId}`, body: () => ({ name: "Changed" }), expect: 404 },
+
+  // Quote line items and comments with the other company's ids
+  { name: "PATCH other quote's line item", directions: "both", method: "PATCH", path: (c) => `/api/quotes/${c.other.quoteId}/line-items/${c.other.quoteLineId}`, body: () => ({ name: "Changed" }), expect: 404 },
+  { name: "PATCH other quote line item under own quote", directions: "both", method: "PATCH", path: (c) => `/api/quotes/${c.own.quoteId}/line-items/${c.other.quoteLineId}`, body: () => ({ name: "Changed", cost: 1 }), expect: 404 },
+  { name: "DELETE other quote line item under own quote", directions: "both", method: "DELETE", path: (c) => `/api/quotes/${c.own.quoteId}/line-items/${c.other.quoteLineId}`, expect: 404 },
+  { name: "POST line item on other quote", directions: "both", method: "POST", path: (c) => `/api/quotes/${c.other.quoteId}/line-items`, body: () => ({ name: "Should Not Exist" }), expect: 404 },
+  { name: "GET other quote's comments", directions: "both", method: "GET", path: (c) => `/api/quotes/${c.other.quoteId}/comments`, expect: 404 },
+  { name: "POST comment on other quote", directions: "both", method: "POST", path: (c) => `/api/quotes/${c.other.quoteId}/comments`, body: () => ({ message: "Should not exist" }), expect: 404 },
+
+  // Sales order and purchase order routes
+  { name: "GET other company's sales order", directions: "both", method: "GET", path: (c) => `/api/sales-orders/${c.other.salesOrderId}`, expect: 404 },
+  { name: "PATCH other company's sales order", directions: "both", method: "PATCH", path: (c) => `/api/sales-orders/${c.other.salesOrderId}`, body: () => ({ internalNotes: "Changed" }), expect: 404 },
+  { name: "DELETE other company's sales order", directions: "both", method: "DELETE", path: (c) => `/api/sales-orders/${c.other.salesOrderId}`, expect: 404 },
+  { name: "GET other company's purchase order", directions: "both", method: "GET", path: (c) => `/api/purchase-orders/${c.other.purchaseOrderId}`, expect: 404 },
+  { name: "PATCH other company's purchase order", directions: "both", method: "PATCH", path: (c) => `/api/purchase-orders/${c.other.purchaseOrderId}`, body: () => ({ internalNotes: "Changed" }), expect: 404 },
+  { name: "DELETE other company's purchase order", directions: "both", method: "DELETE", path: (c) => `/api/purchase-orders/${c.other.purchaseOrderId}`, expect: 404 },
+  { name: "Receive other PO line item under own purchase order", directions: "both", method: "POST", path: (c) => `/api/purchase-orders/${c.own.purchaseOrderId}/line-items/${c.other.poLineId}/receive`, body: () => ({}), expect: 404 },
 
   // ── Body ids: the caller's OWN parent record, the OTHER company's ids ──
   { name: "Client PATCH mainBillingLocationId", directions: "both", method: "PATCH", path: (c) => `/api/clients/${c.own.clientId}`, body: (c) => ({ mainBillingLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
@@ -167,6 +189,9 @@ const ATTEMPTS: Attempt[] = [
   // phase, and answers a foreign vendor with 404 "Vendor not found"
   { name: "Purchase order POST vendorId", directions: "both", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.other.vendorId }), expect: 404, expectError: "Vendor not found" },
   { name: "PO line item POST catalogItemId", directions: "both", method: "POST", path: (c) => `/api/purchase-orders/${c.own.purchaseOrderId}/line-items`, body: (c) => ({ name: "Should Not Exist", catalogItemId: c.other.catalogItemId }), expect: 400, expectError: "Invalid catalog item" },
+  // Generating a PO only ever takes lines from the caller's own company
+  { name: "Generate PO from other company's sales order lines", directions: "both", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.own.vendorId, salesOrderId: c.other.salesOrderId, soLineItemIds: [c.other.soLineId] }), expect: 400, expectError: "No valid line items" },
+  { name: "Generate PO on own sales order with other company's lines", directions: "both", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.own.vendorId, salesOrderId: c.own.salesOrderId, soLineItemIds: [c.other.soLineId] }), expect: 400, expectError: "No valid line items" },
   { name: "SO/PO settings notify rule with foreign user", directions: "both", method: "PATCH", path: () => "/api/so-po-settings", body: (c) => ({ soStatusNotifyRules: { READY_TO_INVOICE: { type: "user", id: c.other.adminId } } }), expect: 400, expectError: "Invalid user" },
   { name: "SO/PO settings notify rule with foreign role", directions: "both", method: "PATCH", path: () => "/api/so-po-settings", body: (c) => ({ soStatusNotifyRules: { READY_TO_ORDER: { type: "role", id: c.other.globalAdminRoleId } } }), expect: 400, expectError: "Invalid role" },
 
@@ -419,6 +444,12 @@ async function main() {
   const rows: Row[] = []
 
   const ids: Record<TestLetter, SampleIds> = { B: await loadSampleIds(prisma, "B"), C: await loadSampleIds(prisma, "C") }
+
+  // Safety: no test company may be able to reach a real mailbox or a real
+  // distributor, even if a refusal below were broken
+  const external = await findExternalServices(prisma, [ids.B.companyId, ids.C.companyId])
+  if (external) throw new HarnessBroken(external)
+
   const fixture = await ensureLimitedFixture(prisma, ids.B)
 
   // Sign in

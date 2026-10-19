@@ -9,6 +9,7 @@
 // host, so the exact dev name is the one reliable signal.
 
 import { loadEnvFile } from "process"
+import type { PrismaClient } from "@/generated/prisma"
 
 export const DEV_DB_NAME = "psasync_dev"
 export const CONFIRM_FLAG = "--yes"
@@ -75,4 +76,27 @@ export function enforceDevGuard(scriptName: string, options: EnforceOptions = {}
     return exit(1)
   }
   return { host: result.host, name: result.name }
+}
+
+// The second safety check, run once the database client exists: a test
+// company with any Microsoft credentials or an enabled distributor
+// integration could reach a real mailbox or a real distributor if some
+// refusal were broken, so the scripts refuse to run at all. Returns what is
+// wrong, or null. The values are only tested for being set, never printed.
+export async function findExternalServices(prisma: PrismaClient, companyIds: readonly string[]): Promise<string | null> {
+  if (companyIds.length === 0) return null
+  const [settings, distributors] = await Promise.all([
+    prisma.companySettings.findMany({
+      where: { companyId: { in: [...companyIds] } },
+      select: { microsoftClientId: true, microsoftTenantId: true, microsoftClientSecret: true },
+    }),
+    prisma.distributorIntegration.count({ where: { companyId: { in: [...companyIds] }, enabled: true } }),
+  ])
+  if (settings.some((s) => s.microsoftClientId || s.microsoftTenantId || s.microsoftClientSecret)) {
+    return "A test company has Microsoft credentials set, so a broken refusal could send a real email. Remove them from the test company first."
+  }
+  if (distributors > 0) {
+    return "A test company has a distributor integration turned on, so a test could reach a real distributor. Turn it off in the test company first."
+  }
+  return null
 }

@@ -90,15 +90,20 @@ export async function PATCH(
     return NextResponse.json({ error: "Item not found" }, { status: 404 })
   }
 
-  if (!body.categoryId) {
-    return NextResponse.json({ error: "Category is required" }, { status: 400 })
-  }
+  // A field left out of the request keeps its stored value, so a partial
+  // save can never reset cost (or anything else) to a default
+  const has = (key: string) => body[key] !== undefined
 
-  const category = await prisma.category.findUnique({
-    where: { id: body.categoryId, companyId: ctx.companyId },
-  })
-  if (!category) {
-    return NextResponse.json({ error: "Category not found" }, { status: 404 })
+  if (has("categoryId")) {
+    if (!body.categoryId) {
+      return NextResponse.json({ error: "Category is required" }, { status: 400 })
+    }
+    const category = await prisma.category.findUnique({
+      where: { id: body.categoryId, companyId: ctx.companyId },
+    })
+    if (!category) {
+      return NextResponse.json({ error: "Category not found" }, { status: 404 })
+    }
   }
 
   if (body.type !== undefined && !isEnumValue(ItemType, body.type)) {
@@ -107,22 +112,21 @@ export async function PATCH(
   const invalid = await assertRefs(ctx, { vendorId: body.vendorId, manufacturerId: body.manufacturerId })
   if (invalid) return invalid
 
-  const newValues = {
-    name: body.name,
-    description: body.description || null,
-    categoryId: body.categoryId,
-    isSerialized: Boolean(body.isSerialized),
-    type: body.type,
-    msrp: Number(body.msrp) || 0,
-    cost: Number(body.cost) || 0,
-    unit: body.unit || "each",
-    taxable: body.taxable,
-    active: body.active,
-    vendorId: body.vendorId || null,
-    vendorSku: body.vendorSku || null,
-    manufacturerId: body.manufacturerId || null,
-    manufacturerSku: body.manufacturerSku || null,
-  }
+  const newValues: Record<string, unknown> = {}
+  if (has("name")) newValues.name = body.name
+  if (has("description")) newValues.description = body.description || null
+  if (has("categoryId")) newValues.categoryId = body.categoryId
+  if (has("isSerialized")) newValues.isSerialized = Boolean(body.isSerialized)
+  if (has("type")) newValues.type = body.type
+  if (has("msrp")) newValues.msrp = Number(body.msrp) || 0
+  if (has("cost")) newValues.cost = Number(body.cost) || 0
+  if (has("unit")) newValues.unit = body.unit || "each"
+  if (has("taxable")) newValues.taxable = body.taxable
+  if (has("active")) newValues.active = body.active
+  if (has("vendorId")) newValues.vendorId = body.vendorId || null
+  if (has("vendorSku")) newValues.vendorSku = body.vendorSku || null
+  if (has("manufacturerId")) newValues.manufacturerId = body.manufacturerId || null
+  if (has("manufacturerSku")) newValues.manufacturerSku = body.manufacturerSku || null
 
   // vendorId/manufacturerId store raw IDs — look up both the old and new
   // vendor's names so the log reads "Acme Corp" instead of a cuid.
@@ -131,7 +135,7 @@ export async function PATCH(
     newValues.vendorId,
     existing.manufacturerId,
     newValues.manufacturerId,
-  ].filter((v): v is string => !!v)
+  ].filter((v): v is string => typeof v === "string" && !!v)
   const vendorNameMap = new Map<string, string>()
   if (vendorIdsToResolve.length > 0) {
     const vendorRows = await prisma.vendor.findMany({
@@ -150,8 +154,9 @@ export async function PATCH(
 
   const logEntries: { fieldName: string; oldValue: string; newValue: string }[] = []
   for (const { key, label } of TRACKED_FIELDS) {
+    if (!(key in newValues)) continue
     const oldVal = (existing as unknown as Record<string, unknown>)[key]
-    const newVal = (newValues as unknown as Record<string, unknown>)[key]
+    const newVal = newValues[key]
     if (oldVal !== newVal) {
       logEntries.push({
         fieldName: label,

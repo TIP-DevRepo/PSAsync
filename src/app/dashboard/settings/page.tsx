@@ -17,6 +17,9 @@ import { NotificationSettingsPanel } from "@/components/settings/NotificationSet
 import { DistributorSettingsPanel } from "@/components/settings/DistributorSettingsPanel"
 import { MicrosoftSettingsPanel } from "@/components/settings/MicrosoftSettingsPanel"
 import { SalesOrderSettingsPanel } from "@/components/settings/SalesOrderSettingsPanel"
+import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
+import { NoAccess } from "@/components/NoAccess"
+import { useAccess } from "@/components/AccessProvider"
 
 type PanelKey =
   | "company"
@@ -90,6 +93,25 @@ const settingsCategories: SettingsCategory[] = [
   },
 ]
 
+// The permission each panel needs, matching the API rules behind it. null
+// means anyone who can open Settings: the Microsoft panel lets every user
+// connect and disconnect their own mailbox, and shows the app credentials
+// and Single Sign-On only with Integrations access.
+const PANEL_PERMISSION: Record<PanelKey, string | null> = {
+  company: "settingsSections.company",
+  users: "settingsSections.users",
+  roles: "settingsSections.users",
+  industries: "settingsSections.company",
+  contactTags: "settingsSections.company",
+  categories: "settingsSections.company",
+  salesOrders: "settingsSections.salesOrders",
+  quotes: "settingsSections.quotes",
+  "approval-workflows": "settingsSections.approvalWorkflows",
+  notifications: "settingsSections.notifications",
+  distributors: "settingsSections.integrations",
+  microsoft: null,
+}
+
 const ITEM_LOOKUP = {} as Record<PanelKey, { label: string; category: string }>
 settingsCategories.forEach((cat) => {
   cat.items.forEach((item) => {
@@ -152,10 +174,34 @@ export default function SettingsIndexPage() {
 }
 
 function SettingsPageContent() {
-  const searchParams = useSearchParams()
+  const { can } = useAccess()
+  if (!can("pages.settings")) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumbs items={[]} current="Settings" />
+        <NoAccess />
+      </div>
+    )
+  }
+  return <SettingsPanels />
+}
 
-  const [openCategory, setOpenCategory] = useState<string | null>(settingsCategories[0].label)
-  const [selectedKey, setSelectedKey] = useState<PanelKey | null>(settingsCategories[0].items[0].key)
+function SettingsPanels() {
+  const searchParams = useSearchParams()
+  const { can } = useAccess()
+
+  // Only the panels this user may use are listed. Global Admin sees all.
+  const canUsePanel = (key: PanelKey) => {
+    const permission = PANEL_PERMISSION[key]
+    return permission === null || can(permission)
+  }
+  const visibleCategories = settingsCategories
+    .map((cat) => ({ ...cat, items: cat.items.filter((item) => canUsePanel(item.key)) }))
+    .filter((cat) => cat.items.length > 0)
+  const firstVisible = visibleCategories[0] ?? null
+
+  const [openCategory, setOpenCategory] = useState<string | null>(firstVisible?.label ?? null)
+  const [selectedKey, setSelectedKey] = useState<PanelKey | null>(firstVisible?.items[0].key ?? null)
 
   function toggleCategory(label: string) {
     const btn = headerRefs.current[label]
@@ -190,6 +236,19 @@ function SettingsPageContent() {
 
   const selected = selectedKey ? ITEM_LOOKUP[selectedKey] : null
 
+  if (!firstVisible) {
+    return (
+      <div className="space-y-6">
+        <Breadcrumbs items={[]} current="Settings" />
+        <h1 className="text-display font-semibold tracking-tight text-foreground">Settings</h1>
+        <NoAccess
+          title="You do not have access to any settings"
+          description="Ask an administrator if you need to change company settings."
+        />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-6">
       {/* Follows the selected section, which starts from ?panel= and changes as the user picks another. */}
@@ -202,7 +261,7 @@ function SettingsPageContent() {
       <div className="flex gap-6 items-start">
         {/* Left panel — accordion */}
         <div className="w-72 flex-shrink-0 space-y-2">
-          {settingsCategories.map((category) => {
+          {visibleCategories.map((category) => {
             const isOpen = openCategory === category.label
             const panelId = categoryPanelId(category.label)
             return (
@@ -266,7 +325,8 @@ function SettingsPageContent() {
               <h2 className="text-heading font-semibold text-foreground">{selected.label}</h2>
             </div>
           )}
-          {renderPanel(selectedKey)}
+          {/* A direct link (?panel=) to a panel the user may not use */}
+          {selectedKey && !canUsePanel(selectedKey) ? <SettingsNoAccess /> : renderPanel(selectedKey)}
         </div>
       </div>
     </div>

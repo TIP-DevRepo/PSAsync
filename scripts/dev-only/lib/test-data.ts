@@ -87,8 +87,33 @@ export function testNames(letter: TestLetter) {
     senderName: `Test Sender ${letter}`,
     senderEmail: `test-sender-${lower}@example.test`,
     senderMailboxEmail: `test-sender-${lower}-mailbox@example.test`,
+    // Orders holds the Orders role below, plus a sales order and purchase
+    // order of its own (each with a line), so the view rules can be seen
+    ordersName: `Test Orders ${letter}`,
+    ordersEmail: `test-orders-${lower}@example.test`,
+    ordersRole: "Orders",
+    ordersSalesOrder: `Sample Orders Sales Order ${letter}`,
+    ordersSoLine: `Sample Orders SO Line ${letter}`,
+    ordersPurchaseOrder: `Sample Orders Purchase Order ${letter}`,
+    ordersPoLine: `Sample Orders PO Line ${letter}`,
+    // Templater holds the Templater role below, and edits this template for
+    // the line item cost checks
+    templaterName: `Test Templater ${letter}`,
+    templaterEmail: `test-templater-${lower}@example.test`,
+    templaterRole: "Templater",
+    costTemplate: `Sample Cost Template ${letter}`,
+    costTemplateLine: `Sample Cost Template Line ${letter}`,
+    // Only created by the check-permissions script: sees every sales order
+    // and purchase order but edits none, so it can't see cost
+    viewerRole: `Test Viewer Role ${letter}`,
+    viewerName: `Test Viewer ${letter}`,
+    viewerEmail: `test-viewer-${lower}@example.test`,
   }
 }
+
+// The sample catalog item's cost, reset on every create run, so the line
+// item cost checks know what the stored cost must be
+export const SAMPLE_ITEM_COST = 60
 
 // Stored in place of real Microsoft tokens on the sample mailbox rows. The
 // test companies have no Microsoft credentials either, so nothing can ever
@@ -104,6 +129,18 @@ export const CLERK_PERMISSIONS = {
   pages: { clients: true, vendors: true, catalog: true, inventory: true },
   clients: { create: true, edit: true },
 }
+
+// Orders: the Sales Orders and Purchase Orders pages, creating and editing
+// both, nothing else (no viewAll, no generatePO, no status, no deletes)
+export const ORDERS_PERMISSIONS = {
+  pages: { salesOrders: true, purchaseOrders: true },
+  salesOrders: { create: true, edit: true },
+  purchaseOrders: { create: true, edit: true },
+}
+
+// Templater: Quote Settings only, which maintains quote templates. Holds
+// none of the cost permissions, so it can't see or set cost.
+export const TEMPLATER_PERMISSIONS = { settingsSections: { quotes: true } }
 
 // Letters and digits only, so it pastes into any shell without quoting
 const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
@@ -164,6 +201,16 @@ export interface PermissionFixtureIds {
   stockItemId: string
   containerId: string
   stockId: string
+  ordersUserId: string
+  ordersRoleId: string
+  ordersSalesOrderId: string
+  ordersSoLineId: string
+  ordersPurchaseOrderId: string
+  ordersPoLineId: string
+  templaterUserId: string
+  templaterRoleId: string
+  costTemplateId: string
+  costTemplateLineId: string
 }
 
 // The permission test records for one test company (check-permissions).
@@ -203,14 +250,38 @@ export async function loadPermissionFixtureIds(prisma: PrismaClient, letter: Tes
     prisma.catalogItem.findFirst({ where: { companyId, name: n.stockItem }, select: { id: true } }),
     prisma.inventoryLocation.findFirst({ where: { companyId, name: n.container }, select: { id: true } }),
   ])
-  const stock = await prisma.inventoryStock.findFirst({
-    where: { companyId, catalogItemId: id(stockItem), locationId: id(container) },
-    select: { id: true },
-  })
-  const repQuoteLine = await prisma.quoteLineItem.findFirst({
-    where: { name: n.repQuoteLine, quoteId: id(repQuote), quote: { companyId } },
-    select: { id: true },
-  })
+  const [ordersUser, ordersRole, ordersSalesOrder, ordersPurchaseOrder, templaterUser, templaterRole, costTemplate] =
+    await Promise.all([
+      prisma.user.findFirst({ where: { email: n.ordersEmail, companyId }, select: { id: true } }),
+      prisma.role.findFirst({ where: { companyId, name: n.ordersRole }, select: { id: true } }),
+      prisma.salesOrder.findFirst({ where: { companyId, internalNotes: n.ordersSalesOrder }, select: { id: true } }),
+      prisma.purchaseOrder.findFirst({ where: { companyId, internalNotes: n.ordersPurchaseOrder }, select: { id: true } }),
+      prisma.user.findFirst({ where: { email: n.templaterEmail, companyId }, select: { id: true } }),
+      prisma.role.findFirst({ where: { companyId, name: n.templaterRole }, select: { id: true } }),
+      prisma.quoteTemplate.findFirst({ where: { companyId, name: n.costTemplate }, select: { id: true } }),
+    ])
+  const [stock, repQuoteLine, ordersSoLine, ordersPoLine, costTemplateLine] = await Promise.all([
+    prisma.inventoryStock.findFirst({
+      where: { companyId, catalogItemId: id(stockItem), locationId: id(container) },
+      select: { id: true },
+    }),
+    prisma.quoteLineItem.findFirst({
+      where: { name: n.repQuoteLine, quoteId: id(repQuote), quote: { companyId } },
+      select: { id: true },
+    }),
+    prisma.sOLineItem.findFirst({
+      where: { name: n.ordersSoLine, salesOrderId: id(ordersSalesOrder), salesOrder: { companyId } },
+      select: { id: true },
+    }),
+    prisma.pOLineItem.findFirst({
+      where: { name: n.ordersPoLine, purchaseOrderId: id(ordersPurchaseOrder), purchaseOrder: { companyId } },
+      select: { id: true },
+    }),
+    prisma.quoteTemplateLineItem.findFirst({
+      where: { name: n.costTemplateLine, templateId: id(costTemplate), template: { companyId } },
+      select: { id: true },
+    }),
+  ])
 
   const ids: PermissionFixtureIds = {
     everyoneUserId: id(everyoneUser),
@@ -226,6 +297,16 @@ export async function loadPermissionFixtureIds(prisma: PrismaClient, letter: Tes
     stockItemId: id(stockItem),
     containerId: id(container),
     stockId: id(stock),
+    ordersUserId: id(ordersUser),
+    ordersRoleId: id(ordersRole),
+    ordersSalesOrderId: id(ordersSalesOrder),
+    ordersSoLineId: id(ordersSoLine),
+    ordersPurchaseOrderId: id(ordersPurchaseOrder),
+    ordersPoLineId: id(ordersPoLine),
+    templaterUserId: id(templaterUser),
+    templaterRoleId: id(templaterRole),
+    costTemplateId: id(costTemplate),
+    costTemplateLineId: id(costTemplateLine),
   }
   const missing = Object.entries(ids)
     .filter(([, value]) => !value)

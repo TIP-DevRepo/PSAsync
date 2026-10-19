@@ -1,13 +1,17 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireAccess, notFound } from "@/lib/api-access"
+import { mayWriteCost } from "@/lib/line-item-cost"
 import { loadPurchaseOrderLineItem, purchaseOrderLineItemWhere, purchaseOrderWhere } from "@/lib/scoped-loaders"
 
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "purchaseOrders.edit",
+    message: "You do not have permission to edit purchase orders",
+  })
   if (response) return response
 
   const { id, lineItemId } = await params
@@ -22,7 +26,7 @@ export async function PATCH(
   const data: Record<string, unknown> = {}
   if (body.received !== undefined) data.received = Boolean(body.received)
   if (body.serialNumber !== undefined) data.serialNumber = body.serialNumber || null
-  if (body.unitCost !== undefined) data.unitCost = Number(body.unitCost)
+  if (mayWriteCost(ctx, body.unitCost)) data.unitCost = Number(body.unitCost)
   if (body.quantity !== undefined) data.quantity = Number(body.quantity)
   if (body.name !== undefined) data.name = body.name
   if (body.description !== undefined) data.description = body.description || null
@@ -57,7 +61,10 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "purchaseOrders.edit",
+    message: "You do not have permission to edit purchase orders",
+  })
   if (response) return response
 
   const { id, lineItemId } = await params

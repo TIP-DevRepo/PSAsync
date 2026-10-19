@@ -1,17 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
 import { notificationSettingsSelect } from "@/lib/safe-selects"
 
+// Only the Notifications settings panel reads or writes these
+const SETTINGS_RULE = {
+  permission: "settingsSections.notifications",
+  message: "You do not have permission to manage notification settings",
+}
+
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess(SETTINGS_RULE)
+  if (response) return response
 
   const settings = await prisma.companySettings.findUnique({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
   })
 
   return NextResponse.json({
@@ -21,24 +24,19 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.notifications"))) {
-    return NextResponse.json({ error: "You don't have permission to edit notification settings" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess(SETTINGS_RULE)
+  if (response) return response
 
   const body = await req.json()
 
   const settings = await prisma.companySettings.upsert({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     update: {
       emailDefaultCc: body.emailDefaultCc || null,
       emailSignature: body.emailSignature || null,
     },
     create: {
-      companyId: session.user.companyId,
+      companyId: ctx.companyId,
       emailDefaultCc: body.emailDefaultCc || null,
       emailSignature: body.emailSignature || null,
     },

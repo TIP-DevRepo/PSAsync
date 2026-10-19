@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { signIn } from "@/auth"
 import { createSsoRelayToken } from "@/lib/sso-relay-token"
 import { prisma } from "@/lib/prisma"
+import { checkSsoTenant } from "@/lib/sso-tenant"
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code")
@@ -48,6 +49,15 @@ export async function GET(req: NextRequest) {
   }
   const tokens = await tokenRes.json()
 
+  // The account must belong to the company's own Microsoft directory. The
+  // id token comes straight from Microsoft's token endpoint above, so its
+  // tid claim is trusted without a signature check. A tenant saved as a
+  // domain name can't be compared with tid and is skipped (see
+  // checkSsoTenant). Nothing is created or linked when this fails.
+  if (checkSsoTenant(settings.microsoftTenantId, tokens.id_token) === "mismatch") {
+    return NextResponse.redirect(new URL("/login?error=wrong_tenant", req.url))
+  }
+
   const meRes = await fetch("https://graph.microsoft.com/v1.0/me", {
     headers: { Authorization: `Bearer ${tokens.access_token}` },
   })
@@ -77,29 +87,43 @@ export async function GET(req: NextRequest) {
   }
 
   // Link the Microsoft account and auto-save the mailbox/calendar
-  // connection, so there's no separate "connect your mailbox" step
+  // connection, so there's no separate "connect your mailbox" step. A
+  // mailbox row someone else already owns is left exactly as it is: signing
+  // in never takes over another user's connection. A row with no owner left
+  // goes to whoever signs in, same as reconnecting from Settings.
+  const existingConnection = await prisma.microsoftConnection.findUnique({
+    where: { companyId_email: { companyId, email } },
+    select: { connectedByUserId: true },
+  })
+  const ownedByOther =
+    !!existingConnection?.connectedByUserId && existingConnection.connectedByUserId !== user.id
+
   await prisma.$transaction([
     prisma.user.update({
       where: { id: user.id },
       data: { microsoftId: msId },
     }),
-    prisma.microsoftConnection.upsert({
-      where: { companyId_email: { companyId, email } },
-      update: {
-        label: user.name,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        connectedByUserId: user.id,
-      },
-      create: {
-        companyId,
-        label: user.name,
-        email,
-        accessToken: tokens.access_token,
-        refreshToken: tokens.refresh_token,
-        connectedByUserId: user.id,
-      },
-    }),
+    ...(ownedByOther
+      ? []
+      : [
+          prisma.microsoftConnection.upsert({
+            where: { companyId_email: { companyId, email } },
+            update: {
+              label: user.name,
+              accessToken: tokens.access_token,
+              refreshToken: tokens.refresh_token,
+              connectedByUserId: user.id,
+            },
+            create: {
+              companyId,
+              label: user.name,
+              email,
+              accessToken: tokens.access_token,
+              refreshToken: tokens.refresh_token,
+              connectedByUserId: user.id,
+            },
+          }),
+        ]),
   ])
 
   const relayToken = createSsoRelayToken(user.id)

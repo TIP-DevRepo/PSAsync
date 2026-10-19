@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
-import { hasPermission, resolvePagePermissions } from "@/lib/permissions"
+import { resolvePagePermissions } from "@/lib/permissions"
 import { canViewWidgetType, type WidgetType, type WidgetSize } from "@/lib/dashboards/widgetTypes"
 import { findFirstAvailableCell } from "@/lib/dashboards/gridPlacement"
 
@@ -12,17 +12,15 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
-  const dashboard = await prisma.dashboard.findUnique({ where: { id, companyId: session.user.companyId } })
+  const dashboard = await prisma.dashboard.findUnique({ where: { id, companyId: ctx.companyId } })
   if (!dashboard) {
     return NextResponse.json({ error: "Dashboard not found" }, { status: 404 })
   }
-  const canEdit = dashboard.userId ? dashboard.userId === session.user.id : await hasPermission(session.user.id, "dashboards.manage")
+  const canEdit = dashboard.userId ? dashboard.userId === ctx.userId : ctx.can("dashboards.manage")
   if (!canEdit) {
     return NextResponse.json({ error: "You don't have permission to edit this dashboard" }, { status: 403 })
   }
@@ -35,7 +33,7 @@ export async function POST(
     return NextResponse.json({ error: "Invalid widget type" }, { status: 400 })
   }
 
-  const pagePermissions = resolvePagePermissions(session.user.access)
+  const pagePermissions = resolvePagePermissions(ctx.access)
   if (!canViewWidgetType(pagePermissions, widgetType)) {
     return NextResponse.json({ error: "You don't have permission to view that widget's data" }, { status: 403 })
   }

@@ -5,6 +5,8 @@ import { useRouter } from "next/navigation"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
+import { useAccess } from "@/components/AccessProvider"
+import { NoAccess } from "@/components/NoAccess"
 
 interface ClientOption {
   id: string
@@ -32,6 +34,19 @@ interface ClientFull {
 }
 
 export default function NewSalesOrderPage() {
+  const { can } = useAccess()
+  if (!can("pages.salesOrders") || !can("salesOrders.create")) {
+    return (
+      <div className="w-full space-y-4">
+        <Breadcrumbs items={[{ label: "Sales Orders", href: "/dashboard/sales-orders" }]} current="No access" />
+        <NoAccess />
+      </div>
+    )
+  }
+  return <NewSalesOrderForm />
+}
+
+function NewSalesOrderForm() {
   const router = useRouter()
   const [clients, setClients] = useState<ClientOption[]>([])
   const [saving, setSaving] = useState(false)

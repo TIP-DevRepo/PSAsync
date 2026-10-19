@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { requireAccess } from "@/lib/api-access"
-import { assertRefs } from "@/lib/scoped-loaders"
+import { notFound, requireAccess } from "@/lib/api-access"
+import { assertRefs, loadViewablePurchaseOrder } from "@/lib/scoped-loaders"
 import { prisma } from "@/lib/prisma"
 import { generateAssetTag } from "@/lib/inventory/generateAssetTag"
 
@@ -8,12 +8,19 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; lineItemId: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "purchaseOrders.edit",
+    message: "You do not have permission to edit purchase orders",
+  })
   if (response) return response
 
   const { id: poId, lineItemId } = await params
   const companyId = ctx.companyId
   const userId = ctx.userId
+
+  // The user must be able to open this purchase order (VPO)
+  const visible = await loadViewablePurchaseOrder(ctx, poId)
+  if (!visible) return notFound()
 
   const lineItem = await prisma.pOLineItem.findUnique({
     where: { id: lineItemId },

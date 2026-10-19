@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 
 // Marks a dashboard as the one that loads for this user at /dashboard —
@@ -11,22 +11,20 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id } = await params
-  const dashboard = await prisma.dashboard.findUnique({ where: { id, companyId: session.user.companyId } })
+  const dashboard = await prisma.dashboard.findUnique({ where: { id, companyId: ctx.companyId } })
   if (!dashboard) {
     return NextResponse.json({ error: "Dashboard not found" }, { status: 404 })
   }
   // Same visibility rule as everywhere else — a personal dashboard can
   // only ever be seen (and so only ever set as default) by its owner.
-  if (dashboard.userId && dashboard.userId !== session.user.id) {
+  if (dashboard.userId && dashboard.userId !== ctx.userId) {
     return NextResponse.json({ error: "Dashboard not found" }, { status: 404 })
   }
 
-  await prisma.user.update({ where: { id: session.user.id }, data: { defaultDashboardId: id } })
+  await prisma.user.update({ where: { id: ctx.userId }, data: { defaultDashboardId: id } })
   return NextResponse.json({ defaultDashboardId: id })
 }

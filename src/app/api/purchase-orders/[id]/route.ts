@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
+import { apiError, canSeeCost, notFound, omitUnitCost, requireAccess } from "@/lib/api-access"
+import { purchaseOrderWhere, viewablePurchaseOrderWhere } from "@/lib/scoped-loaders"
 
 const VALID_STATUSES = ["DRAFT", "PARTS_ORDERED", "RECEIVED", "ON_HOLD", "BACKORDERED", "CANCELLED"]
 const VALID_PAYMENT_TYPES = ["Due on Receipt", "Net15", "Net30", "Net45", "Net60", "Prepaid", "Credit Card"]
@@ -22,19 +22,23 @@ const EDIT_GATED_FIELDS = [
   "shipClientLocationId",
 ]
 
+// Every field other than status needs purchaseOrders.edit
+const EDIT_FIELDS = [...EDIT_GATED_FIELDS, "internalNotes", "expectedAt", "shipToClient"]
+
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "pages.purchaseOrders",
+    message: "You do not have permission to view purchase orders",
+  })
+  if (response) return response
 
   const { id } = await params
 
-  const po = await prisma.purchaseOrder.findUnique({
-    where: { id, companyId: session.user.companyId },
+  const po = await prisma.purchaseOrder.findFirst({
+    where: viewablePurchaseOrderWhere(ctx, id),
     include: {
       vendor: { select: { id: true, name: true, email: true } },
       user: { select: { id: true, name: true } },
@@ -55,8 +59,11 @@ export async function GET(
     },
   })
 
-  if (!po) {
-    return NextResponse.json({ error: "Purchase Order not found" }, { status: 404 })
+  if (!po) return notFound()
+
+  // Line item cost only goes to users who can see cost
+  if (!canSeeCost(ctx)) {
+    return NextResponse.json({ ...po, lineItems: po.lineItems.map(omitUnitCost) })
   }
 
   return NextResponse.json(po)
@@ -66,25 +73,26 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  // Status needs purchaseOrders.changeStatus and every other field needs
+  // purchaseOrders.edit, checked per field below once the body is read
+  const { ctx, response } = await requireAccess({
+    permission: ["purchaseOrders.edit", "purchaseOrders.changeStatus"],
+    message: "You do not have permission to edit purchase orders",
+  })
+  if (response) return response
 
   const { id } = await params
-  const companyId = session.user.companyId
-  const body = await req.json()
 
-  const existing = await prisma.purchaseOrder.findUnique({ where: { id, companyId } })
-  if (!existing) {
-    return NextResponse.json({ error: "Purchase Order not found" }, { status: 404 })
-  }
+  const existing = await prisma.purchaseOrder.findFirst({ where: viewablePurchaseOrderWhere(ctx, id) })
+  if (!existing) return notFound()
+
+  const body = await req.json()
 
   const data: Record<string, unknown> = {}
 
   if (body.status !== undefined) {
-    if (!(await hasPermission(session.user.id, "purchaseOrders.changeStatus"))) {
-      return NextResponse.json({ error: "You don't have permission to change a Purchase Order's status" }, { status: 403 })
+    if (!ctx.can("purchaseOrders.changeStatus")) {
+      return apiError(403, "You do not have permission to change a purchase order's status", "FORBIDDEN")
     }
     if (!VALID_STATUSES.includes(body.status)) {
       return NextResponse.json({ error: "Invalid status" }, { status: 400 })
@@ -93,12 +101,15 @@ export async function PATCH(
     if (body.status === "RECEIVED" && !existing.receivedAt) data.receivedAt = new Date()
   }
 
+  if (EDIT_FIELDS.some((field) => body[field] !== undefined) && !ctx.can("purchaseOrders.edit")) {
+    return apiError(403, "You do not have permission to edit purchase orders", "FORBIDDEN")
+  }
+
   const touchesGatedField = EDIT_GATED_FIELDS.some((field) => body[field] !== undefined)
   if (touchesGatedField) {
-    if (!(await hasPermission(session.user.id, "purchaseOrders.edit"))) {
-      return NextResponse.json({ error: "You don't have permission to edit this purchase order" }, { status: 403 })
-    }
-    const receivedLineItemCount = await prisma.pOLineItem.count({ where: { purchaseOrderId: id, received: true } })
+    const receivedLineItemCount = await prisma.pOLineItem.count({
+      where: { purchaseOrderId: existing.id, received: true },
+    })
     if (existing.status === "RECEIVED" || receivedLineItemCount > 0) {
       return NextResponse.json(
         { error: "This purchase order has already been received. Payment and shipping details can no longer be edited." },
@@ -141,7 +152,7 @@ export async function PATCH(
     }
   }
 
-  const updated = await prisma.purchaseOrder.update({ where: { id }, data })
+  const updated = await prisma.purchaseOrder.update({ where: purchaseOrderWhere(ctx, existing.id), data })
 
   return NextResponse.json(updated)
 }
@@ -150,27 +161,22 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  if (!(await hasPermission(session.user.id, "purchaseOrders.delete"))) {
-    return NextResponse.json({ error: "You don't have permission to delete purchase orders" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "purchaseOrders.delete",
+    message: "You do not have permission to delete purchase orders",
+  })
+  if (response) return response
 
   const { id } = await params
 
-  const po = await prisma.purchaseOrder.findUnique({
-    where: { id, companyId: session.user.companyId },
+  const po = await prisma.purchaseOrder.findFirst({
+    where: viewablePurchaseOrderWhere(ctx, id),
     include: {
       lineItems: { include: { polineItemSerials: { select: { id: true } } } },
     },
   })
 
-  if (!po) {
-    return NextResponse.json({ error: "Purchase Order not found" }, { status: 404 })
-  }
+  if (!po) return notFound()
 
   const hasReceivedSerials = po.lineItems.some((li) => li.polineItemSerials.length > 0)
   if (hasReceivedSerials || po.status === "RECEIVED") {
@@ -180,7 +186,7 @@ export async function DELETE(
     )
   }
 
-  await prisma.purchaseOrder.delete({ where: { id } })
+  await prisma.purchaseOrder.delete({ where: purchaseOrderWhere(ctx, po.id) })
 
   return NextResponse.json({ deleted: true })
 }

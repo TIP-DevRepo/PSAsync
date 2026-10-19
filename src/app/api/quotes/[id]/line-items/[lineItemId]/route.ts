@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { withDeadlockRetry } from "@/lib/withDeadlockRetry"
 import { RecurringInterval } from "@/generated/prisma"
 import { apiError, isEnumValue, notFound, requireAccess, type AccessContext } from "@/lib/api-access"
+import { mayWriteCost } from "@/lib/line-item-cost"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 
 const EDIT_RULE = { permission: "quotes.edit", message: "You do not have permission to edit quotes" }
@@ -54,7 +55,7 @@ export async function PATCH(
   if (body.sku !== undefined) data.sku = body.sku || null
   if (body.quantity !== undefined) data.quantity = Number(body.quantity)
   if (body.unitPrice !== undefined) data.unitPrice = Number(body.unitPrice)
-  if (body.cost !== undefined) data.cost = Number(body.cost)
+  if (mayWriteCost(ctx, body.cost)) data.cost = Number(body.cost)
   if (body.discount !== undefined) data.discount = Number(body.discount)
   if (body.taxable !== undefined) data.taxable = Boolean(body.taxable)
   if (body.isOptional !== undefined) data.isOptional = Boolean(body.isOptional)

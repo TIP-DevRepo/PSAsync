@@ -1,15 +1,13 @@
 import { NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 
 export async function POST() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   await prisma.notification.updateMany({
-    where: { userId: session.user.id, read: false },
+    where: { userId: ctx.userId, read: false },
     data: { read: true },
   })
 

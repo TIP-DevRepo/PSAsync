@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { getEffectiveAccess } from "@/lib/permissions"
+import { requireAccess } from "@/lib/api-access"
 
 // Clears a user's login lockout so they can sign in again right away.
 // Global Admin only, even for someone with Manage Users access, and only
@@ -11,19 +10,15 @@ export async function POST(
   _req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-
-  const access = await getEffectiveAccess(session.user.id)
-  if (!access?.isGlobalAdmin) {
-    return NextResponse.json({ error: "Only a Global Admin can unlock users" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    globalAdmin: true,
+    message: "Only a Global Admin can unlock users",
+  })
+  if (response) return response
 
   const { id } = await params
   const { count } = await prisma.user.updateMany({
-    where: { id, companyId: session.user.companyId },
+    where: { id, companyId: ctx.companyId },
     data: { loginFailedAttempts: 0, loginLockedUntil: null },
   })
   if (count === 0) {

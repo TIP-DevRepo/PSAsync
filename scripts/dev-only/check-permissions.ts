@@ -1,14 +1,15 @@
 // DEV ONLY. Proves the permission checks inside one company against the
 // locally running dev server: signs in as Test Admin B (Global Admin), Test
-// Rep B (only the Rep role), Test Clerk B (only the Clerk role), and Test
-// Everyone B (only the Everyone role, with no permissions), all made by
-// create-test-companies.ts, plus a Test Sender B user this script sets up
-// itself, and checks every attempt in the ATTEMPTS list below.
+// Rep B (only the Rep role), Test Clerk B (only the Clerk role), Test Orders
+// B (only the Orders role), Test Templater B (only the Templater role), and
+// Test Everyone B (only the Everyone role, with no permissions), all made by
+// create-test-companies.ts, plus Test Sender B and Test Viewer B users this
+// script sets up itself, and checks every attempt in the ATTEMPTS list below.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and only
 // talks to a server on this machine. Run from the repo root, with the dev
 // server running and the passwords set in the shell (never in a file):
-//   TEST_ADMIN_B_PASSWORD=... TEST_REP_B_PASSWORD=... TEST_EVERYONE_B_PASSWORD=... TEST_CLERK_B_PASSWORD=... npx tsx scripts/dev-only/check-permissions.ts --yes
+//   TEST_ADMIN_B_PASSWORD=... TEST_REP_B_PASSWORD=... TEST_EVERYONE_B_PASSWORD=... TEST_CLERK_B_PASSWORD=... TEST_ORDERS_B_PASSWORD=... TEST_TEMPLATER_B_PASSWORD=... npx tsx scripts/dev-only/check-permissions.ts --yes
 // Optional: --base-url http://localhost:3000 (the default)
 //
 // Order of work: guard, safety checks, sign in, every positive control (if
@@ -18,8 +19,10 @@
 // shared mode attempts, and put back the way it was at the end. Any FAIL or
 // UNEXPECTED exits 1, a broken harness exits 2.
 //
-// No real email is ever sent: the test companies have no Microsoft
-// credentials (checked below before anything runs), their mailbox rows hold
+// No real email is ever sent and no real distributor is reached: the test
+// companies have no Microsoft credentials and no distributor integration
+// turned on (findExternalServices, checked before anything runs), and no
+// attempt tests a distributor connection. Their mailbox rows hold
 // placeholder tokens, and every send-email attempt is one that must be
 // refused before any mail would go out. The success path of the sender
 // rules is checked through send-options instead.
@@ -32,10 +35,11 @@
 
 import bcrypt from "bcryptjs"
 import { Prisma, type PrismaClient } from "@/generated/prisma"
-import { enforceDevGuard } from "./lib/guard"
+import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import {
   BCRYPT_COST,
   PLACEHOLDER_TOKEN,
+  SAMPLE_ITEM_COST,
   generatePassword,
   loadPermissionFixtureIds,
   loadSampleIds,
@@ -56,10 +60,12 @@ enforceDevGuard("check-permissions")
 //
 //   actor        who makes the request: admin (Test Admin B, Global Admin),
 //                rep (Test Rep B), clerk (Test Clerk B), everyone (Test
-//                Everyone B), or sender
+//                Everyone B), orders (Test Orders B), templater (Test
+//                Templater B), sender
 //                (Test Sender B: pages.quotes, quotes.sendEmail, and
 //                quotes.viewAllUsersQuotes, made by this script, with a
-//                mailbox of its own)
+//                mailbox of its own), or viewer (Test Viewer B: both order
+//                pages and both viewAll keys, no edit, made by this script)
 //   kind         control: must succeed, and if it doesn't the harness is
 //                broken and nothing else runs. allowed: must succeed.
 //                refused: must be refused with exactly expect, and must not
@@ -76,7 +82,7 @@ enforceDevGuard("check-permissions")
 //   sharedMode   runs with Quote Settings set to send every quote from Test
 //                Admin B's mailbox ("admin") or Test Sender B's ("sender")
 
-type Actor = "admin" | "rep" | "clerk" | "everyone" | "sender"
+type Actor = "admin" | "rep" | "clerk" | "everyone" | "sender" | "orders" | "templater" | "viewer"
 
 interface AttemptContext {
   b: SampleIds
@@ -266,6 +272,118 @@ function offersWithoutPricing(json: unknown): string | null {
   return priced.length > 0 ? `${priced.length} offers still include price or cost` : null
 }
 
+// Every sales order and purchase order route, and the SO/PO settings read.
+// Test Everyone B, Test Rep B, and Test Clerk B hold neither order page, so
+// each one is refused for all three with a 403 before any record is looked
+// up. The ids are Test Admin B's records.
+const ORDER_GUARDED: Guarded[] = [
+  { name: "List sales orders", method: "GET", path: () => "/api/sales-orders", expectError: "view sales orders" },
+  { name: "Create a sales order", method: "POST", path: () => "/api/sales-orders", body: (c) => ({ clientId: c.b.clientId }), expectError: "create sales orders" },
+  { name: "Open a sales order", method: "GET", path: (c) => `/api/sales-orders/${c.b.salesOrderId}`, expectError: "view sales orders" },
+  { name: "Edit a sales order", method: "PATCH", path: (c) => `/api/sales-orders/${c.b.salesOrderId}`, body: () => ({ internalNotes: "Changed" }), expectError: "edit sales orders" },
+  { name: "Change a sales order's status", method: "PATCH", path: (c) => `/api/sales-orders/${c.b.salesOrderId}`, body: () => ({ status: "CLOSED" }), expectError: "edit sales orders" },
+  { name: "Delete a sales order", method: "DELETE", path: (c) => `/api/sales-orders/${c.b.salesOrderId}`, expectError: "delete sales orders" },
+  { name: "Sales order attachments", method: "GET", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/attachments`, expectError: "view sales orders" },
+  { name: "Upload a sales order attachment", method: "POST", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/attachments`, expectError: "edit sales orders" },
+  { name: "Delete a sales order attachment", method: "DELETE", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/attachments/${c.b.soAttachmentId}`, expectError: "edit sales orders" },
+  { name: "Sales order comments", method: "GET", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/comments`, expectError: "view sales orders" },
+  { name: "Comment on a sales order", method: "POST", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/comments`, body: () => ({ message: "Should not exist" }), expectError: "view sales orders" },
+  { name: "Add a sales order line item", method: "POST", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/line-items`, body: () => ({ name: "Should Not Exist" }), expectError: "edit sales orders" },
+  { name: "Edit a sales order line item", method: "PATCH", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/line-items/${c.b.soLineId}`, body: () => ({ name: "Changed" }), expectError: "edit sales orders" },
+  { name: "Delete a sales order line item", method: "DELETE", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/line-items/${c.b.soLineId}`, expectError: "edit sales orders" },
+  { name: "Sales order and purchase order settings", method: "GET", path: () => "/api/so-po-settings", expectError: "sales order and purchase order settings" },
+  { name: "List purchase orders", method: "GET", path: () => "/api/purchase-orders", expectError: "view purchase orders" },
+  { name: "Create a purchase order", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.b.vendorId }), expectError: "create purchase orders" },
+  { name: "Generate a purchase order from sales order lines", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.b.vendorId, salesOrderId: c.b.salesOrderId, soLineItemIds: [c.b.soLineId] }), expectError: "create purchase orders" },
+  { name: "Open a purchase order", method: "GET", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}`, expectError: "view purchase orders" },
+  { name: "Edit a purchase order", method: "PATCH", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}`, body: () => ({ internalNotes: "Changed" }), expectError: "edit purchase orders" },
+  { name: "Change a purchase order's status", method: "PATCH", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}`, body: () => ({ status: "CANCELLED" }), expectError: "edit purchase orders" },
+  { name: "Delete a purchase order", method: "DELETE", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}`, expectError: "delete purchase orders" },
+  { name: "Purchase order attachments", method: "GET", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/attachments`, expectError: "view purchase orders" },
+  { name: "Upload a purchase order attachment", method: "POST", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/attachments`, expectError: "edit purchase orders" },
+  { name: "Delete a purchase order attachment", method: "DELETE", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/attachments/${c.b.poAttachmentId}`, expectError: "edit purchase orders" },
+  { name: "Purchase order comments", method: "GET", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/comments`, expectError: "view purchase orders" },
+  { name: "Comment on a purchase order", method: "POST", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/comments`, body: () => ({ message: "Should not exist" }), expectError: "view purchase orders" },
+  { name: "Add a purchase order line item", method: "POST", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/line-items`, body: () => ({ name: "Should Not Exist" }), expectError: "edit purchase orders" },
+  { name: "Edit a purchase order line item", method: "PATCH", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/line-items/${c.b.poLineId}`, body: () => ({ name: "Changed", received: true }), expectError: "edit purchase orders" },
+  { name: "Delete a purchase order line item", method: "DELETE", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/line-items/${c.b.poLineId}`, expectError: "edit purchase orders" },
+  { name: "Receive a purchase order line item", method: "POST", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/line-items/${c.b.poLineId}/receive`, body: () => ({}), expectError: "edit purchase orders" },
+]
+
+// Settings, users, and roles routes Test Everyone B is refused. The
+// distributor connection test is left out on purpose: a broken refusal
+// there could call a real distributor.
+const SETTINGS_GUARDED: Guarded[] = [
+  { name: "Notification settings", method: "GET", path: () => "/api/notification-settings", expectError: "notification settings" },
+  { name: "Save notification settings", method: "PATCH", path: () => "/api/notification-settings", body: () => ({ emailDefaultCc: "nobody@example.test" }), expectError: "notification settings" },
+  { name: "Approval workflows", method: "GET", path: () => "/api/approval-workflows", expectError: "approval workflows" },
+  { name: "Create an approval workflow", method: "POST", path: () => "/api/approval-workflows", body: (c) => ({ name: "Should Not Exist", triggerType: "TOTAL_THRESHOLD", thresholdValue: 1, requiredRoleId: c.b.globalAdminRoleId }), expectError: "create approval workflows" },
+  { name: "Edit an approval workflow", method: "PATCH", path: (c) => `/api/approval-workflows/${c.b.workflowId}`, body: () => ({ name: "Changed" }), expectError: "edit approval workflows" },
+  { name: "Delete an approval workflow", method: "DELETE", path: (c) => `/api/approval-workflows/${c.b.workflowId}`, expectError: "delete approval workflows" },
+  { name: "Distributor settings", method: "GET", path: () => "/api/distributor-settings", expectError: "view distributor settings" },
+  { name: "Change distributor settings", method: "PATCH", path: () => "/api/distributor-settings/INGRAM_MICRO", body: () => ({ enabled: true }), expectError: "change distributor settings" },
+  { name: "Edit company settings", method: "PATCH", path: () => "/api/company-settings", body: () => ({ name: "Changed" }), expectError: "edit company settings" },
+  { name: "Upload a company logo", method: "POST", path: () => "/api/company-settings/logo", expectError: "change the company logo" },
+  { name: "Change Microsoft settings", method: "PATCH", path: () => "/api/microsoft-settings", body: () => ({ microsoftTenantId: "00000000-0000-0000-0000-000000000000" }), expectError: "configure Microsoft integration" },
+  { name: "Edit quote settings", method: "PATCH", path: () => "/api/quote-settings", body: () => ({ quotePrefix: "NOPE" }), expectError: "edit quote settings" },
+  { name: "Invite a user", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: "should-not-exist@example.test", tempPassword: "ShouldNotExist123" }), expectError: "invite users" },
+  { name: "Edit a user", method: "PATCH", path: (c) => `/api/users/${c.b.adminId}`, body: () => ({ name: "Changed" }), expectError: "edit users" },
+  { name: "Unlock a user", method: "POST", path: (c) => `/api/users/${c.b.adminId}/unlock`, expectError: "Only a Global Admin" },
+  { name: "Create a role", method: "POST", path: () => "/api/roles", body: () => ({ name: "Should Not Exist" }), expectError: "create roles" },
+  { name: "Edit a role", method: "PATCH", path: (c) => `/api/roles/${c.fx.repRoleId}`, body: () => ({ name: "Changed" }), expectError: "edit roles" },
+  { name: "Delete a role", method: "DELETE", path: (c) => `/api/roles/${c.fx.repRoleId}`, expectError: "delete roles" },
+  { name: "Reorder roles", method: "PUT", path: () => "/api/roles/order", body: (c) => ({ roleIds: [c.fx.repRoleId, c.fx.clerkRoleId] }), expectError: "reorder roles" },
+]
+
+// Reads any active user may make, and what they must leave out
+const activeReadsFor = (actor: Actor): Attempt[] => [
+  { name: "Company settings (any signed in user)", actor, kind: "allowed", method: "GET", path: () => "/api/company-settings", expect: 200, contains: () => ["primaryColor"] },
+  { name: "Microsoft settings, no secret", actor, kind: "allowed", method: "GET", path: () => "/api/microsoft-settings", expect: 200, contains: () => ["hasClientSecret"], notContains: () => ["microsoftClientSecret"] },
+  { name: "Users list, no email addresses", actor, kind: "allowed", method: "GET", path: () => "/api/users", expect: 200, contains: (c) => [c.names.adminName], notContains: (c) => [c.names.adminEmail, '"email"'] },
+  { name: "Roles list, no permissions", actor, kind: "allowed", method: "GET", path: () => "/api/roles", expect: 200, contains: (c) => [c.b.globalAdminRoleId], notContains: () => ['"permissions"'] },
+  { name: "Enabled distributors", actor, kind: "allowed", method: "GET", path: () => "/api/distributors/enabled", expect: 200, contains: () => ["["] },
+  { name: "Own distributor preferences", actor, kind: "allowed", method: "GET", path: () => "/api/distributor-search/preferences", expect: 200, contains: () => ["distributors"] },
+  { name: "Save own distributor preferences", actor, kind: "allowed", method: "PATCH", path: () => "/api/distributor-search/preferences", body: () => ({ distributors: [] }), expect: 200, contains: () => ["distributors"] },
+  { name: "Own notifications", actor, kind: "allowed", method: "GET", path: () => "/api/notifications", expect: 200, contains: () => ["unreadCount"] },
+  { name: "Own dashboards", actor, kind: "allowed", method: "GET", path: () => "/api/dashboards", expect: 200, contains: () => ["isMyDefault"] },
+]
+
+// A widget the user may not see answers with no data, never an error
+const noAccessWidget = (actor: Actor, type: string): Attempt => ({
+  name: `${type} widget, no data`,
+  actor,
+  kind: "allowed",
+  method: "GET",
+  path: () => `/api/dashboards/widget-data?type=${type}`,
+  expect: 200,
+  contains: () => ['"noAccess":true'],
+  notContains: () => ['"count"', '"groups"'],
+})
+
+// The created template line must hold the catalog item's stored cost, not
+// the bogus one sent. The line is removed again once checked.
+async function templateLineUsesCatalogCost(json: unknown, prisma: PrismaClient): Promise<string | null> {
+  const created = json as { id?: string; cost?: unknown }
+  if (!created.id) return "no line item id in the response"
+  try {
+    if ("cost" in created) return "the response includes cost for a user who can't see it"
+    const row = await prisma.quoteTemplateLineItem.findUnique({ where: { id: created.id }, select: { cost: true } })
+    if (!row) return "the created line item isn't in the database"
+    return row.cost === SAMPLE_ITEM_COST ? null : `stored cost is ${row.cost}, the catalog cost is ${SAMPLE_ITEM_COST}`
+  } finally {
+    await prisma.quoteTemplateLineItem.deleteMany({ where: { id: created.id } })
+  }
+}
+
+// The open purchase orders widget counts only the user's own
+async function openPOsCountOwn(json: unknown, companyId: string, userId: string, prisma: PrismaClient) {
+  const count = (json as { count?: number }).count
+  const own = await prisma.purchaseOrder.count({
+    where: { companyId, userId, status: { in: ["DRAFT", "PARTS_ORDERED", "ON_HOLD", "BACKORDERED"] } },
+  })
+  return count === own ? null : `count is ${count}, the user has ${own} open purchase orders`
+}
+
 const ATTEMPTS: Attempt[] = [
   // ── Positive controls: Global Admin B ──
   { name: "List quotes shows everyone's", actor: "admin", kind: "control", method: "GET", path: () => "/api/quotes", expect: 200, contains: (c) => [c.b.quoteId, c.fx.repQuoteId] },
@@ -305,6 +423,50 @@ const ATTEMPTS: Attempt[] = [
   catalogList("admin", "control", true),
   { name: "Catalog order history shows everyone's sales orders", actor: "admin", kind: "control", method: "GET", path: (c) => `/api/catalog/${c.b.catalogItemId}/order-history`, expect: 200, contains: (c) => [c.b.salesOrderId, c.fx.clerkSalesOrderId] },
   { name: "Vendor purchase orders shows everyone's", actor: "admin", kind: "control", method: "GET", path: (c) => `/api/vendors/${c.b.vendorId}/purchase-orders`, expect: 200, contains: (c) => [c.b.purchaseOrderId, c.fx.clerkPurchaseOrderId] },
+  { name: "Users list, with email addresses", actor: "admin", kind: "control", method: "GET", path: () => "/api/users", expect: 200, contains: (c) => [c.names.adminEmail] },
+  { name: "Roles list, with permissions", actor: "admin", kind: "control", method: "GET", path: () => "/api/roles", expect: 200, contains: () => ['"permissions"'] },
+  { name: "List sales orders shows everyone's", actor: "admin", kind: "control", method: "GET", path: () => "/api/sales-orders", expect: 200, contains: (c) => [c.b.salesOrderId, c.fx.ordersSalesOrderId] },
+  { name: "Open a sales order, with cost", actor: "admin", kind: "control", method: "GET", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}`, expect: 200, contains: (c) => [c.fx.ordersSalesOrderId, '"cost"'] },
+  { name: "List purchase orders shows everyone's", actor: "admin", kind: "control", method: "GET", path: () => "/api/purchase-orders", expect: 200, contains: (c) => [c.b.purchaseOrderId, c.fx.ordersPurchaseOrderId] },
+  { name: "Open a purchase order, with cost", actor: "admin", kind: "control", method: "GET", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}`, expect: 200, contains: (c) => [c.fx.ordersPurchaseOrderId, '"unitCost"'] },
+  { name: "SO and PO settings", actor: "admin", kind: "control", method: "GET", path: () => "/api/so-po-settings", expect: 200, contains: () => ["soPrefix"] },
+  { name: "Notification settings", actor: "admin", kind: "control", method: "GET", path: () => "/api/notification-settings", expect: 200, contains: () => ["emailSignature"] },
+  { name: "Approval workflows", actor: "admin", kind: "control", method: "GET", path: () => "/api/approval-workflows", expect: 200, contains: (c) => [c.b.workflowId] },
+  { name: "Open purchase orders widget", actor: "admin", kind: "control", method: "GET", path: () => "/api/dashboards/widget-data?type=OPEN_POS", expect: 200, contains: () => ['"count"'] },
+
+  // ── Positive controls: Test Orders B (both order pages, create and edit
+  // on both, no viewAll, no generatePO). Edits send the stored values. ──
+  { name: "List sales orders shows only own", actor: "orders", kind: "control", method: "GET", path: () => "/api/sales-orders", expect: 200, contains: (c) => [c.fx.ordersSalesOrderId], notContains: (c) => [c.b.salesOrderId, c.fx.clerkSalesOrderId] },
+  { name: "Open own sales order, with cost", actor: "orders", kind: "control", method: "GET", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}`, expect: 200, contains: (c) => [c.fx.ordersSalesOrderId, '"cost"'] },
+  { name: "Edit own sales order (same notes)", actor: "orders", kind: "control", method: "PATCH", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}`, body: (c) => ({ internalNotes: c.names.ordersSalesOrder }), expect: 200, contains: (c) => [c.fx.ordersSalesOrderId] },
+  { name: "Edit own sales order line item (same name)", actor: "orders", kind: "control", method: "PATCH", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}/line-items/${c.fx.ordersSoLineId}`, body: (c) => ({ name: c.names.ordersSoLine }), expect: 200, contains: (c) => [c.fx.ordersSoLineId] },
+  { name: "Own sales order comments", actor: "orders", kind: "control", method: "GET", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}/comments`, expect: 200, contains: () => ["["] },
+  { name: "Own sales order attachments", actor: "orders", kind: "control", method: "GET", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}/attachments`, expect: 200, contains: () => ["["] },
+  { name: "Create a sales order (no client, past the permission check)", actor: "orders", kind: "control", method: "POST", path: () => "/api/sales-orders", body: () => ({}), expect: 400, contains: () => ["A client is required"] },
+  { name: "List purchase orders shows only own", actor: "orders", kind: "control", method: "GET", path: () => "/api/purchase-orders", expect: 200, contains: (c) => [c.fx.ordersPurchaseOrderId], notContains: (c) => [c.b.purchaseOrderId, c.b.purchaseOrder2Id, c.fx.clerkPurchaseOrderId] },
+  { name: "Open own purchase order, with cost", actor: "orders", kind: "control", method: "GET", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}`, expect: 200, contains: (c) => [c.fx.ordersPurchaseOrderId, '"unitCost"'] },
+  { name: "Edit own purchase order (same notes)", actor: "orders", kind: "control", method: "PATCH", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}`, body: (c) => ({ internalNotes: c.names.ordersPurchaseOrder }), expect: 200, contains: (c) => [c.fx.ordersPurchaseOrderId] },
+  { name: "Edit own purchase order line item (same name)", actor: "orders", kind: "control", method: "PATCH", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}/line-items/${c.fx.ordersPoLineId}`, body: (c) => ({ name: c.names.ordersPoLine }), expect: 200, contains: (c) => [c.fx.ordersPoLineId] },
+  { name: "Own purchase order comments", actor: "orders", kind: "control", method: "GET", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}/comments`, expect: 200, contains: () => ["["] },
+  // A manual purchase order, sent without a vendor: the 400 comes after the
+  // purchaseOrders.create check, which shows it passed
+  { name: "Create a manual purchase order (no vendor, past the permission check)", actor: "orders", kind: "control", method: "POST", path: () => "/api/purchase-orders", body: () => ({}), expect: 400, contains: () => ["A vendor is required"] },
+  {
+    name: "Open purchase orders widget counts only own",
+    actor: "orders",
+    kind: "control",
+    method: "GET",
+    path: () => "/api/dashboards/widget-data?type=OPEN_POS",
+    expect: 200,
+    check: (json, c, prisma) => openPOsCountOwn(json, c.b.companyId, c.fx.ordersUserId, prisma),
+  },
+
+  // ── Positive controls: Test Viewer B (both order pages and viewAll, no
+  // edit, so no cost) and Test Templater B (Quote Settings only) ──
+  { name: "List sales orders shows everyone's", actor: "viewer", kind: "control", method: "GET", path: () => "/api/sales-orders", expect: 200, contains: (c) => [c.b.salesOrderId, c.fx.ordersSalesOrderId] },
+  { name: "Open someone else's sales order, without cost", actor: "viewer", kind: "control", method: "GET", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}`, expect: 200, contains: (c) => [c.fx.ordersSalesOrderId], notContains: () => ['"cost"', '"unitCost"'] },
+  { name: "Open someone else's purchase order, without cost", actor: "viewer", kind: "control", method: "GET", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}`, expect: 200, contains: (c) => [c.fx.ordersPurchaseOrderId], notContains: () => ['"unitCost"'] },
+  { name: "Edit the cost template (same name)", actor: "templater", kind: "control", method: "PATCH", path: (c) => `/api/quote-templates/${c.fx.costTemplateId}`, body: (c) => ({ name: c.names.costTemplate }), expect: 200, contains: (c) => [c.fx.costTemplateId] },
 
   // ── Positive controls: Test Rep B (pages.quotes, quotes.create, quotes.edit) ──
   { name: "List quotes shows only own", actor: "rep", kind: "control", method: "GET", path: () => "/api/quotes", expect: 200, contains: (c) => [c.fx.repQuoteId], notContains: (c) => [c.b.quoteId] },
@@ -504,7 +666,9 @@ const ATTEMPTS: Attempt[] = [
   { name: "Add a template section", actor: "everyone", kind: "refused", method: "POST", path: (c) => `/api/quote-templates/${c.b.templateId}/sections`, body: () => ({ name: "Should Not Exist" }), expect: 403, expectError: "quote templates" },
   { name: "Remove a template section", actor: "everyone", kind: "refused", method: "DELETE", path: (c) => `/api/quote-templates/${c.b.templateId}/sections`, body: () => ({ name: "Should Not Exist" }), expect: 403, expectError: "quote templates" },
   { name: "Distributor search", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/distributor-search?q=test", expect: 403, expectError: "search distributors" },
-  { name: "Open quotes widget", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/dashboards/widget-data?type=OPEN_QUOTES", expect: 403, expectError: "permission" },
+  // A widget the user may not see answers with no data rather than a 403,
+  // so a shared dashboard shows a no access note instead of an error
+  noAccessWidget("everyone", "OPEN_QUOTES"),
   { name: "Disconnect the admin's mailbox", actor: "everyone", kind: "refused", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
   // Any signed in user may start connecting their own mailbox. The test
   // company has no Microsoft credentials, so the route stops there, which
@@ -555,6 +719,96 @@ const ATTEMPTS: Attempt[] = [
   { name: "Send to an invalid address", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/send-email`, body: () => sendBody({ to: "not-an-address" }), expect: 400, expectError: "not a valid email address" },
   { name: "Send to too many recipients", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/send-email`, body: () => sendBody({ to: Array.from({ length: 26 }, (_, i) => `nobody${i}@example.test`).join(", ") }), expect: 400, expectError: "at most" },
   { name: "Send with no message", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/send-email`, body: () => sendBody({ message: "" }), expect: 400, expectError: "required" },
+
+  // ── Sales orders, purchase orders, settings, users, and roles ──
+  // Test Everyone B: refused every guarded route, allowed the reads any
+  // active user may make, and no data from widgets it may not see
+  ...ORDER_GUARDED.map(refusedFor("everyone")),
+  ...SETTINGS_GUARDED.map(refusedFor("everyone")),
+  ...activeReadsFor("everyone"),
+  noAccessWidget("everyone", "OPEN_POS"),
+  noAccessWidget("everyone", "INVENTORY_BY_STATUS"),
+  noAccessWidget("everyone", "INVENTORY_BY_CLIENT"),
+  noAccessWidget("everyone", "TOTAL_CLIENTS"),
+  // Test Rep B and Test Clerk B hold neither order page
+  ...ORDER_GUARDED.map(refusedFor("rep")),
+  ...ORDER_GUARDED.map(refusedFor("clerk")),
+
+  // Test Orders B: only its own orders, and nothing it holds no key for
+  { name: "Open the admin's sales order", actor: "orders", kind: "refused", method: "GET", path: (c) => `/api/sales-orders/${c.b.salesOrderId}`, expect: 404, expectError: "Not found" },
+  { name: "Edit the admin's sales order", actor: "orders", kind: "refused", method: "PATCH", path: (c) => `/api/sales-orders/${c.b.salesOrderId}`, body: () => ({ internalNotes: "Changed" }), expect: 404, expectError: "Not found" },
+  { name: "Add a line item to the admin's sales order", actor: "orders", kind: "refused", method: "POST", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/line-items`, body: () => ({ name: "Should Not Exist" }), expect: 404, expectError: "Not found" },
+  { name: "Edit the admin's sales order line item", actor: "orders", kind: "refused", method: "PATCH", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/line-items/${c.b.soLineId}`, body: () => ({ name: "Changed" }), expect: 404, expectError: "Not found" },
+  { name: "Edit the admin's line item under own sales order", actor: "orders", kind: "refused", method: "PATCH", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}/line-items/${c.b.soLineId}`, body: () => ({ name: "Changed" }), expect: 404, expectError: "Not found" },
+  { name: "Delete the admin's sales order line item", actor: "orders", kind: "refused", method: "DELETE", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/line-items/${c.b.soLineId}`, expect: 404, expectError: "Not found" },
+  { name: "Read the admin's sales order comments", actor: "orders", kind: "refused", method: "GET", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/comments`, expect: 404, expectError: "Not found" },
+  { name: "Comment on the admin's sales order", actor: "orders", kind: "refused", method: "POST", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/comments`, body: () => ({ message: "Should not exist" }), expect: 404, expectError: "Not found" },
+  { name: "The admin's sales order attachments", actor: "orders", kind: "refused", method: "GET", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/attachments`, expect: 404, expectError: "Not found" },
+  { name: "Delete the admin's sales order attachment", actor: "orders", kind: "refused", method: "DELETE", path: (c) => `/api/sales-orders/${c.b.salesOrderId}/attachments/${c.b.soAttachmentId}`, expect: 404, expectError: "Not found" },
+  { name: "Delete own sales order", actor: "orders", kind: "refused", method: "DELETE", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}`, expect: 403, expectError: "delete sales orders" },
+  { name: "Change own sales order's status", actor: "orders", kind: "refused", method: "PATCH", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}`, body: () => ({ status: "CLOSED" }), expect: 403, expectError: "change a sales order's status" },
+  { name: "Generate a purchase order from own sales order lines", actor: "orders", kind: "refused", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.b.vendorId, salesOrderId: c.fx.ordersSalesOrderId, soLineItemIds: [c.fx.ordersSoLineId] }), expect: 403, expectError: "generate purchase orders" },
+  { name: "Generate a purchase order from the admin's sales order lines", actor: "orders", kind: "refused", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.b.vendorId, salesOrderId: c.b.salesOrderId, soLineItemIds: [c.b.soLineId] }), expect: 403, expectError: "generate purchase orders" },
+  { name: "Open the admin's purchase order", actor: "orders", kind: "refused", method: "GET", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}`, expect: 404, expectError: "Not found" },
+  { name: "Edit the admin's purchase order", actor: "orders", kind: "refused", method: "PATCH", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}`, body: () => ({ internalNotes: "Changed" }), expect: 404, expectError: "Not found" },
+  { name: "Add a line item to the admin's purchase order", actor: "orders", kind: "refused", method: "POST", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/line-items`, body: () => ({ name: "Should Not Exist" }), expect: 404, expectError: "Not found" },
+  { name: "Edit the admin's purchase order line item", actor: "orders", kind: "refused", method: "PATCH", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/line-items/${c.b.poLineId}`, body: () => ({ name: "Changed", received: true }), expect: 404, expectError: "Not found" },
+  { name: "Edit the admin's line item under own purchase order", actor: "orders", kind: "refused", method: "PATCH", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}/line-items/${c.b.poLineId}`, body: () => ({ name: "Changed" }), expect: 404, expectError: "Not found" },
+  { name: "Receive the admin's purchase order line item", actor: "orders", kind: "refused", method: "POST", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/line-items/${c.b.poLineId}/receive`, body: () => ({}), expect: 404, expectError: "Not found" },
+  { name: "Read the admin's purchase order comments", actor: "orders", kind: "refused", method: "GET", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/comments`, expect: 404, expectError: "Not found" },
+  { name: "Delete the admin's purchase order attachment", actor: "orders", kind: "refused", method: "DELETE", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/attachments/${c.b.poAttachmentId}`, expect: 404, expectError: "Not found" },
+  { name: "Delete own purchase order", actor: "orders", kind: "refused", method: "DELETE", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}`, expect: 403, expectError: "delete purchase orders" },
+  { name: "Change own purchase order's status", actor: "orders", kind: "refused", method: "PATCH", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}`, body: () => ({ status: "CANCELLED" }), expect: 403, expectError: "change a purchase order's status" },
+  { name: "SO and PO settings", actor: "orders", kind: "refused", method: "GET", path: () => "/api/so-po-settings", expect: 403, expectError: "sales order and purchase order settings" },
+  ...activeReadsFor("orders"),
+
+  // Test Viewer B: sees every order, edits none
+  { name: "Edit someone else's sales order", actor: "viewer", kind: "refused", method: "PATCH", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}`, body: () => ({ internalNotes: "Changed" }), expect: 403, expectError: "edit sales orders" },
+  { name: "Edit a sales order line item", actor: "viewer", kind: "refused", method: "PATCH", path: (c) => `/api/sales-orders/${c.fx.ordersSalesOrderId}/line-items/${c.fx.ordersSoLineId}`, body: () => ({ cost: 1 }), expect: 403, expectError: "edit sales orders" },
+  { name: "Edit someone else's purchase order", actor: "viewer", kind: "refused", method: "PATCH", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}`, body: () => ({ internalNotes: "Changed" }), expect: 403, expectError: "edit purchase orders" },
+  { name: "Generate a purchase order", actor: "viewer", kind: "refused", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.b.vendorId, salesOrderId: c.fx.ordersSalesOrderId, soLineItemIds: [c.fx.ordersSoLineId] }), expect: 403, expectError: "create purchase orders" },
+
+  // Cost on line item routes: a user who can't see cost can't set it
+  {
+    name: "Add a template line with a bogus cost: stored cost is the catalog cost",
+    actor: "templater",
+    kind: "allowed",
+    method: "POST",
+    path: (c) => `/api/quote-templates/${c.fx.costTemplateId}/line-items`,
+    body: (c) => ({ name: "Dev check cost line", catalogItemId: c.b.catalogItemId, unitPrice: 100, cost: 9999 }),
+    expect: 200,
+    check: (json, _c, prisma) => templateLineUsesCatalogCost(json, prisma),
+  },
+  {
+    name: "Edit a template line's cost: stored cost is unchanged",
+    actor: "templater",
+    kind: "allowed",
+    method: "PATCH",
+    path: (c) => `/api/quote-templates/${c.fx.costTemplateId}/line-items/${c.fx.costTemplateLineId}`,
+    body: (c) => ({ name: c.names.costTemplateLine, cost: 1 }),
+    expect: 200,
+    notContains: () => ['"cost"'],
+    check: async (_json, c, prisma) => {
+      const row = await prisma.quoteTemplateLineItem.findUnique({ where: { id: c.fx.costTemplateLineId }, select: { cost: true } })
+      return row?.cost === SAMPLE_ITEM_COST ? null : `stored cost is ${row?.cost}, expected it to stay ${SAMPLE_ITEM_COST}`
+    },
+  },
+  {
+    name: "Edit a catalog item without a cost field: cost and category unchanged",
+    actor: "clerk",
+    kind: "allowed",
+    method: "PATCH",
+    path: (c) => `/api/catalog/${c.b.catalogItemId}`,
+    body: (c) => ({ name: c.names.catalogItem }),
+    expect: 200,
+    check: async (_json, c, prisma) => {
+      const row = await prisma.catalogItem.findUnique({ where: { id: c.b.catalogItemId }, select: { cost: true, categoryId: true } })
+      if (row?.cost !== SAMPLE_ITEM_COST) return `cost is ${row?.cost}, expected it to stay ${SAMPLE_ITEM_COST}`
+      return row.categoryId === c.b.categoryId ? null : "the category changed"
+    },
+  },
+  { name: "SO and PO settings", actor: "templater", kind: "refused", method: "GET", path: () => "/api/so-po-settings", expect: 403, expectError: "sales order and purchase order settings" },
+  { name: "Open a sales order", actor: "templater", kind: "refused", method: "GET", path: (c) => `/api/sales-orders/${c.b.salesOrderId}`, expect: 403, expectError: "view sales orders" },
 
   // ── Clients, catalog, vendors, company settings lists, and inventory ──
   // Test Everyone B and Test Rep B: refused every guarded route, allowed the open pickers
@@ -639,10 +893,29 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
       ...byId,
       select: { id: true, companyId: true, email: true, label: true, connectedByUserId: true, updatedAt: true },
     }),
+    // updatedAt moves on any write to company settings, secrets included
     settings: prisma.companySettings.findUnique({
       where: { companyId: b },
       select: { quoteSendFromMode: true, quoteSendFromConnectionId: true, updatedAt: true },
     }),
+    company: prisma.company.findUnique({ where: { id: b }, select: { name: true, logoUrl: true, secondaryLogoUrl: true } }),
+    salesOrders: prisma.salesOrder.findMany({
+      where: { companyId: b },
+      ...byId,
+      include: { lineItems: byId, comments: byId, attachments: byId },
+    }),
+    purchaseOrders: prisma.purchaseOrder.findMany({
+      where: { companyId: b },
+      ...byId,
+      include: { lineItems: byId, comments: byId, attachments: byId },
+    }),
+    approvalWorkflows: prisma.approvalWorkflow.findMany({ where: { companyId: b }, ...byId }),
+    distributorIntegrations: prisma.distributorIntegration.findMany({
+      where: { companyId: b },
+      ...byId,
+      select: { id: true, distributor: true, enabled: true, updatedAt: true },
+    }),
+    dashboards: prisma.dashboard.findMany({ where: { companyId: b }, ...byId, include: { widgets: byId } }),
     roles: prisma.role.findMany({ where: { companyId: b }, ...byId }),
     clients: prisma.client.findMany({
       where: { companyId: b },
@@ -667,7 +940,11 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
     containers: prisma.inventoryLocation.findMany({ where: { companyId: b }, ...byId }),
     stock: prisma.inventoryStock.findMany({ where: { companyId: b }, ...byId }),
     stockEvents: prisma.inventoryStockEvent.count({ where: { stock: { companyId: b } } }),
-    users: prisma.user.findMany({ where: { companyId: b }, ...byId, select: { id: true, active: true, roleId: true } }),
+    users: prisma.user.findMany({
+      where: { companyId: b },
+      ...byId,
+      select: { id: true, name: true, active: true, roleId: true, loginLockedUntil: true },
+    }),
     notifications: prisma.notification.count({ where: { companyId: b } }),
   }
   const keys = Object.keys(sections) as (keyof typeof sections)[]
@@ -719,6 +996,38 @@ async function ensureSenderFixture(prisma: PrismaClient, b: SampleIds) {
   })
 
   return { email: n.senderEmail, password, mailboxId: mailbox.id }
+}
+
+// Test Viewer B inside Test Company B: both order pages and both viewAll
+// keys, no edit, so it opens every order without seeing cost. Reset to the
+// same known state every run, password in memory only.
+async function ensureViewerFixture(prisma: PrismaClient, b: SampleIds) {
+  const n = testNames("B")
+  const companyId = b.companyId
+  const viewerPermissions = {
+    pages: { salesOrders: true, purchaseOrders: true },
+    salesOrders: { viewAll: true },
+    purchaseOrders: { viewAll: true },
+  }
+
+  const existingRole = await prisma.role.findFirst({ where: { companyId, name: n.viewerRole } })
+  const role = existingRole
+    ? await prisma.role.update({ where: { id: existingRole.id }, data: { rank: 1, permissions: viewerPermissions } })
+    : await prisma.role.create({ data: { companyId, name: n.viewerRole, rank: 1, permissions: viewerPermissions } })
+
+  const password = generatePassword(20)
+  const hashed = await bcrypt.hash(password, BCRYPT_COST)
+  const existing = await prisma.user.findUnique({ where: { email: n.viewerEmail } })
+  if (existing && existing.companyId !== companyId) {
+    throw new HarnessBroken(`${n.viewerEmail} belongs to a different company, refusing to change it`)
+  }
+  const reset = { password: hashed, active: true, mustChangePassword: false, loginFailedAttempts: 0, loginLockedUntil: null }
+  const user = existing
+    ? await prisma.user.update({ where: { id: existing.id }, data: { name: n.viewerName, ...reset } })
+    : await prisma.user.create({ data: { companyId, name: n.viewerName, email: n.viewerEmail, ...reset } })
+  await setUserRoles(prisma, user.id, [role.id])
+
+  return { email: n.viewerEmail, password }
 }
 
 // A held email whose send fails must not strand the quote. Runs as Test
@@ -862,12 +1171,16 @@ async function main() {
     rep: process.env.TEST_REP_B_PASSWORD,
     everyone: process.env.TEST_EVERYONE_B_PASSWORD,
     clerk: process.env.TEST_CLERK_B_PASSWORD,
+    orders: process.env.TEST_ORDERS_B_PASSWORD,
+    templater: process.env.TEST_TEMPLATER_B_PASSWORD,
   }
   const missing = [
     !passwords.admin && "TEST_ADMIN_B_PASSWORD",
     !passwords.rep && "TEST_REP_B_PASSWORD",
     !passwords.everyone && "TEST_EVERYONE_B_PASSWORD",
     !passwords.clerk && "TEST_CLERK_B_PASSWORD",
+    !passwords.orders && "TEST_ORDERS_B_PASSWORD",
+    !passwords.templater && "TEST_TEMPLATER_B_PASSWORD",
   ].filter(Boolean)
   if (missing.length > 0) {
     throw new HarnessBroken(`Set ${missing.join(", ")} in your shell (the passwords create-test-companies printed).`)
@@ -882,16 +1195,11 @@ async function main() {
   const fx = await loadPermissionFixtureIds(prisma, "B")
   const fxC = await loadPermissionFixtureIds(prisma, "C")
 
-  // Safety: with no Microsoft credentials a quote email can't be sent from
-  // these companies even if a refusal below were broken. Only whether the
-  // values exist is read, never the values.
-  const credentials = await prisma.companySettings.findMany({
-    where: { companyId: { in: [b.companyId, c.companyId] } },
-    select: { microsoftClientId: true, microsoftClientSecret: true },
-  })
-  if (credentials.some((s) => s.microsoftClientId || s.microsoftClientSecret)) {
-    throw new HarnessBroken("A test company has Microsoft credentials set, so a broken refusal could send a real email. Remove them from the test company first.")
-  }
+  // Safety: with no Microsoft credentials and no distributor turned on, a
+  // quote email can't be sent and no real distributor can be reached from
+  // these companies even if a refusal below were broken
+  const external = await findExternalServices(prisma, [b.companyId, c.companyId])
+  if (external) throw new HarnessBroken(external)
   const quotes = await prisma.quote.findMany({ where: { id: { in: [b.quoteId, fx.repQuoteId] } }, select: { status: true } })
   if (quotes.length !== 2 || quotes.some((q) => q.status !== "DRAFT")) {
     throw new HarnessBroken("The sample quotes must be drafts. Run create-test-companies again to reset them.")
@@ -922,6 +1230,7 @@ async function main() {
   async function runChecks() {
     await setSenderMode("CREATOR", null)
     const sender = await ensureSenderFixture(prisma, b)
+    const viewer = await ensureViewerFixture(prisma, b)
     const names = testNames("B")
     const ctx: AttemptContext = {
       b,
@@ -941,15 +1250,32 @@ async function main() {
       clerk: new Session("Test Clerk B", baseUrl),
       everyone: new Session("Test Everyone B", baseUrl),
       sender: new Session("Test Sender B", baseUrl),
+      orders: new Session("Test Orders B", baseUrl),
+      templater: new Session("Test Templater B", baseUrl),
+      viewer: new Session("Test Viewer B", baseUrl),
     }
     await sessions.admin.signIn(names.adminEmail, passwords.admin as string)
     await sessions.rep.signIn(names.repEmail, passwords.rep as string)
     await sessions.everyone.signIn(names.everyoneEmail, passwords.everyone as string)
     await sessions.clerk.signIn(names.clerkEmail, passwords.clerk as string)
     await sessions.sender.signIn(sender.email, sender.password)
-    console.log(`Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, and Test Sender B.`)
+    await sessions.orders.signIn(names.ordersEmail, passwords.orders as string)
+    await sessions.templater.signIn(names.templaterEmail, passwords.templater as string)
+    await sessions.viewer.signIn(viewer.email, viewer.password)
+    console.log(
+      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, and Test Viewer B.`
+    )
 
-    const ACTOR_LABEL: Record<Actor, string> = { admin: "Admin B", rep: "Rep B", clerk: "Clerk B", everyone: "Everyone B", sender: "Sender B" }
+    const ACTOR_LABEL: Record<Actor, string> = {
+      admin: "Admin B",
+      rep: "Rep B",
+      clerk: "Clerk B",
+      everyone: "Everyone B",
+      sender: "Sender B",
+      orders: "Orders B",
+      templater: "Templater B",
+      viewer: "Viewer B",
+    }
     const label = (a: Attempt) => `[${a.kind === "control" ? "control " : ""}${ACTOR_LABEL[a.actor]}] ${a.name}`
 
     // Positive controls first: if any fails, the refusals below would prove nothing

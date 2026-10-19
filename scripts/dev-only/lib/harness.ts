@@ -5,7 +5,7 @@
 //
 // No database imports here, so loading this file never touches the database.
 
-export type Method = "GET" | "POST" | "PATCH" | "DELETE"
+export type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 export type Result = "PASS" | "FAIL" | "UNEXPECTED"
 

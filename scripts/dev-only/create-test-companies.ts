@@ -8,10 +8,17 @@
 // Clerk" (only a "Clerk" role with the Clients, Vendors, Catalog, and
 // Inventory pages plus clients.create and clients.edit) with a sales order
 // and purchase order of their own, plus a sample mailbox row for the admin
-// with placeholder tokens.
+// with placeholder tokens. "Test Orders" (only an "Orders" role with the
+// Sales Orders and Purchase Orders pages plus create and edit on both) gets
+// a sales order and purchase order of their own, each with a line, and "Test
+// Templater" (only a "Templater" role with Quote Settings) gets a quote
+// template with one line for the line item cost checks. The sample catalog
+// item's cost is reset to SAMPLE_ITEM_COST on every run.
 //
-// Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts). Run from
-// the repo root:
+// Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and
+// refuses to touch a test company that has Microsoft credentials or an
+// enabled distributor integration (findExternalServices). Run from the repo
+// root:
 //   npx tsx scripts/dev-only/create-test-companies.ts --yes
 //
 // Safe to re-run: existing records are found by their fixed sample names and
@@ -19,13 +26,16 @@
 // random password, printed once below and never written anywhere else.
 
 import bcrypt from "bcryptjs"
-import { enforceDevGuard } from "./lib/guard"
+import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import {
   BCRYPT_COST,
   CLERK_PERMISSIONS,
   DUMMY_FILE_URL,
+  ORDERS_PERMISSIONS,
   PLACEHOLDER_TOKEN,
   REP_PERMISSIONS,
+  SAMPLE_ITEM_COST,
+  TEMPLATER_PERMISSIONS,
   TEST_LETTERS,
   generatePassword,
   loadPermissionFixtureIds,
@@ -51,6 +61,18 @@ async function main() {
   const { prisma } = await import("@/lib/prisma")
   const { generateAssetTag } = await import("@/lib/inventory/generateAssetTag")
   const { logAssetEvent } = await import("@/lib/inventory/logAssetEvent")
+
+  // Test companies that already exist must not be able to reach a real
+  // mailbox or distributor. New ones start with neither.
+  const existingCompanies = await prisma.company.findMany({
+    where: { name: { in: TEST_LETTERS.map((l) => testNames(l).company) } },
+    select: { id: true },
+  })
+  const external = await findExternalServices(
+    prisma,
+    existingCompanies.map((c) => c.id)
+  )
+  if (external) throw new Error(external)
 
   // Creates the user or resets an existing one to a known state: active, a
   // new password, no forced password change, no lockouts
@@ -84,6 +106,8 @@ async function main() {
     everyonePassword: string
     repPassword: string
     clerkPassword: string
+    ordersPassword: string
+    templaterPassword: string
     fixtures: PermissionFixtureIds
   }> {
     const n = testNames(letter)
@@ -229,9 +253,13 @@ async function main() {
           manufacturerId: vendor.id,
           isSerialized: true,
           msrp: 100,
-          cost: 60,
+          cost: SAMPLE_ITEM_COST,
         },
       }))
+    // A known non-zero cost, for the line item cost checks
+    if (catalogItem.cost !== SAMPLE_ITEM_COST) {
+      await prisma.catalogItem.update({ where: { id: catalogItem.id }, data: { cost: SAMPLE_ITEM_COST } })
+    }
 
     // Numbering below follows the quote, sales order, and purchase order
     // POST routes: prefix from Company Settings, year, then a running count
@@ -483,6 +511,98 @@ async function main() {
     await prisma.salesOrder.updateMany({ where: { companyId, internalNotes: n.salesOrder }, data: { userId: admin.id } })
     await prisma.purchaseOrder.updateMany({ where: { companyId, internalNotes: n.purchaseOrder }, data: { userId: admin.id } })
 
+    // The Orders role is reset to exactly its permissions on every run
+    const existingOrdersRole = await prisma.role.findFirst({ where: { companyId, name: n.ordersRole } })
+    const ordersRole = existingOrdersRole
+      ? await prisma.role.update({ where: { id: existingOrdersRole.id }, data: { permissions: ORDERS_PERMISSIONS } })
+      : await prisma.role.create({ data: { companyId, name: n.ordersRole, rank: 3, permissions: ORDERS_PERMISSIONS } })
+    const orders = await upsertTestUser(companyId, n.ordersName, n.ordersEmail)
+    await setUserRoles(prisma, orders.user.id, [ordersRole.id])
+
+    // A sales order and purchase order the Orders user owns, each with a
+    // line, next to the admin's sample orders they don't own. Kept as
+    // drafts with no purchase order generated, so every field stays editable.
+    let ordersSalesOrder = await prisma.salesOrder.findFirst({ where: { companyId, internalNotes: n.ordersSalesOrder } })
+    if (!ordersSalesOrder) {
+      const count = await prisma.salesOrder.count({ where: { companyId } })
+      ordersSalesOrder = await prisma.salesOrder.create({
+        data: {
+          companyId,
+          clientId: client.id,
+          userId: orders.user.id,
+          soNumber: `${settings?.soPrefix ?? "SO"}-${year}-${pad4(count + 1)}`,
+          internalNotes: n.ordersSalesOrder,
+        },
+      })
+    } else if (ordersSalesOrder.userId !== orders.user.id || ordersSalesOrder.status !== "DRAFT") {
+      ordersSalesOrder = await prisma.salesOrder.update({
+        where: { id: ordersSalesOrder.id },
+        data: { userId: orders.user.id, status: "DRAFT" },
+      })
+    }
+    if (!(await prisma.sOLineItem.findFirst({ where: { salesOrderId: ordersSalesOrder.id, name: n.ordersSoLine } }))) {
+      await prisma.sOLineItem.create({
+        data: {
+          salesOrderId: ordersSalesOrder.id,
+          catalogItemId: catalogItem.id,
+          vendorId: vendor.id,
+          name: n.ordersSoLine,
+          quantity: 1,
+          unitPrice: 100,
+          cost: SAMPLE_ITEM_COST,
+        },
+      })
+    }
+    const ordersPurchaseOrder = await ensurePurchaseOrder(n.ordersPurchaseOrder, orders.user.id)
+    if (ordersPurchaseOrder.userId !== orders.user.id || ordersPurchaseOrder.status !== "DRAFT") {
+      await prisma.purchaseOrder.update({
+        where: { id: ordersPurchaseOrder.id },
+        data: { userId: orders.user.id, status: "DRAFT" },
+      })
+    }
+    if (!(await prisma.pOLineItem.findFirst({ where: { purchaseOrderId: ordersPurchaseOrder.id, name: n.ordersPoLine } }))) {
+      await prisma.pOLineItem.create({
+        data: {
+          purchaseOrderId: ordersPurchaseOrder.id,
+          catalogItemId: catalogItem.id,
+          name: n.ordersPoLine,
+          quantity: 1,
+          unitCost: SAMPLE_ITEM_COST,
+        },
+      })
+    }
+
+    // The Templater role is reset to exactly its permissions on every run
+    const existingTemplaterRole = await prisma.role.findFirst({ where: { companyId, name: n.templaterRole } })
+    const templaterRole = existingTemplaterRole
+      ? await prisma.role.update({ where: { id: existingTemplaterRole.id }, data: { permissions: TEMPLATER_PERMISSIONS } })
+      : await prisma.role.create({ data: { companyId, name: n.templaterRole, rank: 2, permissions: TEMPLATER_PERMISSIONS } })
+    const templater = await upsertTestUser(companyId, n.templaterName, n.templaterEmail)
+    await setUserRoles(prisma, templater.user.id, [templaterRole.id])
+
+    // A quote template with one line for the sample catalog item, its cost
+    // reset to the catalog cost, for the line item cost checks
+    const costTemplate =
+      (await prisma.quoteTemplate.findFirst({ where: { companyId, name: n.costTemplate } })) ??
+      (await prisma.quoteTemplate.create({ data: { companyId, name: n.costTemplate } }))
+    const costTemplateLine = await prisma.quoteTemplateLineItem.findFirst({
+      where: { templateId: costTemplate.id, name: n.costTemplateLine },
+    })
+    if (!costTemplateLine) {
+      await prisma.quoteTemplateLineItem.create({
+        data: {
+          templateId: costTemplate.id,
+          catalogItemId: catalogItem.id,
+          name: n.costTemplateLine,
+          quantity: 1,
+          unitPrice: 100,
+          cost: SAMPLE_ITEM_COST,
+        },
+      })
+    } else if (costTemplateLine.cost !== SAMPLE_ITEM_COST) {
+      await prisma.quoteTemplateLineItem.update({ where: { id: costTemplateLine.id }, data: { cost: SAMPLE_ITEM_COST } })
+    }
+
     // The admin's mailbox row. Placeholder tokens only, and the test
     // companies have no Microsoft credentials, so it can never send.
     await prisma.microsoftConnection.upsert({
@@ -505,6 +625,8 @@ async function main() {
       everyonePassword: everyone.password,
       repPassword: rep.password,
       clerkPassword: clerk.password,
+      ordersPassword: orders.password,
+      templaterPassword: templater.password,
       fixtures: await loadPermissionFixtureIds(prisma, letter),
     }
   }
@@ -515,7 +637,7 @@ async function main() {
   }
 
   console.log("")
-  for (const { letter, password, adminEmail, ids, everyonePassword, repPassword, clerkPassword, fixtures } of results) {
+  for (const { letter, password, adminEmail, ids, everyonePassword, repPassword, clerkPassword, ordersPassword, templaterPassword, fixtures } of results) {
     const n = testNames(letter)
     console.log(`${n.company}`)
     console.log(`  company id: ${ids.companyId}`)
@@ -527,6 +649,10 @@ async function main() {
     console.log(`  rep password (shown only now, not saved anywhere): ${repPassword}`)
     console.log(`  clerk email: ${n.clerkEmail}`)
     console.log(`  clerk password (shown only now, not saved anywhere): ${clerkPassword}`)
+    console.log(`  orders email: ${n.ordersEmail}`)
+    console.log(`  orders password (shown only now, not saved anywhere): ${ordersPassword}`)
+    console.log(`  templater email: ${n.templaterEmail}`)
+    console.log(`  templater password (shown only now, not saved anywhere): ${templaterPassword}`)
     console.log("  sample record ids:")
     for (const [key, value] of Object.entries({ ...ids, ...fixtures })) {
       if (key !== "companyId") console.log(`    ${key}: ${value}`)
@@ -539,6 +665,8 @@ async function main() {
   console.log("  TEST_EVERYONE_B_PASSWORD=<the Test Everyone B password above>")
   console.log("  TEST_REP_B_PASSWORD=<the Test Rep B password above>")
   console.log("  TEST_CLERK_B_PASSWORD=<the Test Clerk B password above>")
+  console.log("  TEST_ORDERS_B_PASSWORD=<the Test Orders B password above>")
+  console.log("  TEST_TEMPLATER_B_PASSWORD=<the Test Templater B password above>")
 
   await prisma.$disconnect()
 }

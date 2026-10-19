@@ -1,7 +1,5 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
 import { ApprovalTriggerType } from "@/generated/prisma"
 import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
@@ -10,11 +8,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.approvalWorkflows",
+    message: "You do not have permission to edit approval workflows",
+  })
   if (response) return response
-  if (!ctx.can("settingsSections.approvalWorkflows")) {
-    return NextResponse.json({ error: "You don't have permission to edit approval workflows" }, { status: 403 })
-  }
 
   const { id } = await params
   const existing = await prisma.approvalWorkflow.findUnique({
@@ -54,23 +52,21 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
-  if (!(await hasPermission(session.user.id, "settingsSections.approvalWorkflows"))) {
-    return NextResponse.json({ error: "You don't have permission to delete approval workflows" }, { status: 403 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.approvalWorkflows",
+    message: "You do not have permission to delete approval workflows",
+  })
+  if (response) return response
 
   const { id } = await params
   const existing = await prisma.approvalWorkflow.findUnique({
-    where: { id, companyId: session.user.companyId },
+    where: { id, companyId: ctx.companyId },
   })
   if (!existing) {
     return NextResponse.json({ error: "Workflow not found" }, { status: 404 })
   }
 
-  await prisma.approvalWorkflow.delete({ where: { id } })
+  await prisma.approvalWorkflow.delete({ where: { id, companyId: ctx.companyId } })
 
   return NextResponse.json({ deleted: true })
 }

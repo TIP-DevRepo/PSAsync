@@ -1,13 +1,12 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
+import { requireAccess, type AccessContext } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
 import { canPlace } from "@/lib/dashboards/gridPlacement"
 
-async function loadDashboardAndCheckEdit(dashboardId: string, companyId: string, userId: string) {
-  const dashboard = await prisma.dashboard.findUnique({ where: { id: dashboardId, companyId } })
+async function loadDashboardAndCheckEdit(dashboardId: string, ctx: AccessContext) {
+  const dashboard = await prisma.dashboard.findUnique({ where: { id: dashboardId, companyId: ctx.companyId } })
   if (!dashboard) return { error: NextResponse.json({ error: "Dashboard not found" }, { status: 404 }) }
-  const canEdit = dashboard.userId ? dashboard.userId === userId : await hasPermission(userId, "dashboards.manage")
+  const canEdit = dashboard.userId ? dashboard.userId === ctx.userId : ctx.can("dashboards.manage")
   if (!canEdit) return { error: NextResponse.json({ error: "You don't have permission to edit this dashboard" }, { status: 403 }) }
   return { dashboard }
 }
@@ -16,13 +15,11 @@ export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; widgetId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id, widgetId } = await params
-  const { error } = await loadDashboardAndCheckEdit(id, session.user.companyId, session.user.id)
+  const { error } = await loadDashboardAndCheckEdit(id, ctx)
   if (error) return error
 
   const widget = await prisma.dashboardWidget.findUnique({ where: { id: widgetId } })
@@ -56,13 +53,11 @@ export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string; widgetId: string }> }
 ) {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess()
+  if (response) return response
 
   const { id, widgetId } = await params
-  const { error } = await loadDashboardAndCheckEdit(id, session.user.companyId, session.user.id)
+  const { error } = await loadDashboardAndCheckEdit(id, ctx)
   if (error) return error
 
   const widget = await prisma.dashboardWidget.findUnique({ where: { id: widgetId } })

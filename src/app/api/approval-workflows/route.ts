@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { ApprovalTriggerType } from "@/generated/prisma"
 import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
 
+// Only the Approval Workflows settings panel reads this list. Quote
+// approval checks read workflows on the server themselves.
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.approvalWorkflows",
+    message: "You do not have permission to manage approval workflows",
+  })
+  if (response) return response
 
   const workflows = await prisma.approvalWorkflow.findMany({
-    where: { companyId: session.user.companyId },
+    where: { companyId: ctx.companyId },
     include: { triggerUser: { select: { name: true } }, requiredRole: { select: { id: true, name: true, color: true, isGlobalAdmin: true } } },
     orderBy: { createdAt: "asc" },
   })
@@ -21,11 +23,11 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.approvalWorkflows",
+    message: "You do not have permission to create approval workflows",
+  })
   if (response) return response
-  if (!ctx.can("settingsSections.approvalWorkflows")) {
-    return NextResponse.json({ error: "You don't have permission to create approval workflows" }, { status: 403 })
-  }
 
   const body = await req.json()
 

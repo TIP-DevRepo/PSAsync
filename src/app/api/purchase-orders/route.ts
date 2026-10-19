@@ -1,23 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
-import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
-import { hasPermission } from "@/lib/permissions"
-import { requireAccess } from "@/lib/api-access"
-import { assertRefs } from "@/lib/scoped-loaders"
+import { apiError, notFound, requireAccess } from "@/lib/api-access"
+import { assertRefs, purchaseOrderListWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user) {
-    return NextResponse.json({ error: "Not authenticated" }, { status: 401 })
-  }
+  const { ctx, response } = await requireAccess({
+    permission: "pages.purchaseOrders",
+    message: "You do not have permission to view purchase orders",
+  })
+  if (response) return response
 
-  const canViewAll = await hasPermission(session.user.id, "purchaseOrders.viewAll")
-
+  // Own orders only, unless the user holds purchaseOrders.viewAll
   const purchaseOrders = await prisma.purchaseOrder.findMany({
-    where: {
-      companyId: session.user.companyId,
-      ...(canViewAll ? {} : { userId: session.user.id }),
-    },
+    where: purchaseOrderListWhere(ctx),
     include: {
       vendor: { select: { name: true } },
       user: { select: { name: true } },
@@ -42,14 +37,25 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  // Generating from sales order lines needs salesOrders.generatePO and a
+  // manual purchase order needs purchaseOrders.create, checked below once
+  // the body says which one this is
+  const { ctx, response } = await requireAccess({
+    permission: ["purchaseOrders.create", "salesOrders.generatePO"],
+    message: "You do not have permission to create purchase orders",
+  })
   if (response) return response
-  if (!ctx.can("purchaseOrders.create")) {
-    return NextResponse.json({ error: "You don't have permission to create Purchase Orders" }, { status: 403 })
-  }
 
   const body = await req.json()
   const companyId = ctx.companyId
+  const isGeneratingFromSO = Array.isArray(body.soLineItemIds) && body.soLineItemIds.length > 0
+
+  if (isGeneratingFromSO && !ctx.can("salesOrders.generatePO")) {
+    return apiError(403, "You do not have permission to generate purchase orders from sales orders", "FORBIDDEN")
+  }
+  if (!isGeneratingFromSO && !ctx.can("purchaseOrders.create")) {
+    return apiError(403, "You do not have permission to create purchase orders", "FORBIDDEN")
+  }
 
   if (!body.vendorId) {
     return NextResponse.json({ error: "A vendor is required" }, { status: 400 })
@@ -72,8 +78,6 @@ export async function POST(req: NextRequest) {
   // (the existing "Generate Purchase Order" flow on a Sales Order), or
   // creating a blank PO manually with no line items yet — line items get
   // added afterward from the PO detail page in that case.
-  const isGeneratingFromSO = Array.isArray(body.soLineItemIds) && body.soLineItemIds.length > 0
-
   let salesOrderId: string | null = body.salesOrderId || null
   let shipToClientId: string | null = null
   let lineItemsCreate: {
@@ -87,17 +91,30 @@ export async function POST(req: NextRequest) {
   }[] = []
 
   if (isGeneratingFromSO) {
-    // Confirm every requested line item actually belongs to this company's SO
-    const soLineItems = await prisma.sOLineItem.findMany({
+    // Confirm every requested line item actually belongs to this company's
+    // SO, the one the body names when it names one
+    const namedOrderId = typeof body.salesOrderId === "string" && body.salesOrderId ? body.salesOrderId : null
+    const found = await prisma.sOLineItem.findMany({
       where: {
-        id: { in: body.soLineItemIds },
+        id: { in: body.soLineItemIds.filter((v: unknown) => typeof v === "string") },
         salesOrder: { companyId },
+        ...(namedOrderId ? { salesOrderId: namedOrderId } : {}),
       },
     })
-    if (soLineItems.length === 0) {
+    if (found.length === 0) {
       return NextResponse.json({ error: "No valid line items found" }, { status: 400 })
     }
-    salesOrderId = soLineItems[0].salesOrderId
+    salesOrderId = found[0].salesOrderId
+
+    // The user must be able to open that sales order (VSO), and lines from
+    // any other order are left out
+    const sourceOrder = await prisma.salesOrder.findFirst({
+      where: viewableSalesOrderWhere(ctx, salesOrderId),
+      select: { id: true },
+    })
+    if (!sourceOrder) return notFound()
+    const soLineItems = found.filter((li) => li.salesOrderId === sourceOrder.id)
+
     lineItemsCreate = soLineItems.map((li, idx) => ({
       sourceSOLineItemId: li.id,
       name: li.name,

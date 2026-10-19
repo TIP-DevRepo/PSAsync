@@ -33,11 +33,11 @@ function readNumberField(value: unknown): number | undefined {
 }
 
 export async function PATCH(req: NextRequest) {
-  const { ctx, response } = await requireAccess()
+  const { ctx, response } = await requireAccess({
+    permission: "settingsSections.quotes",
+    message: "You do not have permission to edit quote settings",
+  })
   if (response) return response
-  if (!ctx.can("settingsSections.quotes")) {
-    return NextResponse.json({ error: "You don't have permission to edit quote settings" }, { status: 403 })
-  }
 
   const body = await req.json()
 
