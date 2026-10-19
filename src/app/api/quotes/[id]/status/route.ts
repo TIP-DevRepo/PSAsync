@@ -4,7 +4,7 @@ import { withoutPortalTokens } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
-import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
+import { applyTermsFreeze, isFrozenStatus, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
 
 const VALID_STATUSES = [
   "DRAFT",
@@ -42,11 +42,15 @@ export async function POST(
   if (body.status === "ACCEPTED" && !quote.acceptedAt) data.acceptedAt = new Date()
   if (body.status === "DECLINED" && !quote.declinedAt) data.declinedAt = new Date()
 
+  // Any status past DRAFT and PENDING_APPROVAL freezes the terms: a quote
+  // not frozen yet that uses the company default keeps the default as it
+  // is now, written in the same transaction as the status change. This
+  // covers the bulk Mark Lost and Mark Expired actions, which call here.
+  const freeze = isFrozenStatus(body.status) ? termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId)) : null
+
   // Manually marking a quote SENT should make it the live version, same as
   // the normal send flow
   if (body.status === "SENT") {
-    // Freezes the company default terms when this first marks it sent
-    const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
     const updated = await prisma.$transaction(async (tx) => {
       await applyTermsFreeze(tx, id, freeze)
       await tx.quote.updateMany({
@@ -58,7 +62,10 @@ export async function POST(
     return NextResponse.json(withoutPortalTokens(updated))
   }
 
-  const updated = await prisma.quote.update({ where: { id }, data })
+  const updated = await prisma.$transaction(async (tx) => {
+    await applyTermsFreeze(tx, id, freeze)
+    return tx.quote.update({ where: { id }, data })
+  })
 
   if (body.status === "ACCEPTED") {
     try {

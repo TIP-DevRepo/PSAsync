@@ -84,7 +84,7 @@ export function toPortalQuote(row: PortalQuoteRow, isInternalPreview: boolean) {
   const companyDefault = settings?.quoteTerms ?? null
   return {
     ...rest,
-    terms: resolveQuoteTerms({ terms: row.terms, useDefaultTerms, sentAt: row.sentAt }, companyDefault),
+    terms: resolveQuoteTerms({ terms: row.terms, useDefaultTerms, sentAt: row.sentAt, status: row.status }, companyDefault),
     company: {
       ...companyRest,
       settings: settings ? { primaryColor: settings.primaryColor, accentColor: settings.accentColor } : null,

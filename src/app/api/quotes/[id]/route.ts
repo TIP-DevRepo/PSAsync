@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { withoutCustomerToken, withoutPortalTokens } from "@/lib/portal-token"
 import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
 import { loadViewableQuote, quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
-import { loadCompanyDefaultTerms, quoteTermsView, requestTouchesTerms, termsPatchData } from "@/lib/quote-terms"
+import { isTermsFrozen, loadCompanyDefaultTerms, quoteTermsView, requestTouchesTerms, termsPatchData } from "@/lib/quote-terms"
 
 export async function GET(
   req: NextRequest,
@@ -84,9 +84,10 @@ export async function PATCH(
 
   if (body.title !== undefined) data.title = body.title || null
   if (body.introText !== undefined) data.introText = body.introText || null
-  // A sent quote keeps the terms the customer received
+  // A frozen quote (sent, or moved past DRAFT and PENDING_APPROVAL) keeps
+  // its terms
   if (requestTouchesTerms(body)) {
-    if (existing.sentAt) {
+    if (isTermsFrozen(existing)) {
       return NextResponse.json(
         { error: "Terms can't be changed after a quote has been sent. Create a new version to change them." },
         { status: 400 }

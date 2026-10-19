@@ -52,6 +52,9 @@ interface QuoteDetail {
   effectiveTerms: string | null
   // Ticking the box would replace stored custom terms
   termsDifferFromDefault: boolean
+  // Sent, or moved past draft: terms are shown read only (decided on the
+  // server by isTermsFrozen in src/lib/quote-terms.ts)
+  termsFrozen: boolean
   client: { id: string; name: string; email: string | null }
   contact: { id: string; firstName: string; lastName: string; email: string | null } | null
   user: { id: string; name: string }
@@ -914,7 +917,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                 <CollapsibleField label="Terms & Conditions">
                   {/* Only ever a terms string from an API response, sanitized on the server
                       (src/lib/sanitize-terms.ts). Never render anything else here. */}
-                  {quote.sentAt ? (
+                  {quote.termsFrozen ? (
                     <>
                       <p className="text-xs text-muted-foreground mb-2">
                         These are the terms this quote was sent with. Create a new version to change them.
@@ -935,7 +938,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                       Use company default Terms &amp; Conditions
                     </label>
                   )}
-                  {quote.sentAt ? null : quote.useDefaultTerms ? (
+                  {quote.termsFrozen ? null : quote.useDefaultTerms ? (
                     <div
                       className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
                       dangerouslySetInnerHTML={{ __html: quote.effectiveTerms || "No company default set." }}
