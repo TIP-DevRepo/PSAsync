@@ -18,6 +18,46 @@ export interface ProductUpdate {
 // update appears on /updates the moment the release goes live.
 export const PRODUCT_UPDATES: ProductUpdate[] = [
   {
+    version: "v0.9.08",
+    date: "2026-10-20",
+    title: "Safer Files and Links, and Quote Terms That Stay in Sync",
+    sections: [
+      {
+        category: "Added",
+        items: [
+          "A Regenerate Customer Link button on quotes. It replaces the customer link for every version of the quote, and links already sent stop working right away.",
+          "Clear pages on the customer portal for a quote that has expired and for a link that is no longer valid."
+        ],
+      },
+      {
+        category: "Improved",
+        items: [
+          "Customer links for new quotes, copies, and new versions now use stronger, harder to guess addresses. A link stops working once its quote expires, though an accepted quote can still be viewed. \"Valid until\" dates now show the exact date you chose, and a quote stays valid through the end of that day.",
+          "Opening a quote from the quotes list with View Portal now uses the internal preview, so it no longer marks the quote as viewed or notifies anyone. The internal preview link now requires signing in to a PSAsync account that can view the quote.",
+          "File uploads are now checked for type and size (attachments up to 4 MB, logos up to 2 MB, PNG, JPG, or WebP), with a clear message when a file is refused. Stored files are removed when an attachment, or a record with attachments, is deleted and when a logo is replaced or removed.",
+          "Quote terms keep their formatting in the quote PDF and in the customer's accept window. A draft quote that uses the default terms always shows the current company default everywhere, and once a quote is sent or closed its terms are locked in.",
+          "The quote page keeps the editing side at two thirds of the screen and Version History and Comments at one third, however much is on the quote.",
+          "Changing a quote's status now follows your approval workflows: a quote that needs approval cannot be marked Sent, Viewed, or Accepted until it is approved, while Lost and Expired always work. Bulk Mark Lost and Mark Expired now change each quote on its own and tell you how many could not be changed.",
+          "An older version of a quote can still be viewed and downloaded by the customer, but once a newer version has been sent it can no longer be accepted, declined, or commented on, and the customer is pointed to the latest link.",
+          "Sign ins now last up to 7 days without use, and everyone signs in again at least every 30 days. Repeated failed sign ins or invalid customer links from one network are slowed down with a clear message. A first Microsoft sign in now matches your Microsoft sign in name, and users already linked are not affected.",
+          "Inviting a user can no longer give a role at or above your own, the same rule as editing a user. Global Admins can still give any role. People with Quote Settings access can now open quote templates.",
+          "Everything a customer enters on a quote link is now checked, and quantities must be whole numbers. Quote, sales order, and purchase order number prefixes can only use letters, numbers, and hyphens, up to 10 characters.",
+          "Purchase order lines for inventory items can now only be received with Receive, so inventory stays correct. A sales order now lists only the linked purchase orders you can open.",
+          "Security updates to the underlying platform and sign in system, plus extra protections built into every page."
+        ],
+      },
+      {
+        category: "Fixed",
+        items: [
+          "Copying a quote or creating a new version no longer turns the \"use default terms\" setting back on.",
+          "If a quote's prices, discounts, quantities, items, or owner change after approval was requested, approving it no longer sends it. The quote goes back to Draft, the owner is notified, and any email waiting to go out is kept so approval can be requested again.",
+          "A customer accepting and declining a quote at the same moment now records only one answer.",
+          "Error messages no longer show internal details."
+        ],
+      },
+    ],
+  },
+  {
     version: "v0.9.07",
     date: "2026-10-19",
     title: "Roles and Permissions, Enforced Everywhere",
