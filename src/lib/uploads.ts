@@ -9,6 +9,7 @@ import {
   fileExtension,
   type UploadProfile,
 } from "@/lib/upload-rules"
+import { attachmentDisposition } from "@/lib/content-disposition"
 
 // The only place that validates uploaded files and writes to or deletes
 // from the uploads bucket. Every upload route reads its file with
@@ -213,11 +214,9 @@ export function buildObjectKey(folder: string, ext: string, namePrefix = ""): st
 // ─── Storage ────────────────────────────────────────────────────────────
 
 // The original name as a download name: an ASCII fallback plus the exact
-// name encoded per RFC 5987
+// name encoded per RFC 5987, through the shared helper every download uses
 export function contentDisposition(displayName: string): string {
-  const fallback = displayName.replace(/[^\x20-\x7e]|["\\%]/g, "_")
-  const encoded = encodeURIComponent(displayName).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
-  return `attachment; filename="${fallback}"; filename*=UTF-8''${encoded}`
+  return attachmentDisposition(displayName, "file")
 }
 
 export const ATTACHMENT_CACHE_CONTROL = "private, max-age=86400"

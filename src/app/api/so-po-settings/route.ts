@@ -4,6 +4,7 @@ import { soPoSettingsSelect } from "@/lib/safe-selects"
 import { apiError, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
 import { readSoStatusNotifyRules } from "@/lib/so-status-notify-rules"
+import { numberPrefixProblem } from "@/lib/number-prefix"
 
 // Only the Sales Order and Purchase Order settings panel reads or writes
 // these. The order routes read the prefixes on the server themselves.
@@ -34,6 +35,21 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json()
   const companyId = ctx.companyId
+
+  // The prefixes become part of every order number. Checked only when they
+  // change, so a company whose stored prefix predates the rule can still
+  // save its other settings.
+  if (body.soPrefix !== undefined || body.poPrefix !== undefined) {
+    const stored = await prisma.companySettings.findUnique({ where: { companyId }, select: { soPrefix: true, poPrefix: true } })
+    if (body.soPrefix !== undefined && body.soPrefix !== (stored?.soPrefix ?? "SO")) {
+      const problem = numberPrefixProblem(body.soPrefix, "Sales order number")
+      if (problem) return apiError(400, problem)
+    }
+    if (body.poPrefix !== undefined && body.poPrefix !== (stored?.poPrefix ?? "PO")) {
+      const problem = numberPrefixProblem(body.poPrefix, "Purchase order number")
+      if (problem) return apiError(400, problem)
+    }
+  }
 
   const data: Record<string, unknown> = {}
   if (body.soPrefix !== undefined) data.soPrefix = body.soPrefix

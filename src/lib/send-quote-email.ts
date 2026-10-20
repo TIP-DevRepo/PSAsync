@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
 import { asSent, resolveQuoteTerms, type TermsFreeze } from "@/lib/quote-terms"
+import { quotePdfName } from "@/lib/content-disposition"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
 
@@ -181,7 +182,7 @@ async function sendFromConnection(
       })
       attachments.push({
         "@odata.type": "#microsoft.graph.fileAttachment",
-        name: `${quote.quoteNumber}${quote.version > 1 ? `-v${quote.version}` : ""}.pdf`,
+        name: quotePdfName(quote.quoteNumber, quote.version),
         contentType: "application/pdf",
         contentBytes: Buffer.from(pdfBuffer).toString("base64"),
       })
