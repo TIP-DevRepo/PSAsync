@@ -5,6 +5,7 @@ import { Button as HeroButton } from "@heroui/react"
 import { AcceptFlowModal } from "./AcceptFlowModal"
 import { formatValidUntil } from "@/lib/quote-expiry"
 import { PORTAL_COMMENT_MAX, PORTAL_DECLINE_REASON_MAX, PORTAL_QUANTITY_MAX } from "@/lib/portal-input"
+import { toast } from "@/lib/toast"
 
 const pdfButtonStyle = `
   .pdf-download-btn {
@@ -156,6 +157,7 @@ export default function PortalPage({
   const [rateLimited, setRateLimited] = useState<string | null>(null)
   // An internal preview link opened without a signed in session (401)
   const [signInRequired, setSignInRequired] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [showDeclineForm, setShowDeclineForm] = useState(false)
   const [declineReason, setDeclineReason] = useState("")
   const [comment, setComment] = useState("")
@@ -399,6 +401,35 @@ export default function PortalPage({
     setSubmitting(false)
   }
 
+  // Fetched rather than linked, so a link that has been used too often (429)
+  // shows a short note instead of an error page
+  async function handleDownloadPdf() {
+    setDownloadingPdf(true)
+    try {
+      const res = await fetch(`/api/portal/${token}/pdf`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 429) toast.warning("Please wait before downloading again", data.error)
+        else toast.error("Couldn't download the PDF", data.error || "Please try again.")
+        return
+      }
+      const blob = await res.blob()
+      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] || "quote.pdf"
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = name
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      toast.error("Couldn't download the PDF", "Please try again.")
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
   async function handleComment() {
     if (!comment.trim()) return
     setSubmitting(true)
@@ -516,9 +547,9 @@ export default function PortalPage({
             )}
           </div>
           
-            <a href={`/api/portal/${token}/pdf`} target="_blank" rel="noopener noreferrer" className="pdf-download-btn">
-            Download PDF
-          </a>
+            <button type="button" onClick={handleDownloadPdf} disabled={downloadingPdf} className="pdf-download-btn">
+            {downloadingPdf ? "Preparing PDF..." : "Download PDF"}
+          </button>
         </div>
 
         {quote.introText && (
