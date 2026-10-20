@@ -435,28 +435,28 @@ function QuotesTab() {
         Array.from(selected).map((id) => fetch(`/api/quotes/${id}`, { method: "DELETE" }))
       )
       toast.success(`Deleted ${count} quote${count === 1 ? "" : "s"}`)
-    } else if (bulkAction === "mark_lost") {
-      await Promise.all(
+    } else if (bulkAction === "mark_lost" || bulkAction === "mark_expired") {
+      // Each quote is changed on its own, so one refusal never stops the rest
+      const status = bulkAction === "mark_lost" ? "DECLINED" : "EXPIRED"
+      const label = bulkAction === "mark_lost" ? "Lost" : "Expired"
+      const results = await Promise.all(
         Array.from(selected).map((id) =>
           fetch(`/api/quotes/${id}/status`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "DECLINED" }),
-          })
+            body: JSON.stringify({ status }),
+          }).then((res) => res.ok, () => false)
         )
       )
-      toast.success(`Marked ${count} quote${count === 1 ? "" : "s"} as Lost`)
-    } else if (bulkAction === "mark_expired") {
-      await Promise.all(
-        Array.from(selected).map((id) =>
-          fetch(`/api/quotes/${id}/status`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "EXPIRED" }),
-          })
+      const changed = results.filter(Boolean).length
+      const refused = count - changed
+      if (changed > 0) toast.success(`Marked ${changed} quote${changed === 1 ? "" : "s"} as ${label}`)
+      if (refused > 0) {
+        toast.warning(
+          `${refused} quote${refused === 1 ? "" : "s"} couldn't be marked as ${label}`,
+          "Open each one to see why."
         )
-      )
-      toast.success(`Marked ${count} quote${count === 1 ? "" : "s"} as Expired`)
+      }
     }
 
     setSelected(new Set())
@@ -937,11 +937,16 @@ function QuoteActionsMenu({
   }
 
   async function handleChangeStatus(status: string) {
-    await fetch(`/api/quotes/${quote.id}/status`, {
+    const res = await fetch(`/api/quotes/${quote.id}/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     })
+    if (!res.ok) {
+      // For example a quote that needs approval before it can go out
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't change the status", data.error)
+    }
     setOpen(false)
     setSubPanel(null)
     onUpdated()

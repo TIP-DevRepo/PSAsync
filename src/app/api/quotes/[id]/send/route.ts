@@ -5,6 +5,7 @@ import { withoutPortalTokensOrNull, withoutPortalTokens } from "@/lib/portal-tok
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
+import { loadMatchingWorkflows } from "@/lib/approval-workflows"
 
 export async function POST(
   req: NextRequest,
@@ -32,28 +33,8 @@ export async function POST(
   }
 
   // ─── Evaluate active approval workflows against this quote ──────────────
-  const workflows = await prisma.approvalWorkflow.findMany({
-    where: { companyId, active: true },
-  })
-
-  const total = quote.lineItems.reduce(
-    (sum, li) => sum + li.unitPrice * li.quantity * (1 - li.discount / 100),
-    0
-  )
-  const maxDiscount = quote.lineItems.reduce((max, li) => Math.max(max, li.discount), 0)
-
-  const matched = workflows.filter((w) => {
-    if (w.triggerType === "TOTAL_THRESHOLD") {
-      return w.thresholdValue != null && total >= w.thresholdValue
-    }
-    if (w.triggerType === "DISCOUNT_THRESHOLD") {
-      return w.thresholdValue != null && maxDiscount >= w.thresholdValue
-    }
-    if (w.triggerType === "SPECIFIC_USER") {
-      return w.triggerUserId === quote.userId
-    }
-    return false
-  })
+  // (src/lib/approval-workflows.ts, the same rule as send-email and status)
+  const matched = await loadMatchingWorkflows(companyId, quote)
 
   if (matched.length > 0) {
     // Needs sign-off — create one pending approval per matched workflow and

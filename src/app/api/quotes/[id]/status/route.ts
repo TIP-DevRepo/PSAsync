@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { withoutPortalTokens } from "@/lib/portal-token"
-import { notFound, requireAccess } from "@/lib/api-access"
+import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
-import { applyTermsFreeze, isFrozenStatus, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
+import { applyTermsFreeze, isFrozenStatus, loadCompanyDefaultTerms, termsFreezeFor, UNFROZEN_STATUSES } from "@/lib/quote-terms"
+import { approvalsStillGranted, loadMatchingWorkflows } from "@/lib/approval-workflows"
+
+// The statuses that put a quote in front of the customer (or record their
+// acceptance), so reaching them from DRAFT or PENDING_APPROVAL needs every
+// matching approval workflow approved
+const APPROVAL_CHECKED_STATUSES = ["SENT", "VIEWED", "ACCEPTED"]
+const NEEDS_APPROVAL_MESSAGE =
+  "This quote needs approval before it can be changed to this status. Use Send Quote to request approval."
 
 const VALID_STATUSES = [
   "DRAFT",
@@ -34,8 +42,23 @@ export async function POST(
     return NextResponse.json({ error: "Invalid status" }, { status: 400 })
   }
 
-  const quote = await prisma.quote.findFirst({ where: viewableQuoteWhere(ctx, id) })
+  const quote = await prisma.quote.findFirst({
+    where: viewableQuoteWhere(ctx, id),
+    include: { lineItems: { select: { id: true, quantity: true, unitPrice: true, discount: true } } },
+  })
   if (!quote) return notFound()
+
+  // A quote that hasn't gone out yet only reaches the customer facing
+  // statuses through the approval workflows, the same check send and
+  // send-email run (src/lib/approval-workflows.ts). DECLINED, EXPIRED, and
+  // moves from a status already past DRAFT and PENDING_APPROVAL are not
+  // checked.
+  if (UNFROZEN_STATUSES.includes(quote.status) && APPROVAL_CHECKED_STATUSES.includes(body.status)) {
+    const matched = await loadMatchingWorkflows(companyId, quote)
+    if (matched.length > 0 && !(await approvalsStillGranted(quote, matched))) {
+      return apiError(400, NEEDS_APPROVAL_MESSAGE, "APPROVAL_REQUIRED")
+    }
+  }
 
   const data: Record<string, unknown> = { status: body.status }
   if (body.status === "SENT" && !quote.sentAt) data.sentAt = new Date()

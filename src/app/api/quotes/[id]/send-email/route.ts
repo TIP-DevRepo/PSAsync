@@ -3,7 +3,7 @@ import { sendQuoteEmail } from "@/lib/send-quote-email"
 import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { withoutPortalTokens } from "@/lib/portal-token"
-import { approvalFingerprint, type HeldEmail } from "@/lib/quote-approval"
+import { approvalsStillGranted, loadMatchingWorkflows } from "@/lib/approval-workflows"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { escapeHtmlWithBreaks } from "@/lib/html"
@@ -93,34 +93,13 @@ export async function POST(
   }
 
   // ─── Evaluate active approval workflows against this quote ──────────────
-  const workflows = await prisma.approvalWorkflow.findMany({
-    where: { companyId, active: true },
-  })
-
-  const total = quote.lineItems.reduce(
-    (sum, li) => sum + li.unitPrice * li.quantity * (1 - li.discount / 100),
-    0
-  )
-  const maxDiscount = quote.lineItems.reduce((max, li) => Math.max(max, li.discount), 0)
-
-  const matched = workflows.filter((w) => {
-    if (w.triggerType === "TOTAL_THRESHOLD") return w.thresholdValue != null && total >= w.thresholdValue
-    if (w.triggerType === "DISCOUNT_THRESHOLD") return w.thresholdValue != null && maxDiscount >= w.thresholdValue
-    if (w.triggerType === "SPECIFIC_USER") return w.triggerUserId === quote.userId
-    return false
-  })
+  // (src/lib/approval-workflows.ts, the same rule as send and status)
+  const matched = await loadMatchingWorkflows(companyId, quote)
 
   // Approvals already granted for this quote count, but only for an email
   // that was approved and then couldn't be sent, and only while nothing the
   // workflows look at has changed since. Anything else asks again.
-  const held = quote.pendingEmailPayload as HeldEmail | null
-  const alreadyApproved =
-    matched.length > 0 &&
-    !!held?.approvedFingerprint &&
-    held.approvedFingerprint === approvalFingerprint(quote.userId, quote.lineItems) &&
-    (await prisma.quoteApproval.count({
-      where: { quoteId: id, workflowId: { in: matched.map((w) => w.id) }, status: "APPROVED" },
-    })) === matched.length
+  const alreadyApproved = await approvalsStillGranted(quote, matched)
 
   if (matched.length > 0 && !alreadyApproved) {
     // Needs sign-off: hold the composed email and its sender until approved

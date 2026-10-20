@@ -3,41 +3,11 @@ import { prisma } from "@/lib/prisma"
 import { sendQuoteEmail } from "@/lib/send-quote-email"
 import { loadCompanyMailbox, sendAsNote, withNote } from "@/lib/quote-sender"
 import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
+import { approvalFingerprint, type HeldEmail } from "@/lib/approval-workflows"
 
-// The email composed in the Send Quote dialog, held on the quote
-// (pendingEmailPayload) while it waits for approval
-export interface HeldEmail {
-  to: string
-  cc: string | null
-  subject: string
-  bodyHtml: string
-  includePdf: boolean
-  // The rep's plain text message, so the dialog can show it again.
-  // Missing on emails held before it was stored.
-  message?: string
-  // The mailbox chosen when Send was clicked. Missing on emails held
-  // before the sender was stored.
-  connectionId?: string
-  sentByUserId?: string
-  sentByName?: string
-  // Set only when every approval was granted but the email couldn't be
-  // sent: why, and what the approvals were granted for
-  lastSendError?: string
-  approvedFingerprint?: string
-}
-
-// What the approval workflows look at (the owner, and each line item's
-// quantity, price, and discount), so approvals already granted can be
-// honored only while none of it has changed
-export function approvalFingerprint(
-  userId: string,
-  lineItems: { id: string; quantity: number; unitPrice: number; discount: number }[]
-): string {
-  const items = [...lineItems]
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .map((li) => [li.id, li.quantity, li.unitPrice, li.discount])
-  return JSON.stringify([userId, items])
-}
+// The held email and the fingerprint live with the workflow evaluation in
+// src/lib/approval-workflows.ts
+export { approvalFingerprint, type HeldEmail }
 
 // Records one approver's decision, only while it is still pending. False
 // when it was already decided (a double click, or a second request), so

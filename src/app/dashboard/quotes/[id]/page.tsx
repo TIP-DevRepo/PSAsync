@@ -446,13 +446,19 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
 
   async function handleChangeStatus(newStatus: string) {
     setChangingStatus(true)
-    await fetch(`/api/quotes/${id}/status`, {
+    const res = await fetch(`/api/quotes/${id}/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: newStatus }),
     })
     setChangingStatus(false)
-    toast.success(`Status updated to ${statusLabel(newStatus)}`)
+    if (res.ok) {
+      toast.success(`Status updated to ${statusLabel(newStatus)}`)
+    } else {
+      // For example a quote that needs approval before it can go out
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't change the status", data.error)
+    }
     loadQuote()
     loadVersions()
   }
