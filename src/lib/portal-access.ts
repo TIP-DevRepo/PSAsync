@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server"
 import type { QuoteStatus } from "@/generated/prisma"
+import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
+import { getEffectiveAccess } from "@/lib/permissions"
+import { checkAccess } from "@/lib/access-check"
+import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { isPastExpiry, PORTAL_EXPIRY_TIME_ZONE } from "@/lib/quote-expiry"
 import { getClientIp, isKnownBlocked, rateLimitedResponse, recordFailure } from "@/lib/rate-limit"
 
@@ -13,8 +17,11 @@ import { getClientIp, isKnownBlocked, rateLimitedResponse, recordFailure } from 
 // - The client token (accessToken) is what the customer gets. It opens a
 //   version that was actually sent, until the quote expires.
 // - The internal token (internalAccessToken) is the staff "open portal"
-//   preview of the newest version, drafts included. It never marks a quote
-//   viewed, never notifies anyone, ignores expiry, and refuses every action.
+//   preview of the newest version, drafts included. It only opens for a
+//   signed in user who may open the quote (internalPreviewViewer): no
+//   session answers 401 SIGN_IN_REQUIRED, anyone else the generic 404. It
+//   never marks a quote viewed, never notifies anyone, ignores expiry, and
+//   refuses every action.
 
 // A sent version the customer may open. DRAFT and PENDING_APPROVAL mean the
 // quote was pulled back (or never went out), so its link does not open.
@@ -182,6 +189,33 @@ async function findTokenQuote(token: string, allowInternal: boolean): Promise<{ 
   return { quote: newest ?? internal, kind: "internal" }
 }
 
+export const SIGN_IN_REQUIRED_MESSAGE = "Sign in to PSAsync to view this internal preview."
+
+export function signInRequiredResponse() {
+  return NextResponse.json({ error: SIGN_IN_REQUIRED_MESSAGE, code: "SIGN_IN_REQUIRED" }, { status: 401 })
+}
+
+// Who is opening an internal preview link: a signed in user (active, not
+// still on a temporary password) in the quote's own company who may open
+// that quote under the quote view rule (VQ: pages.quotes and their own,
+// everyone's with quotes.viewAllUsersQuotes, or one waiting on their
+// approval). Anyone else is "sign_in" (no usable session) or "not_allowed"
+// (answered like an unknown link).
+async function internalPreviewViewer(quote: StateRow): Promise<"allowed" | "sign_in" | "not_allowed"> {
+  const session = await auth()
+  const userId = session?.user?.id
+  if (!userId) return "sign_in"
+  // Null for a deactivated or deleted user
+  const access = await getEffectiveAccess(userId)
+  if (!access || access.mustChangePassword) return "sign_in"
+  if (access.companyId !== quote.companyId) return "not_allowed"
+
+  const viewer = { companyId: access.companyId, userId, access, can: (path: string) => checkAccess(access, path) }
+  if (!viewer.can("pages.quotes")) return "not_allowed"
+  const visible = await prisma.quote.count({ where: viewableQuoteWhere(viewer, quote.id) })
+  return visible === 1 ? "allowed" : "not_allowed"
+}
+
 export type PortalAccess =
   | {
       ok: true
@@ -229,6 +263,16 @@ export async function resolvePortalAccess(
   if (!found) return linkInvalidCounted(ip)
 
   const { quote, kind } = found
+
+  // The internal preview is staff only: a signed in user who may open the
+  // quote. These refusals never count toward the IP limit, since the token
+  // itself is real.
+  if (kind === "internal") {
+    const viewer = await internalPreviewViewer(quote)
+    if (viewer === "sign_in") return { ok: false, response: signInRequiredResponse() }
+    if (viewer === "not_allowed") return { ok: false, response: linkInvalidResponse() }
+  }
+
   const superseded = kind === "client" && isSupersededVersion(quote, await findActiveSentVersionId(quote))
   const decision = decidePortalAccess(quote, kind, use, options.now ?? new Date(), superseded)
   if (!decision.ok) {
