@@ -3,7 +3,7 @@ import { sendQuoteEmail } from "@/lib/send-quote-email"
 import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { withoutPortalTokens } from "@/lib/portal-token"
-import { approvalsStillGranted, loadMatchingWorkflows } from "@/lib/approval-workflows"
+import { approvalFingerprint, approvalsStillGranted, loadMatchingWorkflows } from "@/lib/approval-workflows"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { escapeHtmlWithBreaks } from "@/lib/html"
@@ -113,7 +113,12 @@ export async function POST(
       ),
       prisma.quote.update({
         where: quoteWhere(ctx, id),
-        data: { status: "PENDING_APPROVAL", pendingEmailPayload: emailPayload },
+        // What the approvals are requested for, checked again when the last
+        // one is granted (approvalsCoverQuote)
+        data: {
+          status: "PENDING_APPROVAL",
+          pendingEmailPayload: { ...emailPayload, requestedFingerprint: approvalFingerprint(quote.userId, quote.lineItems) },
+        },
       }),
     ])
 

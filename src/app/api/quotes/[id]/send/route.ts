@@ -5,7 +5,7 @@ import { withoutPortalTokensOrNull, withoutPortalTokens } from "@/lib/portal-tok
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
-import { loadMatchingWorkflows } from "@/lib/approval-workflows"
+import { approvalFingerprint, loadMatchingWorkflows } from "@/lib/approval-workflows"
 
 export async function POST(
   req: NextRequest,
@@ -48,8 +48,15 @@ export async function POST(
         })
       ),
       // No email goes with this send, so an email held earlier must not go
-      // out once it's approved
-      prisma.quote.update({ where: { id }, data: { status: "PENDING_APPROVAL", pendingEmailPayload: Prisma.JsonNull } }),
+      // out once it's approved. Only what the approvals are requested for is
+      // kept, checked again when the last one is granted (approvalsCoverQuote).
+      prisma.quote.update({
+        where: { id },
+        data: {
+          status: "PENDING_APPROVAL",
+          pendingEmailPayload: { requestedFingerprint: approvalFingerprint(quote.userId, quote.lineItems) },
+        },
+      }),
     ])
 
     const updated = await prisma.quote.findUnique({ where: { id } })

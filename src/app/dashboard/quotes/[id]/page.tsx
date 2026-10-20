@@ -63,7 +63,8 @@ interface QuoteDetail {
 }
 
 // The email composed in the Send Quote dialog and held on the quote. When
-// lastSendError is set, it was approved but couldn't be sent.
+// lastSendError is set, it was approved but couldn't be sent, or (with
+// approvalStale) the quote changed after approval was requested.
 interface HeldEmailView {
   to: string
   cc: string | null
@@ -72,6 +73,7 @@ interface HeldEmailView {
   includePdf: boolean
   connectionId?: string
   lastSendError?: string
+  approvalStale?: boolean
 }
 
 interface VersionSummary {
@@ -293,6 +295,9 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
     setDecidingId(null)
     if (!res.ok) {
       toast.error("Couldn't approve", data.error)
+    } else if (data.stale) {
+      // The quote changed after approval was requested, so it was not sent
+      toast.warning("Approved, but the quote was not sent", data.warning)
     } else if (data.warning) {
       // The approval stands even though the held email didn't go out
       toast.warning(
@@ -725,8 +730,17 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
       {quote.status === "DRAFT" && quote.pendingEmailPayload?.lastSendError && (
         <div className="rounded-lg border border-warning/30 bg-warning-bg p-4 flex items-center justify-between gap-4">
           <p className="text-sm text-warning">
-            This quote was approved, but its email could not be sent: {quote.pendingEmailPayload.lastSendError}. The email is
-            still waiting to be sent.
+            {quote.pendingEmailPayload.approvalStale ? (
+              <>
+                This quote changed after approval was requested, so it was not sent. Send it again to request approval
+                again. The email is still saved.
+              </>
+            ) : (
+              <>
+                This quote was approved, but its email could not be sent: {quote.pendingEmailPayload.lastSendError}. The email
+                is still waiting to be sent.
+              </>
+            )}
           </p>
           {canSendEmail && (
             <Button size="sm" onClick={() => setShowSendModal(true)}>

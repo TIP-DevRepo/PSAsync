@@ -23,10 +23,29 @@ export interface HeldEmail {
   connectionId?: string
   sentByUserId?: string
   sentByName?: string
-  // Set only when every approval was granted but the email couldn't be
-  // sent: why, and what the approvals were granted for
+  // Set only when the email was not sent after approval: why, so the
+  // quote page can show it and the Send dialog can start from the email
   lastSendError?: string
+  // Set only when every approval was granted but the email couldn't be
+  // sent: what the approvals were granted for
   approvedFingerprint?: string
+  // What the workflows looked at when approval was requested (see
+  // approvalFingerprint). Missing on quotes held before it was recorded.
+  requestedFingerprint?: string
+  // Set when the quote changed after approval was requested, so it was not
+  // sent and the owner must request approval again
+  approvalStale?: boolean
+}
+
+// What pendingEmailPayload holds: a held email, or (for a quote sent for
+// approval without an email, POST quotes/[id]/send) only the fingerprint
+// recorded when approval was requested
+export type HeldPayload = Partial<HeldEmail>
+
+// The held payload's email, or null when it only records a fingerprint
+export function heldEmailOf(payload: unknown): HeldEmail | null {
+  const held = payload as HeldPayload | null
+  return held && typeof held.to === "string" && held.to ? (held as HeldEmail) : null
 }
 
 export interface ApprovalLine {
@@ -83,8 +102,26 @@ export async function loadMatchingWorkflows(companyId: string, quote: Pick<Appro
 // matching workflow is APPROVED. Anything else asks again.
 export async function approvalsStillGranted(quote: ApprovalQuote, matched: WorkflowRule[]): Promise<boolean> {
   if (matched.length === 0) return false
-  const held = quote.pendingEmailPayload as Partial<HeldEmail> | null
+  const held = quote.pendingEmailPayload as HeldPayload | null
   if (!held?.approvedFingerprint || held.approvedFingerprint !== approvalFingerprint(quote.userId, quote.lineItems)) return false
+  const approved = await prisma.quoteApproval.count({
+    where: { quoteId: quote.id, workflowId: { in: matched.map((w) => w.id) }, status: "APPROVED" },
+  })
+  return approved === matched.length
+}
+
+// Whether the approvals granted still cover the quote as it is now, checked
+// when the last approval comes in, before anything is sent: nothing the
+// workflows look at changed since approval was requested (when that was
+// recorded), and every workflow that matches now is APPROVED, including
+// one that only started matching after the request
+export async function approvalsCoverQuote(companyId: string, quote: ApprovalQuote): Promise<boolean> {
+  const held = quote.pendingEmailPayload as HeldPayload | null
+  if (held?.requestedFingerprint && held.requestedFingerprint !== approvalFingerprint(quote.userId, quote.lineItems)) {
+    return false
+  }
+  const matched = await loadMatchingWorkflows(companyId, quote)
+  if (matched.length === 0) return true
   const approved = await prisma.quoteApproval.count({
     where: { quoteId: quote.id, workflowId: { in: matched.map((w) => w.id) }, status: "APPROVED" },
   })
