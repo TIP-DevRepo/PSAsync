@@ -14,7 +14,11 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const { ctx, response } = await requireAccess({ page: "quotes", message: "You do not have permission to view quotes" })
+  const { ctx, response } = await requireAccess({
+    // Quote Settings users maintain templates, so they read them too
+    permission: ["pages.quotes", "settingsSections.quotes"],
+    message: "You do not have permission to view quotes",
+  })
   if (response) return response
 
   const { id } = await params

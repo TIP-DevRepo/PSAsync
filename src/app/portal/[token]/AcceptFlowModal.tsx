@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect } from "react"
 import { Parisienne } from "next/font/google"
+import { PORTAL_NAME_MAX } from "@/lib/portal-input"
 
 const signatureFont = Parisienne({ weight: "400", subsets: ["latin"], display: "swap" })
 
@@ -172,6 +173,7 @@ export function AcceptFlowModal({
             <input
               type="text"
               value={signerName}
+              maxLength={PORTAL_NAME_MAX}
               onChange={(e) => setSignerName(e.target.value)}
               placeholder="Jane Smith"
               className="w-full rounded-md border px-3 py-2 text-sm"
@@ -194,6 +196,7 @@ export function AcceptFlowModal({
           <input
             type="text"
             value={clientPoNumber}
+            maxLength={PORTAL_NAME_MAX}
             onChange={(e) => setClientPoNumber(e.target.value)}
             className="w-full rounded-md border px-3 py-2 text-sm"
           />
@@ -219,6 +222,7 @@ export function AcceptFlowModal({
               <input
                 type="text"
                 value={shipContactName}
+                maxLength={PORTAL_NAME_MAX}
                 onChange={(e) => setShipContactName(e.target.value)}
                 placeholder="Point of Contact"
                 className="w-full rounded-md border px-3 py-2 text-sm"
@@ -226,6 +230,7 @@ export function AcceptFlowModal({
               <input
                 type="text"
                 value={shipAddress}
+                maxLength={PORTAL_NAME_MAX}
                 onChange={(e) => setShipAddress(e.target.value)}
                 placeholder="Address"
                 className="w-full rounded-md border px-3 py-2 text-sm"
@@ -234,6 +239,7 @@ export function AcceptFlowModal({
                 <input
                   type="text"
                   value={shipCity}
+                  maxLength={PORTAL_NAME_MAX}
                   onChange={(e) => setShipCity(e.target.value)}
                   placeholder="City"
                   className="rounded-md border px-3 py-2 text-sm"
@@ -241,6 +247,7 @@ export function AcceptFlowModal({
                 <input
                   type="text"
                   value={shipState}
+                  maxLength={PORTAL_NAME_MAX}
                   onChange={(e) => setShipState(e.target.value)}
                   placeholder="State"
                   className="rounded-md border px-3 py-2 text-sm"
@@ -248,6 +255,7 @@ export function AcceptFlowModal({
                 <input
                   type="text"
                   value={shipZip}
+                  maxLength={PORTAL_NAME_MAX}
                   onChange={(e) => setShipZip(e.target.value)}
                   placeholder="Zip"
                   className="rounded-md border px-3 py-2 text-sm"

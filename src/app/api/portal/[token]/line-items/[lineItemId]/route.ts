@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { prisma } from "@/lib/prisma"
 import { portalLineItemSelect } from "@/lib/portal-public"
+import { checkOptionalSelected, checkQuantity, readPortalBody } from "@/lib/portal-input"
 import { withDeadlockRetry } from "@/lib/withDeadlockRetry"
 
 export async function PATCH(
@@ -10,10 +11,10 @@ export async function PATCH(
 ) {
   const { token, lineItemId } = await params
   // Only while the quote is waiting on the customer and not expired
-  const access = await resolvePortalAccess(token, "act")
+  const access = await resolvePortalAccess(token, "act", { request: req })
   if (!access.ok) return access.response
 
-  const body = await req.json().catch(() => ({}))
+  const body = await readPortalBody(req)
 
   const quote = await prisma.quote.findUnique({ where: { id: access.quoteId } })
   if (!quote) return linkInvalidResponse()
@@ -27,30 +28,30 @@ export async function PATCH(
 
   // Toggling whether an optional item is included
   if (body.optionalSelected !== undefined) {
+    const selected = checkOptionalSelected(body.optionalSelected)
+    if (!selected.ok) return NextResponse.json({ error: selected.error }, { status: 400 })
     if (!lineItem.isOptional) {
       return NextResponse.json({ error: "This item is not optional" }, { status: 400 })
     }
     // Choice-group items act like radio buttons — you can't deselect one
     // without picking another, and selecting one clears its group-mates
-    if (lineItem.choiceGroup && !body.optionalSelected) {
+    if (lineItem.choiceGroup && !selected.value) {
       return NextResponse.json(
         { error: "Pick a different option instead — you can't leave this choice unselected." },
         { status: 400 }
       )
     }
-    data.optionalSelected = Boolean(body.optionalSelected)
+    data.optionalSelected = selected.value
   }
 
   // Changing quantity, only allowed on items explicitly marked adjustable
   if (body.quantity !== undefined) {
+    const qty = checkQuantity(body.quantity)
+    if (!qty.ok) return NextResponse.json({ error: qty.error }, { status: 400 })
     if (!lineItem.quantityAdjustable) {
       return NextResponse.json({ error: "This item's quantity can't be changed" }, { status: 400 })
     }
-    const qty = Number(body.quantity)
-    if (!Number.isFinite(qty) || qty < 0) {
-      return NextResponse.json({ error: "Invalid quantity" }, { status: 400 })
-    }
-    data.quantity = qty
+    data.quantity = qty.value
   }
 
   if (Object.keys(data).length === 0) {

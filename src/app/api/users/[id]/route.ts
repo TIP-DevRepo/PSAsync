@@ -2,7 +2,14 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 import { getUserRank } from "@/lib/permissions"
-import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
+import {
+  readRoleIdsFromBody,
+  loadRolesForAssignment,
+  setUserRoles,
+  assignsRoleAtOrAboveRank,
+  ROLE_AT_OR_ABOVE_RANK_MESSAGE,
+} from "@/lib/user-roles"
+import { ensureEveryoneRole } from "@/lib/everyone-role"
 
 export async function PATCH(
   req: NextRequest,
@@ -77,11 +84,8 @@ export async function PATCH(
     if (loaded.error !== undefined) {
       return NextResponse.json({ error: loaded.error }, { status: 400 })
     }
-    if (loaded.roles.some((role) => role.rank >= actorRank)) {
-      return NextResponse.json(
-        { error: "You can't assign a role at or above your own rank" },
-        { status: 403 }
-      )
+    if (assignsRoleAtOrAboveRank(loaded.roles, actorRank)) {
+      return NextResponse.json({ error: ROLE_AT_OR_ABOVE_RANK_MESSAGE }, { status: 403 })
     }
     newRoles = loaded.roles
   }
@@ -95,6 +99,11 @@ export async function PATCH(
   const willBeGlobalAdmin = newRoles ? newRoles.some((r) => r.isGlobalAdmin) : !!wasActiveGlobalAdmin
   const willBeActive = active !== undefined ? active : targetUser.active
   const losesGlobalAdmin = wasActiveGlobalAdmin && !(willBeGlobalAdmin && willBeActive)
+
+  // Every company keeps its one Everyone role. GET /api/roles no longer
+  // creates a missing one, so role assignment does, outside the
+  // transaction so a lost creation race can't abort it.
+  if (roleIds !== undefined) await ensureEveryoneRole(prisma, companyId)
 
   const result = await prisma.$transaction(async (tx) => {
     if (losesGlobalAdmin) {

@@ -4,6 +4,7 @@ import React, { useState, useEffect, useCallback, use } from "react"
 import { Button as HeroButton } from "@heroui/react"
 import { AcceptFlowModal } from "./AcceptFlowModal"
 import { formatValidUntil } from "@/lib/quote-expiry"
+import { PORTAL_COMMENT_MAX, PORTAL_DECLINE_REASON_MAX, PORTAL_QUANTITY_MAX } from "@/lib/portal-input"
 
 const pdfButtonStyle = `
   .pdf-download-btn {
@@ -53,6 +54,8 @@ interface PortalQuote {
   version: number
   status: string
   isInternalPreview: boolean
+  // A newer version of this quote was sent: view only, no actions
+  superseded: boolean
   title: string | null
   introText: string | null
   terms: string | null
@@ -149,6 +152,8 @@ export default function PortalPage({
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
   const [expired, setExpired] = useState<ExpiredBranding | null>(null)
+  // Too many links that didn't open from this network (429)
+  const [rateLimited, setRateLimited] = useState<string | null>(null)
   const [showDeclineForm, setShowDeclineForm] = useState(false)
   const [declineReason, setDeclineReason] = useState("")
   const [comment, setComment] = useState("")
@@ -165,14 +170,17 @@ export default function PortalPage({
   }, [token])
 
   // 404 is an invalid or replaced link, 410 an expired quote (branding
-  // only). Anything else that fails reads as an invalid link rather than
-  // an error screen.
+  // only), 429 too many attempts from this network. Anything else that
+  // fails reads as an invalid link rather than an error screen.
   const load = useCallback(() => {
     fetch(`/api/portal/${token}`)
       .then(async (res) => {
         const data = await res.json().catch(() => null)
         if (res.status === 410 && data?.company) {
           setExpired(data.company as ExpiredBranding)
+          setQuote(null)
+        } else if (res.status === 429) {
+          setRateLimited(typeof data?.error === "string" ? data.error : "Too many attempts from your network. Try again later.")
           setQuote(null)
         } else if (!res.ok || !data || !Array.isArray(data.lineItems)) {
           setNotFound(true)
@@ -192,6 +200,7 @@ export default function PortalPage({
 
   if (loading) return <div className="p-10 text-center text-zinc-500">Loading your quote...</div>
   if (expired) return <ExpiredQuote company={expired} />
+  if (rateLimited) return <div className="p-10 text-center text-zinc-500">{rateLimited}</div>
   if (notFound || !quote)
     return <div className="p-10 text-center text-zinc-500">This link is no longer valid.</div>
 
@@ -199,7 +208,7 @@ export default function PortalPage({
   const accent = quote.company.settings?.accentColor ?? "#2E86AB"
   const statusMeta = STATUS_LABELS[quote.status] ?? { label: quote.status, color: "bg-zinc-100 text-zinc-600" }
   const isLocked = quote.status === "ACCEPTED" || quote.status === "DECLINED" || quote.status === "EXPIRED"
-  const showClientActions = !quote.isInternalPreview && !isLocked
+  const showClientActions = !quote.isInternalPreview && !isLocked && !quote.superseded
 
   async function toggleOptional(li: LineItem) {
     setQuote((prev) =>
@@ -242,7 +251,10 @@ export default function PortalPage({
   }
 
   async function changeQuantity(li: LineItem, newQuantity: number) {
-    if (!Number.isFinite(newQuantity) || newQuantity < 0) return
+    if (!Number.isInteger(newQuantity) || newQuantity < 0 || newQuantity > PORTAL_QUANTITY_MAX) {
+      setActionMessage(`Quantity must be a whole number from 0 to ${PORTAL_QUANTITY_MAX}.`)
+      return
+    }
     setQuote((prev) =>
       prev
         ? {
@@ -318,6 +330,8 @@ export default function PortalPage({
               <input
                 type="number"
                 min={0}
+                max={PORTAL_QUANTITY_MAX}
+                step={1}
                 defaultValue={li.quantity}
                 onBlur={(e) => changeQuantity(li, Number(e.target.value))}
                 className="w-16 rounded border px-2 py-1 text-right text-xs"
@@ -447,6 +461,12 @@ export default function PortalPage({
       </div>
 
       <style>{pdfButtonStyle}</style>
+
+      {quote.superseded && !quote.isInternalPreview && (
+        <div className="bg-amber-100 border-b border-amber-300 text-amber-800 text-sm text-center py-2 font-medium">
+          A newer version of this quote is available. Please use the latest link you received.
+        </div>
+      )}
 
       {quote.isInternalPreview && (
         <div className="bg-amber-100 border-b border-amber-300 text-amber-800 text-sm text-center py-2 font-medium">
@@ -672,6 +692,7 @@ export default function PortalPage({
                 <textarea
                   value={declineReason}
                   onChange={(e) => setDeclineReason(e.target.value)}
+                  maxLength={PORTAL_DECLINE_REASON_MAX}
                   rows={3}
                   className="w-full rounded-md border px-3 py-2 text-sm"
                 />
@@ -730,6 +751,7 @@ export default function PortalPage({
               <textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
+                maxLength={PORTAL_COMMENT_MAX}
                 rows={2}
                 placeholder="Type your message here..."
                 className="w-full rounded-md border px-3 py-2 text-sm"

@@ -16,6 +16,12 @@ export const LOCKOUT_MINUTES = 15
 // left, e.g. "locked_15". Set in src/auth.ts, read by the login page.
 export const LOGIN_LOCKED_CODE_PREFIX = "locked_"
 
+// Sign in error code when too many failed sign ins came from the caller's
+// network (the IP rate limit in src/lib/rate-limit.ts): this prefix plus
+// the minutes left, e.g. "ipblocked_12". Separate from the per account
+// lockout above, which is unchanged.
+export const LOGIN_IP_BLOCKED_CODE_PREFIX = "ipblocked_"
+
 // Measures in UTF-8 bytes, not string length, because some characters
 // (accents, emoji) take more than one byte. TextEncoder works in both the
 // browser and Node, so the form and the API share this one helper.

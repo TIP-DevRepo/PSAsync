@@ -4,6 +4,7 @@ import { Sidebar, type PagePermissions } from "@/components/layout/sidebar"
 import { Topbar } from "@/components/layout/topbar"
 import { resolvePagePermissions } from "@/lib/permissions"
 import { AccessProvider } from "@/components/AccessProvider"
+import { SessionKeepAlive } from "@/components/SessionKeepAlive"
 
 export default async function DashboardLayout({
   children,
@@ -26,6 +27,7 @@ export default async function DashboardLayout({
 
   return (
     <div className="flex h-screen">
+      <SessionKeepAlive />
       {/* Sidebar — permanent on desktop, hidden on mobile */}
       <aside className="hidden w-64 border-r border-sidebar-border md:block">
         <Sidebar pagePermissions={pagePermissions} />

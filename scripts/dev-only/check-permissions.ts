@@ -3,8 +3,10 @@
 // Rep B (only the Rep role), Test Clerk B (only the Clerk role), Test Orders
 // B (only the Orders role), Test Templater B (only the Templater role), and
 // Test Everyone B (only the Everyone role, with no permissions), all made by
-// create-test-companies.ts, plus Test Sender B and Test Viewer B users this
-// script sets up itself, and checks every attempt in the ATTEMPTS list below.
+// create-test-companies.ts, plus Test Sender B, Test Viewer B, and Test
+// Manager B users this script sets up itself, and checks every attempt in
+// the ATTEMPTS list below. It also adds an ad hoc line to Test Orders B's
+// purchase order for the received flag checks and removes it at the end.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and only
 // talks to a server on this machine. Run from the repo root, with the dev
@@ -64,8 +66,10 @@ enforceDevGuard("check-permissions")
 //                Templater B), sender
 //                (Test Sender B: pages.quotes, quotes.sendEmail, and
 //                quotes.viewAllUsersQuotes, made by this script, with a
-//                mailbox of its own), or viewer (Test Viewer B: both order
-//                pages and both viewAll keys, no edit, made by this script)
+//                mailbox of its own), viewer (Test Viewer B: both order
+//                pages and both viewAll keys, no edit, made by this script),
+//                or manager (Test Manager B: settingsSections.users only,
+//                not a Global Admin, made by this script)
 //   kind         control: must succeed, and if it doesn't the harness is
 //                broken and nothing else runs. allowed: must succeed.
 //                refused: must be refused with exactly expect, and must not
@@ -82,7 +86,7 @@ enforceDevGuard("check-permissions")
 //   sharedMode   runs with Quote Settings set to send every quote from Test
 //                Admin B's mailbox ("admin") or Test Sender B's ("sender")
 
-type Actor = "admin" | "rep" | "clerk" | "everyone" | "sender" | "orders" | "templater" | "viewer"
+type Actor = "admin" | "rep" | "clerk" | "everyone" | "sender" | "orders" | "templater" | "viewer" | "manager"
 
 interface AttemptContext {
   b: SampleIds
@@ -92,6 +96,10 @@ interface AttemptContext {
   names: ReturnType<typeof testNames>
   senderMailboxId: string
   repUserId: string
+  // Test Manager B's own role, and the ad hoc purchase order line this
+  // script adds (both from the fixtures below)
+  managerRoleId: string
+  untrackedPoLineId: string
   // A made up id, for routes that check the permission before the record
   fakeId: string
 }
@@ -809,6 +817,41 @@ const ATTEMPTS: Attempt[] = [
   },
   { name: "SO and PO settings", actor: "templater", kind: "refused", method: "GET", path: () => "/api/so-po-settings", expect: 403, expectError: "sales order and purchase order settings" },
   { name: "Open a sales order", actor: "templater", kind: "refused", method: "GET", path: (c) => `/api/sales-orders/${c.b.salesOrderId}`, expect: 403, expectError: "view sales orders" },
+  // Quote Settings users read the templates they maintain
+  { name: "List quote templates", actor: "templater", kind: "allowed", method: "GET", path: () => "/api/quote-templates", expect: 200, contains: (c) => [c.b.templateId, c.fx.costTemplateId] },
+  { name: "Open a quote template", actor: "templater", kind: "allowed", method: "GET", path: (c) => `/api/quote-templates/${c.fx.costTemplateId}`, expect: 200, contains: (c) => [c.fx.costTemplateId], notContains: () => ['"cost"'] },
+
+  // ── Purchase order received flag: an inventory tracked line (the sample
+  // catalog item is Physical) is only received through Receive ──
+  { name: "Mark own tracked purchase order line received", actor: "orders", kind: "refused", method: "PATCH", path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}/line-items/${c.fx.ordersPoLineId}`, body: () => ({ received: true }), expect: 400, expectError: "Use Receive to add this item to inventory" },
+  { name: "Mark a tracked purchase order line received", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/purchase-orders/${c.b.purchaseOrderId}/line-items/${c.b.poLineId}`, body: () => ({ received: true }), expect: 400, expectError: "Use Receive to add this item to inventory" },
+  {
+    name: "Mark own untracked purchase order line received (then put back)",
+    actor: "orders",
+    kind: "allowed",
+    method: "PATCH",
+    path: (c) => `/api/purchase-orders/${c.fx.ordersPurchaseOrderId}/line-items/${c.untrackedPoLineId}`,
+    body: () => ({ received: true }),
+    expect: 200,
+    check: async (_json, c, prisma) => {
+      const row = await prisma.pOLineItem.findUnique({ where: { id: c.untrackedPoLineId }, select: { received: true } })
+      await prisma.pOLineItem.update({ where: { id: c.untrackedPoLineId }, data: { received: false } })
+      return row?.received === true ? null : "the line is not marked received"
+    },
+  },
+
+  // ── A manual purchase order may only name a sales order its creator can open ──
+  { name: "Manual purchase order naming the admin's sales order", actor: "orders", kind: "refused", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.b.vendorId, salesOrderId: c.b.salesOrderId }), expect: 400, expectError: "Invalid sales order" },
+  { name: "Manual purchase order naming another company's sales order", actor: "orders", kind: "refused", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.b.vendorId, salesOrderId: c.c.salesOrderId }), expect: 400, expectError: "Invalid sales order" },
+
+  // ── Invites: another company's email gets the generic answer, and a
+  // non Global Admin can't invite at or above their own rank ──
+  { name: "Invite another company's user email", actor: "admin", kind: "refused", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: testNames("C").adminEmail, tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "This email cannot be used" },
+  { name: "Invite an email that isn't an email", actor: "admin", kind: "refused", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: "not-an-email", tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "This email cannot be used" },
+  { name: "Invite an email already used in this company", actor: "admin", kind: "refused", method: "POST", path: () => "/api/users", body: (c) => ({ name: "Should Not Exist", email: c.names.repEmail, tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "A user with that email already exists" },
+  { name: "Invite into own role (same rank)", actor: "manager", kind: "refused", method: "POST", path: () => "/api/users", body: (c) => ({ name: "Should Not Exist", email: "should-not-exist-manager@example.test", tempPassword: "ShouldNotExist123", roleIds: [c.managerRoleId] }), expect: 403, expectError: "at or above your own rank" },
+  { name: "Invite into Global Admin", actor: "manager", kind: "refused", method: "POST", path: () => "/api/users", body: (c) => ({ name: "Should Not Exist", email: "should-not-exist-manager@example.test", tempPassword: "ShouldNotExist123", roleIds: [c.b.globalAdminRoleId] }), expect: 403, expectError: "at or above your own rank" },
+  { name: "Invite another company's user email", actor: "manager", kind: "refused", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: testNames("C").adminEmail, tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "This email cannot be used" },
 
   // ── Clients, catalog, vendors, company settings lists, and inventory ──
   // Test Everyone B and Test Rep B: refused every guarded route, allowed the open pickers
@@ -1030,6 +1073,50 @@ async function ensureViewerFixture(prisma: PrismaClient, b: SampleIds) {
   return { email: n.viewerEmail, password }
 }
 
+// Test Manager B inside Test Company B: manages users (Manage Users) but
+// is not a Global Admin, for the invite rank rule. Reset to the same known
+// state every run, password in memory only.
+async function ensureManagerFixture(prisma: PrismaClient, b: SampleIds) {
+  const n = testNames("B")
+  const companyId = b.companyId
+  const managerPermissions = { settingsSections: { users: true } }
+
+  const existingRole = await prisma.role.findFirst({ where: { companyId, name: n.managerRole } })
+  const role = existingRole
+    ? await prisma.role.update({ where: { id: existingRole.id }, data: { rank: 5, permissions: managerPermissions } })
+    : await prisma.role.create({ data: { companyId, name: n.managerRole, rank: 5, permissions: managerPermissions } })
+
+  const password = generatePassword(20)
+  const hashed = await bcrypt.hash(password, BCRYPT_COST)
+  const existing = await prisma.user.findUnique({ where: { email: n.managerEmail } })
+  if (existing && existing.companyId !== companyId) {
+    throw new HarnessBroken(`${n.managerEmail} belongs to a different company, refusing to change it`)
+  }
+  const reset = { password: hashed, active: true, mustChangePassword: false, loginFailedAttempts: 0, loginLockedUntil: null }
+  const user = existing
+    ? await prisma.user.update({ where: { id: existing.id }, data: { name: n.managerName, ...reset } })
+    : await prisma.user.create({ data: { companyId, name: n.managerName, email: n.managerEmail, ...reset } })
+  await setUserRoles(prisma, user.id, [role.id])
+
+  return { email: n.managerEmail, password, roleId: role.id }
+}
+
+// An ad hoc line (no catalog item, so not inventory tracked) on Test
+// Orders B's purchase order, not yet received. Removed at the end of the run.
+async function ensureUntrackedPoLine(prisma: PrismaClient, fx: PermissionFixtureIds) {
+  const name = testNames("B").untrackedPoLine
+  const existing = await prisma.pOLineItem.findFirst({ where: { purchaseOrderId: fx.ordersPurchaseOrderId, name }, select: { id: true } })
+  if (existing) {
+    await prisma.pOLineItem.update({ where: { id: existing.id }, data: { received: false, catalogItemId: null } })
+    return existing.id
+  }
+  const created = await prisma.pOLineItem.create({
+    data: { purchaseOrderId: fx.ordersPurchaseOrderId, name, quantity: 1, unitCost: 1, received: false },
+    select: { id: true },
+  })
+  return created.id
+}
+
 // A held email whose send fails must not strand the quote. Runs as Test
 // Admin B on its own sample quote, using the sample approval workflow
 // switched on for the duration, and puts everything back at the end.
@@ -1224,6 +1311,8 @@ async function main() {
       originalSettings?.quoteSendFromMode === "SPECIFIC" ? "SPECIFIC" : "CREATOR",
       originalSettings?.quoteSendFromConnectionId ?? null
     )
+    // The ad hoc purchase order line exists only for this run
+    await prisma.pOLineItem.deleteMany({ where: { purchaseOrderId: fx.ordersPurchaseOrderId, name: testNames("B").untrackedPoLine } })
     await prisma.$disconnect()
   }
 
@@ -1231,6 +1320,8 @@ async function main() {
     await setSenderMode("CREATOR", null)
     const sender = await ensureSenderFixture(prisma, b)
     const viewer = await ensureViewerFixture(prisma, b)
+    const manager = await ensureManagerFixture(prisma, b)
+    const untrackedPoLineId = await ensureUntrackedPoLine(prisma, fx)
     const names = testNames("B")
     const ctx: AttemptContext = {
       b,
@@ -1240,6 +1331,8 @@ async function main() {
       names,
       senderMailboxId: sender.mailboxId,
       repUserId: fx.repUserId,
+      managerRoleId: manager.roleId,
+      untrackedPoLineId,
       fakeId: "devonlynotarealid000000000",
     }
 
@@ -1253,6 +1346,7 @@ async function main() {
       orders: new Session("Test Orders B", baseUrl),
       templater: new Session("Test Templater B", baseUrl),
       viewer: new Session("Test Viewer B", baseUrl),
+      manager: new Session("Test Manager B", baseUrl),
     }
     await sessions.admin.signIn(names.adminEmail, passwords.admin as string)
     await sessions.rep.signIn(names.repEmail, passwords.rep as string)
@@ -1262,8 +1356,9 @@ async function main() {
     await sessions.orders.signIn(names.ordersEmail, passwords.orders as string)
     await sessions.templater.signIn(names.templaterEmail, passwords.templater as string)
     await sessions.viewer.signIn(viewer.email, viewer.password)
+    await sessions.manager.signIn(manager.email, manager.password)
     console.log(
-      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, and Test Viewer B.`
+      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, and Test Manager B.`
     )
 
     const ACTOR_LABEL: Record<Actor, string> = {
@@ -1275,6 +1370,7 @@ async function main() {
       orders: "Orders B",
       templater: "Templater B",
       viewer: "Viewer B",
+      manager: "Manager B",
     }
     const label = (a: Attempt) => `[${a.kind === "control" ? "control " : ""}${ACTOR_LABEL[a.actor]}] ${a.name}`
 

@@ -1471,3 +1471,23 @@ model DashboardWidget {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
+
+// ─── RATE LIMITS ──────────────────────────────────────────────────────────────
+// Fixed window counters for IP based rate limiting (src/lib/rate-limit.ts).
+// Only failures are counted (plus every call for keys with no failure
+// state). hashedIp is sha256 of the key and the IP, never the raw IP. Rows
+// older than two days are deleted by the limiter itself. Not company scoped.
+model RateLimit {
+  id          String   @id @default(cuid())
+  // What is limited, e.g. "login", "portal", "sso-lookup"
+  key         String
+  hashedIp    String
+  windowStart DateTime
+  count       Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([key, hashedIp, windowStart])
+  @@index([windowStart])
+  @@map("rate_limits")
+}

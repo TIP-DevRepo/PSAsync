@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteComment } from "@/lib/notify"
 import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
+import { PORTAL_COMMENT_MAX, readPortalBody, requiredText } from "@/lib/portal-input"
 import { prisma } from "@/lib/prisma"
 
 export async function GET(
@@ -9,7 +10,7 @@ export async function GET(
 ) {
   const { token } = await params
   // Staff may read the thread in the internal preview
-  const access = await resolvePortalAccess(token, "view", { allowInternal: true })
+  const access = await resolvePortalAccess(token, "view", { allowInternal: true, request: req })
   if (!access.ok) return access.response
   const activeId = access.quoteId
 
@@ -28,14 +29,14 @@ export async function POST(
 ) {
   const { token } = await params
   // Only while the quote is waiting on the customer and not expired
-  const access = await resolvePortalAccess(token, "act")
+  const access = await resolvePortalAccess(token, "act", { request: req })
   if (!access.ok) return access.response
   const activeId = access.quoteId
 
-  const body = await req.json().catch(() => ({}))
-  if (typeof body.message !== "string" || !body.message.trim()) {
-    return NextResponse.json({ error: "Message is required" }, { status: 400 })
-  }
+  const body = await readPortalBody(req)
+  const checked = requiredText(body.message, "Message", PORTAL_COMMENT_MAX)
+  if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 })
+  const message = checked.value
 
   const quote = await prisma.quote.findUnique({
     where: { id: activeId },
@@ -56,13 +57,13 @@ export async function POST(
       quoteId: activeId,
       authorType: "CLIENT",
       authorName,
-      message: body.message.trim(),
+      message,
     },
   })
 
   // Notify the rep that the client replied — fire-and-forget so a slow or
   // failed notification never blocks the client's comment from saving
-  notifyQuoteComment(activeId, authorName, body.message.trim()).catch((err) =>
+  notifyQuoteComment(activeId, authorName, message).catch((err) =>
     console.error("notifyQuoteComment failed:", err)
   )
 

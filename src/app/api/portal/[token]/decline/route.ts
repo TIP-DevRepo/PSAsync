@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteEvent } from "@/lib/notify"
 import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
+import { optionalText, PORTAL_DECLINE_REASON_MAX, readPortalBody } from "@/lib/portal-input"
 import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
 
@@ -11,10 +12,12 @@ export async function POST(
   const { token } = await params
   // Only while the quote is waiting on the customer (SENT or VIEWED) and
   // not expired; anything else is refused here
-  const access = await resolvePortalAccess(token, "act")
+  const access = await resolvePortalAccess(token, "act", { request: req })
   if (!access.ok) return access.response
 
-  const body = await req.json().catch(() => ({}))
+  const body = await readPortalBody(req)
+  const reason = optionalText(body.reason, "Decline reason", PORTAL_DECLINE_REASON_MAX)
+  if (!reason.ok) return NextResponse.json({ error: reason.error }, { status: 400 })
 
   const quote = await prisma.quote.findUnique({ where: { id: access.quoteId } })
   if (!quote) return linkInvalidResponse()
@@ -24,7 +27,7 @@ export async function POST(
     data: {
       status: "DECLINED",
       declinedAt: new Date(),
-      declineReason: body.reason || null,
+      declineReason: reason.value ?? null,
     },
     select: portalQuoteSelect,
   })

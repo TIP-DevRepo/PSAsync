@@ -44,6 +44,16 @@ export async function loadRolesForAssignment(
   return { roles: roles.map(({ id, name, rank, isGlobalAdmin }) => ({ id, name, rank, isGlobalAdmin })) }
 }
 
+// The rank rule for handing out roles, shared by inviting a user (POST
+// /api/users) and changing a user's roles (PATCH /api/users/[id]): every
+// role must sit below the actor's own rank (getUserRank). A Global Admin's
+// rank is the highest possible, so they can assign any role.
+export function assignsRoleAtOrAboveRank(roles: { rank: number }[], actorRank: number): boolean {
+  return roles.some((role) => role.rank >= actorRank)
+}
+
+export const ROLE_AT_OR_ABOVE_RANK_MESSAGE = "You can't assign a role at or above your own rank"
+
 // Replaces a user's full set of assigned roles with roleIds, then keeps the
 // legacy User.roleId column in sync. Callers are responsible for validating
 // the roles first (same company, rank rules, never the Everyone role).

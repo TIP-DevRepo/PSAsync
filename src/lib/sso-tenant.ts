@@ -5,19 +5,25 @@
 // organizations, consumers) would accept accounts from any directory.
 export const TENANT_GUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
-// The tid claim from an id token's payload, or null when it can't be read.
-// The signature is not checked: the token comes straight from Microsoft's
-// token endpoint over TLS in the same request, never from the browser.
-export function readIdTokenTenant(idToken: unknown): string | null {
+// An id token's payload, or null when it can't be read. The signature is
+// not checked: the token comes straight from Microsoft's token endpoint
+// over TLS in the same request, never from the browser.
+export function readIdTokenPayload(idToken: unknown): Record<string, unknown> | null {
   if (typeof idToken !== "string") return null
   const parts = idToken.split(".")
   if (parts.length < 2) return null
   try {
     const payload = JSON.parse(Buffer.from(parts[1], "base64url").toString("utf8"))
-    return typeof payload?.tid === "string" && payload.tid ? payload.tid : null
+    return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : null
   } catch {
     return null
   }
+}
+
+// The tid claim from an id token's payload, or null when it can't be read
+export function readIdTokenTenant(idToken: unknown): string | null {
+  const tid = readIdTokenPayload(idToken)?.tid
+  return typeof tid === "string" && tid ? tid : null
 }
 
 export type TenantCheck = "match" | "mismatch" | "skipped"

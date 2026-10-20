@@ -3,6 +3,7 @@ import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 import { getUserRank } from "@/lib/permissions"
 import { getRegularRolesInOrder, applyRegularRoleOrder } from "@/lib/role-order"
+import { ensureEveryoneRole } from "@/lib/everyone-role"
 
 // Saves a new rank order from the drag to reorder list in Roles &
 // Permissions. The body is every regular role id (not Global Admin or
@@ -33,6 +34,10 @@ export async function PUT(req: NextRequest) {
   }
 
   const actorRank = await getUserRank(ctx.userId)
+
+  // The renumbering keeps Everyone pinned below every regular role, so
+  // make sure it exists first (GET /api/roles no longer creates it)
+  await ensureEveryoneRole(prisma, companyId)
 
   const result = await prisma.$transaction(async (tx) => {
     const current = await getRegularRolesInOrder(tx, companyId)

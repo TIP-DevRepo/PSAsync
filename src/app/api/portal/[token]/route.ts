@@ -15,7 +15,7 @@ export async function GET(
 ) {
   const { token } = await params
 
-  const access = await resolvePortalAccess(token, "view", { allowInternal: true })
+  const access = await resolvePortalAccess(token, "view", { allowInternal: true, request: req })
   if (!access.ok) {
     // An expired link shows only the company's branding. A quote still
     // waiting on the customer is recorded as expired the first time its
@@ -32,7 +32,7 @@ export async function GET(
     }
     return access.response
   }
-  const { quoteId: activeId, isInternal } = access
+  const { quoteId: activeId, isInternal, superseded } = access
 
   const quote = await prisma.quote.findUnique({
     where: { id: activeId },
@@ -44,7 +44,7 @@ export async function GET(
   // The internal preview never changes the quote: viewing it must never
   // mark it viewed or notify the owner the way a real client visit does
   if (isInternal) {
-    return NextResponse.json(toPortalQuote(quote, true))
+    return NextResponse.json({ ...toPortalQuote(quote, true), superseded: false })
   }
 
   if (quote.status === "SENT") {
@@ -62,5 +62,7 @@ export async function GET(
     )
   }
 
-  return NextResponse.json(toPortalQuote(quote, false))
+  // superseded: a newer version was sent, so the page shows a notice and
+  // hides Accept, Decline, and the message box
+  return NextResponse.json({ ...toPortalQuote(quote, false), superseded })
 }
