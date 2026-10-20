@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { uploadFileToS3 } from "@/lib/s3"
+import { deleteStoredObject, readUpload, storeUpload } from "@/lib/uploads"
 import { prisma } from "@/lib/prisma"
-import { requireAccess } from "@/lib/api-access"
+import { apiError, requireAccess } from "@/lib/api-access"
 
 export async function POST(req: NextRequest) {
   const { ctx, response } = await requireAccess({
@@ -10,22 +10,35 @@ export async function POST(req: NextRequest) {
   })
   if (response) return response
 
-  const formData = await req.formData()
-  const file = formData.get("file") as File | null
+  const formData = await req.formData().catch(() => null)
+  if (!formData) return apiError(400, "No file provided")
   // "primary" (default) or "secondary" — which logo slot this upload fills
   const slot = (formData.get("slot") as string | null) === "secondary" ? "secondary" : "primary"
 
-  if (!file) {
-    return NextResponse.json({ error: "No file provided" }, { status: 400 })
-  }
+  // PNG, JPG, or WebP up to 2 MB, checked by content. Stored in the same
+  // flat logos folder as before, so the bucket policy for it still applies.
+  const { file, response: rejected } = await readUpload(formData, "LOGO")
+  if (rejected) return rejected
 
-  const buffer = Buffer.from(await file.arrayBuffer())
-  const logoUrl = await uploadFileToS3(buffer, file.name, file.type)
+  const logoUrl = await storeUpload(file, { folder: "logos", profile: "LOGO", namePrefix: `${ctx.companyId}-` })
+
+  const before = await prisma.company.findUnique({
+    where: { id: ctx.companyId },
+    select: { logoUrl: true, secondaryLogoUrl: true },
+  })
 
   await prisma.company.update({
     where: { id: ctx.companyId },
     data: slot === "secondary" ? { secondaryLogoUrl: logoUrl } : { logoUrl },
   })
+
+  // The replaced logo's file, best effort once the new one is saved. Kept
+  // when the other slot still shows the same file.
+  const replaced = slot === "secondary" ? before?.secondaryLogoUrl : before?.logoUrl
+  const otherSlot = slot === "secondary" ? before?.logoUrl : before?.secondaryLogoUrl
+  if (replaced && replaced !== logoUrl && replaced !== otherSlot) {
+    await deleteStoredObject(replaced, "logos/")
+  }
 
   return NextResponse.json({ logoUrl, slot })
 }

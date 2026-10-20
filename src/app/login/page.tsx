@@ -4,7 +4,13 @@ import { useState, Suspense } from "react"
 import { signIn } from "next-auth/react"
 import { useSearchParams } from "next/navigation"
 import dynamic from "next/dynamic"
-import { LOGIN_LOCKED_CODE_PREFIX } from "@/lib/password-rules"
+import { LOGIN_LOCKED_CODE_PREFIX, LOGIN_IP_BLOCKED_CODE_PREFIX } from "@/lib/password-rules"
+
+// Same wording as the API's 429 (rateLimitedMessage in src/lib/rate-limit.ts,
+// which is server only)
+function networkBlockedMessage(minutes: number) {
+  return `Too many attempts from your network. Try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`
+}
 
 const Lightfall = dynamic(() => import("@/components/effects/Lightfall"), { ssr: false })
 
@@ -40,6 +46,7 @@ function LoginPage() {
     could_not_read_profile: "Couldn't read your Microsoft profile. Please try again.",
     no_email_on_account: "Your Microsoft account doesn't have an email address PSAsync can use.",
     wrong_tenant: "That Microsoft account belongs to a different organization. Sign in with your company's Microsoft account.",
+    account_already_linked: "That Microsoft account can't be linked to this PSAsync account. Contact your administrator.",
   }
 
   async function handleEmailContinue(e: React.FormEvent) {
@@ -52,7 +59,14 @@ function LoginPage() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ email }),
     })
-    const data = await res.json()
+    const data = await res.json().catch(() => ({}))
+
+    if (res.status === 429) {
+      const seconds = Number(res.headers.get("Retry-After")) || 60
+      setError(networkBlockedMessage(Math.max(1, Math.ceil(seconds / 60))))
+      setLoading(false)
+      return
+    }
 
     if (data.ssoRequired) {
       window.location.href = `/api/sso/start?email=${encodeURIComponent(email)}`
@@ -90,7 +104,13 @@ function LoginPage() {
       const lockedMinutes = result.code?.startsWith(LOGIN_LOCKED_CODE_PREFIX)
         ? parseInt(result.code.slice(LOGIN_LOCKED_CODE_PREFIX.length), 10)
         : NaN
-      if (lockedMinutes > 0) {
+      // Too many failed sign ins from this network (the IP rate limit)
+      const ipBlockedMinutes = result.code?.startsWith(LOGIN_IP_BLOCKED_CODE_PREFIX)
+        ? parseInt(result.code.slice(LOGIN_IP_BLOCKED_CODE_PREFIX.length), 10)
+        : NaN
+      if (ipBlockedMinutes > 0) {
+        setError(networkBlockedMessage(ipBlockedMinutes))
+      } else if (lockedMinutes > 0) {
         setError(
           `Too many sign in attempts. Try again in ${lockedMinutes} ${lockedMinutes === 1 ? "minute" : "minutes"} or contact your administrator.`
         )

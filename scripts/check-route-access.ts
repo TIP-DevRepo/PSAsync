@@ -15,6 +15,9 @@ import { join, relative, sep } from "node:path"
 // public, so only add one that must be.
 const PUBLIC_ROUTES = [
   "auth/[...nextauth]",
+  // Browsers post CSP violation reports without credentials. It stores
+  // nothing, logs one line, and is IP rate limited (src/lib/rate-limit.ts).
+  "csp-report",
   "portal/[token]",
   "portal/[token]/accept",
   "portal/[token]/comments",

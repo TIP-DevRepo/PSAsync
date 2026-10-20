@@ -307,12 +307,12 @@ export function loadViewablePurchaseOrder(ctx: OrderViewer, purchaseOrderId: str
 
 // Returns the line item's own purchaseOrderId, verified against the URL's
 // purchase order, the caller's company, and the VPO check, for follow up
-// queries to use
+// queries to use. Also selects what isInventoryTrackedLine needs.
 export function loadPurchaseOrderLineItem(ctx: OrderViewer, purchaseOrderId: string, lineItemId: string) {
   if (!ctx.can("pages.purchaseOrders")) return Promise.resolve(null)
   return prisma.pOLineItem.findFirst({
     where: { id: lineItemId, purchaseOrderId, purchaseOrder: viewablePurchaseOrderWhere(ctx, purchaseOrderId) },
-    select: { id: true, purchaseOrderId: true },
+    select: { id: true, purchaseOrderId: true, catalogItemId: true, catalogItem: { select: { type: true } } },
   })
 }
 
@@ -374,6 +374,10 @@ export interface BodyRefs {
   companyUserId?: unknown
   customFieldId?: unknown
   salesOrderId?: unknown
+  // A sales order the caller may open (the VSO rule), for a body that
+  // links to one. Needs a ctx with userId and can; without them it never
+  // passes.
+  viewableSalesOrderId?: unknown
   // Contact tags
   tagIds?: unknown
   // Containers
@@ -398,6 +402,7 @@ const REF_LABELS: Record<RefKey, string> = {
   companyUserId: "user",
   customFieldId: "custom field",
   salesOrderId: "sales order",
+  viewableSalesOrderId: "sales order",
   tagIds: "tag",
   inventoryLocationId: "container",
 }
@@ -422,7 +427,11 @@ function readIds(value: unknown): string[] | null {
 
 // How many of the ids exist within the caller's company (and parent, where
 // the ref has one). Valid when that equals the number of distinct ids.
-function countRefs(ctx: Scope, key: RefKey, ids: string[], clientId?: string, vendorId?: string) {
+// Every caller passes its full AccessContext; only the keys that apply a
+// view rule (viewableSalesOrderId) read userId and can
+type RefScope = Scope & Partial<Pick<AccessContext, "userId" | "can">>
+
+function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string, vendorId?: string) {
   const [first] = ids
   const company = { companyId: ctx.companyId }
   switch (key) {
@@ -457,6 +466,12 @@ function countRefs(ctx: Scope, key: RefKey, ids: string[], clientId?: string, ve
       return prisma.inventoryCustomField.count({ where: whereIds(inventoryCustomFieldWhere(ctx, first), ids) })
     case "salesOrderId":
       return prisma.salesOrder.count({ where: whereIds(salesOrderWhere(ctx, first), ids) })
+    case "viewableSalesOrderId": {
+      const { userId, can } = ctx
+      if (!userId || !can) return Promise.resolve(0)
+      if (!can("pages.salesOrders")) return Promise.resolve(0)
+      return prisma.salesOrder.count({ where: whereIds(viewableSalesOrderWhere({ ...ctx, userId, can }, first), ids) })
+    }
     case "tagIds":
       return prisma.contactTag.count({ where: whereIds(contactTagWhere(ctx, first), ids) })
     case "inventoryLocationId":
@@ -472,7 +487,7 @@ function countRefs(ctx: Scope, key: RefKey, ids: string[], clientId?: string, ve
 //   if (invalid) return invalid
 // contactId and clientLocationId are tied to clientId, and vendorLocationId
 // to vendorId, when that parent is a single id.
-export async function assertRefs(ctx: Scope, refs: BodyRefs) {
+export async function assertRefs(ctx: RefScope, refs: BodyRefs) {
   const clientId = typeof refs.clientId === "string" && refs.clientId ? refs.clientId : undefined
   const vendorId = typeof refs.vendorId === "string" && refs.vendorId ? refs.vendorId : undefined
 

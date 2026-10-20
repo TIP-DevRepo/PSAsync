@@ -3,6 +3,7 @@ import {
   DistributorCredentials,
   DistributorSearchResult,
   TestConnectionResult,
+  connectionFailed,
 } from "./types"
 import XiSdkResellers from "xi_sdk_resellers"
 
@@ -84,7 +85,10 @@ async function getPriceAndAvailability(
       { priceAndAvailabilityRequest: requestBody },
       (error: unknown, data: PriceAndAvailabilityItem[]) => {
         if (error) {
-          console.error("Ingram Micro price/availability call failed:", error)
+          // Status only: the SDK's error object carries the request, its
+          // bearer token included, and the response body
+          const status = (error as { status?: unknown } | null)?.status
+          console.error(`Ingram Micro price/availability call failed${typeof status === "number" ? `: ${status}` : ""}`)
           resolve(map) // return empty map — search results still show, just without live price/stock
           return
         }
@@ -116,10 +120,7 @@ export const ingramMicroAdapter: DistributorAdapter = {
         status: `Connected (${sandboxMode ? "Sandbox" : "Production"})`,
       }
     } catch (err) {
-      return {
-        success: false,
-        status: `Connection failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-      }
+      return connectionFailed("Ingram Micro", err)
     }
   },
 

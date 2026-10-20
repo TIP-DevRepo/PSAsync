@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { withoutPortalTokens } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 
@@ -25,5 +26,5 @@ export async function POST(
     data: { flagged: !quote.flagged },
   })
 
-  return NextResponse.json(updated)
+  return NextResponse.json(withoutPortalTokens(updated))
 }

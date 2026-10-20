@@ -125,8 +125,10 @@ export async function POST(req: NextRequest) {
       sortOrder: idx,
     }))
   } else {
-    // A standalone PO can still name a Sales Order, which must be the company's
-    const invalid = await assertRefs(ctx, { salesOrderId })
+    // A standalone PO can still name a Sales Order, which must be one the
+    // creator may open (VSO). Any other id is the same 400 "Invalid sales
+    // order", so it never says whether the order exists.
+    const invalid = await assertRefs(ctx, { viewableSalesOrderId: salesOrderId })
     if (invalid) return invalid
   }
 

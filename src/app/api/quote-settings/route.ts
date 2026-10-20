@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { quoteSettingsSelect } from "@/lib/safe-selects"
 import { apiError, requireAccess } from "@/lib/api-access"
+import { termsForStorage, termsToDisplayHtml } from "@/lib/sanitize-terms"
+import { numberPrefixProblem } from "@/lib/number-prefix"
 
 // Any active user, since the quote pages read these defaults
 export async function GET() {
@@ -16,7 +18,7 @@ export async function GET() {
   return NextResponse.json({
     quotePrefix: settings?.quotePrefix ?? "Q",
     quoteExpiryDays: settings?.quoteExpiryDays ?? 30,
-    quoteTerms: settings?.quoteTerms ?? "",
+    quoteTerms: termsToDisplayHtml(settings?.quoteTerms) ?? "",
     quoteDefaultCc: settings?.quoteDefaultCc ?? "",
     quoteApprovalThreshold: settings?.quoteApprovalThreshold ?? null,
     quoteSendFromMode: settings?.quoteSendFromMode ?? "CREATOR",
@@ -52,6 +54,17 @@ export async function PATCH(req: NextRequest) {
     return apiError(400, "Approval threshold must be a number")
   }
 
+  // The prefix becomes part of every quote number and PDF name. Checked
+  // only when it changes, so a company whose stored prefix predates the
+  // rule can still save its other settings.
+  if (body.quotePrefix !== undefined) {
+    const stored = await prisma.companySettings.findUnique({ where: { companyId: ctx.companyId }, select: { quotePrefix: true } })
+    if (body.quotePrefix !== (stored?.quotePrefix ?? "Q")) {
+      const problem = numberPrefixProblem(body.quotePrefix, "Quote number")
+      if (problem) return apiError(400, problem)
+    }
+  }
+
   // If a specific mailbox was chosen, make sure it actually belongs to
   // this company before saving it
   if (body.quoteSendFromMode === "SPECIFIC" && body.quoteSendFromConnectionId) {
@@ -66,7 +79,7 @@ export async function PATCH(req: NextRequest) {
   const data = {
     quotePrefix: body.quotePrefix,
     quoteExpiryDays,
-    quoteTerms: body.quoteTerms || null,
+    quoteTerms: termsForStorage(body.quoteTerms),
     quoteDefaultCc: body.quoteDefaultCc || null,
     quoteApprovalThreshold: approvalThreshold ?? null,
     quoteSendFromMode: body.quoteSendFromMode === "SPECIFIC" ? "SPECIFIC" : "CREATOR",
@@ -80,5 +93,5 @@ export async function PATCH(req: NextRequest) {
     select: quoteSettingsSelect,
   })
 
-  return NextResponse.json(settings)
+  return NextResponse.json({ ...settings, quoteTerms: termsToDisplayHtml(settings.quoteTerms) })
 }

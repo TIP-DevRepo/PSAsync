@@ -3,6 +3,9 @@
 import React, { useState, useEffect, useCallback, use } from "react"
 import { Button as HeroButton } from "@heroui/react"
 import { AcceptFlowModal } from "./AcceptFlowModal"
+import { formatValidUntil } from "@/lib/quote-expiry"
+import { PORTAL_COMMENT_MAX, PORTAL_DECLINE_REASON_MAX, PORTAL_QUANTITY_MAX } from "@/lib/portal-input"
+import { toast } from "@/lib/toast"
 
 const pdfButtonStyle = `
   .pdf-download-btn {
@@ -52,6 +55,8 @@ interface PortalQuote {
   version: number
   status: string
   isInternalPreview: boolean
+  // A newer version of this quote was sent: view only, no actions
+  superseded: boolean
   title: string | null
   introText: string | null
   terms: string | null
@@ -79,6 +84,39 @@ interface PortalQuote {
 }
 
 const NO_SECTION = "__no_section__"
+
+// What an expired link returns instead of the quote: the company's public
+// branding only (GET /api/portal/[token] answers 410 QUOTE_EXPIRED)
+interface ExpiredBranding {
+  name: string
+  logoUrl: string | null
+  secondaryLogoUrl: string | null
+  primaryColor: string | null
+  accentColor: string | null
+}
+
+function ExpiredQuote({ company }: { company: ExpiredBranding }) {
+  const logo = company.secondaryLogoUrl || company.logoUrl
+  const who = company.name || "us"
+  return (
+    <div className="min-h-screen bg-zinc-50">
+      <div style={{ backgroundColor: company.primaryColor ?? "#1B3A5C" }} className="text-white">
+        <div className="max-w-3xl mx-auto px-6 py-8 flex items-center gap-3">
+          {logo && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={logo} alt={company.name} className="h-10 w-auto" />
+          )}
+          {company.name && <span className="text-lg font-semibold">{company.name}</span>}
+        </div>
+      </div>
+      <div className="max-w-3xl mx-auto px-6 py-10">
+        <div className="rounded-md border bg-white p-6 text-center text-zinc-700">
+          This quote has expired. Please contact {who} for an updated quote.
+        </div>
+      </div>
+    </div>
+  )
+}
 
 interface PortalComment {
   id: string
@@ -114,6 +152,12 @@ export default function PortalPage({
   const [quote, setQuote] = useState<PortalQuote | null>(null)
   const [loading, setLoading] = useState(true)
   const [notFound, setNotFound] = useState(false)
+  const [expired, setExpired] = useState<ExpiredBranding | null>(null)
+  // Too many links that didn't open from this network (429)
+  const [rateLimited, setRateLimited] = useState<string | null>(null)
+  // An internal preview link opened without a signed in session (401)
+  const [signInRequired, setSignInRequired] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [showDeclineForm, setShowDeclineForm] = useState(false)
   const [declineReason, setDeclineReason] = useState("")
   const [comment, setComment] = useState("")
@@ -124,23 +168,36 @@ export default function PortalPage({
 
   const loadComments = useCallback(() => {
     fetch(`/api/portal/${token}/comments`)
-      .then((res) => res.json())
+      .then((res) => (res.ok ? res.json() : []))
       .then((data) => Array.isArray(data) && setComments(data))
+      .catch(() => setComments([]))
   }, [token])
 
+  // 404 is an invalid or replaced link, 410 an expired quote (branding
+  // only), 429 too many attempts from this network. Anything else that
+  // fails reads as an invalid link rather than an error screen.
   const load = useCallback(() => {
     fetch(`/api/portal/${token}`)
-      .then((res) => {
-        if (res.status === 404) {
+      .then(async (res) => {
+        const data = await res.json().catch(() => null)
+        if (res.status === 410 && data?.company) {
+          setExpired(data.company as ExpiredBranding)
+          setQuote(null)
+        } else if (res.status === 429) {
+          setRateLimited(typeof data?.error === "string" ? data.error : "Too many attempts from your network. Try again later.")
+          setQuote(null)
+        } else if (res.status === 401 && data?.code === "SIGN_IN_REQUIRED") {
+          setSignInRequired(true)
+          setQuote(null)
+        } else if (!res.ok || !data || !Array.isArray(data.lineItems)) {
           setNotFound(true)
-          return null
+          setQuote(null)
+        } else {
+          setQuote(data)
         }
-        return res.json()
       })
-      .then((data) => {
-        if (data) setQuote(data)
-        setLoading(false)
-      })
+      .catch(() => setNotFound(true))
+      .finally(() => setLoading(false))
   }, [token])
 
   useEffect(() => {
@@ -149,14 +206,31 @@ export default function PortalPage({
   }, [load, loadComments])
 
   if (loading) return <div className="p-10 text-center text-zinc-500">Loading your quote...</div>
+  if (expired) return <ExpiredQuote company={expired} />
+  if (rateLimited) return <div className="p-10 text-center text-zinc-500">{rateLimited}</div>
+  // The login page always goes on to the dashboard after signing in, so the
+  // preview link is opened again from there
+  if (signInRequired)
+    return (
+      <div className="p-10 text-center text-zinc-500 space-y-4">
+        <p>Sign in to PSAsync to view this internal preview.</p>
+        <a
+          href="/login"
+          className="inline-block rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+        >
+          Sign in
+        </a>
+        <p className="text-xs">After signing in, open the preview link again.</p>
+      </div>
+    )
   if (notFound || !quote)
-    return <div className="p-10 text-center text-zinc-500">This quote link is invalid or no longer available.</div>
+    return <div className="p-10 text-center text-zinc-500">This link is no longer valid.</div>
 
   const primary = quote.company.settings?.primaryColor ?? "#1B3A5C"
   const accent = quote.company.settings?.accentColor ?? "#2E86AB"
   const statusMeta = STATUS_LABELS[quote.status] ?? { label: quote.status, color: "bg-zinc-100 text-zinc-600" }
   const isLocked = quote.status === "ACCEPTED" || quote.status === "DECLINED" || quote.status === "EXPIRED"
-  const showClientActions = !quote.isInternalPreview && !isLocked
+  const showClientActions = !quote.isInternalPreview && !isLocked && !quote.superseded
 
   async function toggleOptional(li: LineItem) {
     setQuote((prev) =>
@@ -169,11 +243,12 @@ export default function PortalPage({
           }
         : prev
     )
-    await fetch(`/api/portal/${token}/line-items/${li.id}`, {
+    const res = await fetch(`/api/portal/${token}/line-items/${li.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ optionalSelected: !li.optionalSelected }),
-    })
+    }).catch(() => null)
+    if (!res?.ok) load()
   }
 
   async function selectChoice(li: LineItem) {
@@ -189,15 +264,19 @@ export default function PortalPage({
           }
         : prev
     )
-    await fetch(`/api/portal/${token}/line-items/${li.id}`, {
+    const res = await fetch(`/api/portal/${token}/line-items/${li.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ optionalSelected: true }),
-    })
+    }).catch(() => null)
+    if (!res?.ok) load()
   }
 
   async function changeQuantity(li: LineItem, newQuantity: number) {
-    if (!Number.isFinite(newQuantity) || newQuantity < 0) return
+    if (!Number.isInteger(newQuantity) || newQuantity < 0 || newQuantity > PORTAL_QUANTITY_MAX) {
+      setActionMessage(`Quantity must be a whole number from 0 to ${PORTAL_QUANTITY_MAX}.`)
+      return
+    }
     setQuote((prev) =>
       prev
         ? {
@@ -208,11 +287,12 @@ export default function PortalPage({
           }
         : prev
     )
-    await fetch(`/api/portal/${token}/line-items/${li.id}`, {
+    const res = await fetch(`/api/portal/${token}/line-items/${li.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ quantity: newQuantity }),
-    })
+    }).catch(() => null)
+    if (!res?.ok) load()
   }
 
   function renderItemRow(li: LineItem) {
@@ -272,6 +352,8 @@ export default function PortalPage({
               <input
                 type="number"
                 min={0}
+                max={PORTAL_QUANTITY_MAX}
+                step={1}
                 defaultValue={li.quantity}
                 onBlur={(e) => changeQuantity(li, Number(e.target.value))}
                 className="w-16 rounded border px-2 py-1 text-right text-xs"
@@ -313,8 +395,39 @@ export default function PortalPage({
     } else {
       const data = await res.json().catch(() => ({}))
       setActionMessage(data.error || "Something went wrong.")
+      // Expired or no longer waiting on the customer: show its current state
+      if (res.status === 410 || res.status === 400) load()
     }
     setSubmitting(false)
+  }
+
+  // Fetched rather than linked, so a link that has been used too often (429)
+  // shows a short note instead of an error page
+  async function handleDownloadPdf() {
+    setDownloadingPdf(true)
+    try {
+      const res = await fetch(`/api/portal/${token}/pdf`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 429) toast.warning("Please wait before downloading again", data.error)
+        else toast.error("Couldn't download the PDF", data.error || "Please try again.")
+        return
+      }
+      const blob = await res.blob()
+      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] || "quote.pdf"
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = name
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      toast.error("Couldn't download the PDF", "Please try again.")
+    } finally {
+      setDownloadingPdf(false)
+    }
   }
 
   async function handleComment() {
@@ -328,6 +441,10 @@ export default function PortalPage({
     if (res.ok) {
       setComment("")
       loadComments()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setActionMessage(data.error || "Something went wrong.")
+      if (res.status === 410 || res.status === 400) load()
     }
     setSubmitting(false)
   }
@@ -396,6 +513,12 @@ export default function PortalPage({
 
       <style>{pdfButtonStyle}</style>
 
+      {quote.superseded && !quote.isInternalPreview && (
+        <div className="bg-amber-100 border-b border-amber-300 text-amber-800 text-sm text-center py-2 font-medium">
+          A newer version of this quote is available. Please use the latest link you received.
+        </div>
+      )}
+
       {quote.isInternalPreview && (
         <div className="bg-amber-100 border-b border-amber-300 text-amber-800 text-sm text-center py-2 font-medium">
           Internal Preview — this link always shows the latest draft and is never sent to the client. Accept/Decline/Comment actions are disabled here.
@@ -419,14 +542,14 @@ export default function PortalPage({
             </p>
             {quote.expiresAt && (
               <p className="text-sm text-zinc-500">
-                Valid until {new Date(quote.expiresAt).toLocaleDateString()}
+                Valid until {formatValidUntil(quote.expiresAt)}
               </p>
             )}
           </div>
           
-            <a href={`/api/portal/${token}/pdf`} target="_blank" rel="noopener noreferrer" className="pdf-download-btn">
-            Download PDF
-          </a>
+            <button type="button" onClick={handleDownloadPdf} disabled={downloadingPdf} className="pdf-download-btn">
+            {downloadingPdf ? "Preparing PDF..." : "Download PDF"}
+          </button>
         </div>
 
         {quote.introText && (
@@ -578,6 +701,8 @@ export default function PortalPage({
         {quote.terms && (
           <div className="rounded-md border bg-white p-4 text-xs text-zinc-500">
             <p className="font-medium text-zinc-700 mb-1">Terms &amp; Conditions</p>
+            {/* Only ever a terms string from an API response, sanitized on the server
+                (src/lib/sanitize-terms.ts). Never render anything else here. */}
             <div
               className="[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
               dangerouslySetInnerHTML={{ __html: quote.terms }}
@@ -618,6 +743,7 @@ export default function PortalPage({
                 <textarea
                   value={declineReason}
                   onChange={(e) => setDeclineReason(e.target.value)}
+                  maxLength={PORTAL_DECLINE_REASON_MAX}
                   rows={3}
                   className="w-full rounded-md border px-3 py-2 text-sm"
                 />
@@ -671,11 +797,12 @@ export default function PortalPage({
               </div>
             ))}
           </div>
-          {!quote.isInternalPreview && (
+          {showClientActions && (
             <>
               <textarea
                 value={comment}
                 onChange={(e) => setComment(e.target.value)}
+                maxLength={PORTAL_COMMENT_MAX}
                 rows={2}
                 placeholder="Type your message here..."
                 className="w-full rounded-md border px-3 py-2 text-sm"

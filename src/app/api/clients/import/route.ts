@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireAccess } from "@/lib/api-access"
+import { apiError, requireAccess } from "@/lib/api-access"
+import { IMPORT_BODY_MAX_BYTES, formatMegabytes } from "@/lib/upload-rules"
 
 const VALID_STATUSES = ["ACTIVE", "PROSPECT", "INACTIVE", "LOST"]
 
@@ -23,8 +24,26 @@ export async function POST(req: NextRequest) {
   if (response) return response
 
   const companyId = ctx.companyId
-  const body = await req.json()
-  const rows: Record<string, string>[] = body.rows ?? []
+
+  // The browser reads the CSV (at most 2 MB) and posts its rows as JSON.
+  // The body is capped here, and every row must be plain text values.
+  const tooLarge = `That import is larger than ${formatMegabytes(IMPORT_BODY_MAX_BYTES)}`
+  if (Number(req.headers.get("content-length")) > IMPORT_BODY_MAX_BYTES) return apiError(400, tooLarge)
+  const raw = await req.text()
+  if (Buffer.byteLength(raw) > IMPORT_BODY_MAX_BYTES) return apiError(400, tooLarge)
+  let body: { rows?: unknown }
+  try {
+    body = JSON.parse(raw)
+  } catch {
+    return apiError(400, "The import could not be read")
+  }
+  const rawRows = body?.rows ?? []
+  const isTextRow = (r: unknown) =>
+    !!r && typeof r === "object" && !Array.isArray(r) && Object.values(r).every((v) => typeof v === "string")
+  if (!Array.isArray(rawRows) || !rawRows.every(isTextRow)) {
+    return apiError(400, "The import could not be read")
+  }
+  const rows = rawRows as Record<string, string>[]
 
   if (rows.length === 0) {
     return NextResponse.json({ error: "No rows to import" }, { status: 400 })

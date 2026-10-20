@@ -3,6 +3,7 @@ import { requireAccess } from "@/lib/api-access"
 import { assertRefs, inventoryAssetWhere } from "@/lib/scoped-loaders"
 import { prisma } from "@/lib/prisma"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
+import { UserError, userFacingError } from "@/lib/user-error"
 
 export async function POST(
   req: NextRequest,
@@ -74,7 +75,7 @@ export async function POST(
       where: { id: containerId, companyId },
       select: { clientLocationId: true },
     })
-    if (!container) throw new Error("Container not found")
+    if (!container) throw new UserError("Container not found")
     return container.clientLocationId
   }
 
@@ -196,7 +197,8 @@ export async function POST(
 
     return NextResponse.json({ error: "Invalid checkout type" }, { status: 400 })
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Couldn't complete checkout"
-    return NextResponse.json({ error: message }, { status: 400 })
+    // Only our own UserError messages reach the user; anything else is logged
+    const { message, status } = userFacingError(err, "Inventory checkout")
+    return NextResponse.json({ error: message }, { status })
   }
 }

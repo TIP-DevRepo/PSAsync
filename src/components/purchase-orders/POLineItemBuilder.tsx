@@ -8,6 +8,7 @@ import { LineItemTable, MoveButtons, RowActionsRead, RowActionsEdit, CopyableCel
 import { AddLineItemModal } from "@/components/line-items/AddLineItemModal"
 import { ReceiveModal, type ReceivePayload, type ReceivableLineItem } from "@/components/purchase-orders/ReceiveModal"
 import type { LocationPathOption } from "@/lib/inventory/locationPaths"
+import { isInventoryTrackedLine } from "@/lib/po-receiving"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 export interface POLineItemBuilderItem {
@@ -44,13 +45,6 @@ function lineTotal(li: POLineItemBuilderItem) {
 
 function moneyOrDash(n: number | null | undefined) {
   return typeof n === "number" ? money(n) : "-"
-}
-
-// A line item only goes through Inventory receiving if it's linked to a
-// Catalog Item AND that item's type is Physical — Services, Subscriptions,
-// and Bundles have nothing to track a physical unit or stock quantity for.
-function isInventoryTracked(li: POLineItemBuilderItem): boolean {
-  return li.catalogItemId !== null && li.catalogItem?.type === "PHYSICAL"
 }
 
 const COLUMNS: ColumnDef[] = [
@@ -134,8 +128,8 @@ export function POLineItemBuilder({
 
   async function handleReceiveAll() {
     const unreceived = sorted.filter((li) => !li.received)
-    const simple = unreceived.filter((li) => !isInventoryTracked(li))
-    const tracked = unreceived.filter((li) => isInventoryTracked(li))
+    const simple = unreceived.filter((li) => !isInventoryTrackedLine(li))
+    const tracked = unreceived.filter((li) => isInventoryTrackedLine(li))
 
     // Non-inventory-tracked items (services, ad-hoc rows, etc) just get
     // marked received directly — there's nothing to collect for them.
@@ -147,7 +141,7 @@ export function POLineItemBuilder({
   }
 
   function renderSerialCell(li: POLineItemBuilderItem) {
-    if (!isInventoryTracked(li) || !li.catalogItem?.isSerialized) {
+    if (!isInventoryTrackedLine(li) || !li.catalogItem?.isSerialized) {
       return <span className="text-xs text-muted-foreground">—</span>
     }
     if (!li.received) {
@@ -178,7 +172,7 @@ export function POLineItemBuilder({
     if (!canReceive) {
       return <span className="text-xs text-muted-foreground">-</span>
     }
-    if (!isInventoryTracked(li)) {
+    if (!isInventoryTrackedLine(li)) {
       return (
         <input
           type="checkbox"

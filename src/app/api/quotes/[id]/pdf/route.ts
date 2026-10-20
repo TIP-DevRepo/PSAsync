@@ -2,9 +2,11 @@ import { NextRequest, NextResponse } from "next/server"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
+import { resolveQuoteTerms } from "@/lib/quote-terms"
 import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
+import { attachmentDisposition, quotePdfName } from "@/lib/content-disposition"
 
 // PDF rendering needs the Node.js runtime (not Edge) and more time than the
 // default serverless timeout allows
@@ -30,7 +32,7 @@ export async function GET(
         select: {
           name: true,
           logoUrl: true,
-          settings: { select: { primaryColor: true, accentColor: true } },
+          settings: { select: { primaryColor: true, accentColor: true, quoteTerms: true } },
         },
       },
       lineItems: { orderBy: { sortOrder: "asc" } },
@@ -39,7 +41,8 @@ export async function GET(
 
   if (!quote) return notFound()
 
-  const html = buildQuotePdfHtml(quote, {
+  const effectiveTerms = resolveQuoteTerms(quote, quote.company.settings?.quoteTerms)
+  const html = buildQuotePdfHtml({ ...quote, effectiveTerms }, {
     name: quote.company.name,
     logoUrl: quote.company.logoUrl,
     primaryColor: quote.company.settings?.primaryColor ?? "#1B3A5C",
@@ -70,9 +73,8 @@ export async function GET(
     return new NextResponse(Buffer.from(pdfBuffer), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${quote.quoteNumber}${
-          quote.version > 1 ? `-v${quote.version}` : ""
-        }.pdf"`,
+        // Built from the stored quote number, so through the shared helper
+        "Content-Disposition": attachmentDisposition(quotePdfName(quote.quoteNumber, quote.version), "quote.pdf"),
       },
     })
   } finally {

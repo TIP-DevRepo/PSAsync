@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
+import { withoutPortalTokensOrNull, withoutPortalTokens } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
+import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
+import { approvalFingerprint, loadMatchingWorkflows } from "@/lib/approval-workflows"
 
 export async function POST(
   req: NextRequest,
@@ -30,28 +33,8 @@ export async function POST(
   }
 
   // ─── Evaluate active approval workflows against this quote ──────────────
-  const workflows = await prisma.approvalWorkflow.findMany({
-    where: { companyId, active: true },
-  })
-
-  const total = quote.lineItems.reduce(
-    (sum, li) => sum + li.unitPrice * li.quantity * (1 - li.discount / 100),
-    0
-  )
-  const maxDiscount = quote.lineItems.reduce((max, li) => Math.max(max, li.discount), 0)
-
-  const matched = workflows.filter((w) => {
-    if (w.triggerType === "TOTAL_THRESHOLD") {
-      return w.thresholdValue != null && total >= w.thresholdValue
-    }
-    if (w.triggerType === "DISCOUNT_THRESHOLD") {
-      return w.thresholdValue != null && maxDiscount >= w.thresholdValue
-    }
-    if (w.triggerType === "SPECIFIC_USER") {
-      return w.triggerUserId === quote.userId
-    }
-    return false
-  })
+  // (src/lib/approval-workflows.ts, the same rule as send-email and status)
+  const matched = await loadMatchingWorkflows(companyId, quote)
 
   if (matched.length > 0) {
     // Needs sign-off — create one pending approval per matched workflow and
@@ -65,16 +48,26 @@ export async function POST(
         })
       ),
       // No email goes with this send, so an email held earlier must not go
-      // out once it's approved
-      prisma.quote.update({ where: { id }, data: { status: "PENDING_APPROVAL", pendingEmailPayload: Prisma.JsonNull } }),
+      // out once it's approved. Only what the approvals are requested for is
+      // kept, checked again when the last one is granted (approvalsCoverQuote).
+      prisma.quote.update({
+        where: { id },
+        data: {
+          status: "PENDING_APPROVAL",
+          pendingEmailPayload: { requestedFingerprint: approvalFingerprint(quote.userId, quote.lineItems) },
+        },
+      }),
     ])
 
     const updated = await prisma.quote.findUnique({ where: { id } })
-    return NextResponse.json(updated)
+    return NextResponse.json(withoutPortalTokensOrNull(updated))
   }
 
-  // No approval needed — send immediately
+  // No approval needed, send immediately. A quote using the company
+  // default terms keeps the default as it is now, frozen in this write.
+  const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
   const updated = await prisma.$transaction(async (tx) => {
+    await applyTermsFreeze(tx, id, freeze)
     // This version becomes the one clients see; every other version in the
     // same quote family is archived (deactivated) but kept for history
     await tx.quote.updateMany({
@@ -88,5 +81,5 @@ export async function POST(
     })
   })
 
-  return NextResponse.json(updated)
+  return NextResponse.json(withoutPortalTokens(updated))
 }

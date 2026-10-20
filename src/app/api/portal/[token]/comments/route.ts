@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteComment } from "@/lib/notify"
-import { resolveClientQuoteId } from "@/lib/portal-quote"
+import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
+import { PORTAL_COMMENT_MAX, readPortalBody, requiredText } from "@/lib/portal-input"
 import { prisma } from "@/lib/prisma"
+import { consumeSubject, linkLimitedResponse } from "@/lib/rate-limit"
 
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params
-  const activeId = await resolveClientQuoteId(token)
-  if (!activeId) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  // Staff may read the thread in the internal preview
+  const access = await resolvePortalAccess(token, "view", { allowInternal: true, request: req })
+  if (!access.ok) return access.response
+  const activeId = access.quoteId
 
   const comments = await prisma.quoteComment.findMany({
     where: { quoteId: activeId },
@@ -27,15 +29,20 @@ export async function POST(
   { params }: { params: Promise<{ token: string }> }
 ) {
   const { token } = await params
-  const body = await req.json()
-  if (!body.message || !body.message.trim()) {
-    return NextResponse.json({ error: "Message is required" }, { status: 400 })
-  }
+  // Only while the quote is waiting on the customer and not expired
+  const access = await resolvePortalAccess(token, "act", { request: req })
+  if (!access.ok) return access.response
+  const activeId = access.quoteId
 
-  const activeId = await resolveClientQuoteId(token)
-  if (!activeId) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  // Each comment emails the rep, so a customer link has its own limit per
+  // hour (only a customer link can comment)
+  const limit = await consumeSubject("portal-comment", token)
+  if (limit.blocked) return linkLimitedResponse(limit.retryAfterSeconds)
+
+  const body = await readPortalBody(req)
+  const checked = requiredText(body.message, "Message", PORTAL_COMMENT_MAX)
+  if (!checked.ok) return NextResponse.json({ error: checked.error }, { status: 400 })
+  const message = checked.value
 
   const quote = await prisma.quote.findUnique({
     where: { id: activeId },
@@ -45,9 +52,7 @@ export async function POST(
       user: { select: { name: true, email: true } },
     },
   })
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  if (!quote) return linkInvalidResponse()
 
   const authorName = quote.contact
     ? `${quote.contact.firstName} ${quote.contact.lastName}`
@@ -58,13 +63,13 @@ export async function POST(
       quoteId: activeId,
       authorType: "CLIENT",
       authorName,
-      message: body.message.trim(),
+      message,
     },
   })
 
   // Notify the rep that the client replied — fire-and-forget so a slow or
   // failed notification never blocks the client's comment from saving
-  notifyQuoteComment(activeId, authorName, body.message.trim()).catch((err) =>
+  notifyQuoteComment(activeId, authorName, message).catch((err) =>
     console.error("notifyQuoteComment failed:", err)
   )
 

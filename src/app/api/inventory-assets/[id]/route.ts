@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
 import { requireAccess } from "@/lib/api-access"
 import { assertRefs, inventoryAssetWhere } from "@/lib/scoped-loaders"
+import { deleteStoredObjects } from "@/lib/uploads"
 
 interface ContainerNode { id: string; name: string; parentId: string | null }
 
@@ -178,7 +179,13 @@ export async function DELETE(
     )
   }
 
+  // The attachment rows cascade with the asset, so their files are
+  // collected first and removed (best effort) once the delete succeeds
+  const attachments = await prisma.inventoryAssetAttachment.findMany({ where: { assetId: id }, select: { fileUrl: true } })
+
   await prisma.inventoryAsset.delete({ where: { id } })
+
+  await deleteStoredObjects(attachments.map((a) => a.fileUrl), `inventory-assets/${id}/`)
 
   return NextResponse.json({ deleted: true })
 }

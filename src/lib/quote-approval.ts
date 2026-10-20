@@ -2,41 +2,12 @@ import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { sendQuoteEmail } from "@/lib/send-quote-email"
 import { loadCompanyMailbox, sendAsNote, withNote } from "@/lib/quote-sender"
+import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
+import { approvalFingerprint, approvalsCoverQuote, heldEmailOf, type HeldEmail } from "@/lib/approval-workflows"
 
-// The email composed in the Send Quote dialog, held on the quote
-// (pendingEmailPayload) while it waits for approval
-export interface HeldEmail {
-  to: string
-  cc: string | null
-  subject: string
-  bodyHtml: string
-  includePdf: boolean
-  // The rep's plain text message, so the dialog can show it again.
-  // Missing on emails held before it was stored.
-  message?: string
-  // The mailbox chosen when Send was clicked. Missing on emails held
-  // before the sender was stored.
-  connectionId?: string
-  sentByUserId?: string
-  sentByName?: string
-  // Set only when every approval was granted but the email couldn't be
-  // sent: why, and what the approvals were granted for
-  lastSendError?: string
-  approvedFingerprint?: string
-}
-
-// What the approval workflows look at (the owner, and each line item's
-// quantity, price, and discount), so approvals already granted can be
-// honored only while none of it has changed
-export function approvalFingerprint(
-  userId: string,
-  lineItems: { id: string; quantity: number; unitPrice: number; discount: number }[]
-): string {
-  const items = [...lineItems]
-    .sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))
-    .map((li) => [li.id, li.quantity, li.unitPrice, li.discount])
-  return JSON.stringify([userId, items])
-}
+// The held email and the fingerprint live with the workflow evaluation in
+// src/lib/approval-workflows.ts
+export { approvalFingerprint, type HeldEmail }
 
 // Records one approver's decision, only while it is still pending. False
 // when it was already decided (a double click, or a second request), so
@@ -57,8 +28,55 @@ export type CompletionResult =
   // Approved, but the email couldn't be sent: the quote is back in DRAFT
   // with the email still held, so the owner can send it
   | { outcome: "send_failed"; warning: string }
+  // The quote changed after approval was requested: not sent, back in
+  // DRAFT with the email kept, and the owner must request approval again
+  | { outcome: "stale"; warning: string }
   // Someone else's request is already completing this quote
   | { outcome: "skipped" }
+
+export const STALE_APPROVAL_WARNING =
+  "This quote changed after approval was requested, so it was not sent. The owner must request approval again."
+
+// The quote changed after approval was requested (or now matches a
+// workflow nobody approved), so nothing is sent. The completion already
+// moved it back to DRAFT. The held email is kept for the Send dialog, with
+// the reason shown on the quote and the approvals no longer counting (no
+// approvedFingerprint), so sending again requests approval again, which
+// resets the existing approvals to PENDING. The owner is notified.
+async function markStale(quote: {
+  id: string
+  companyId: string
+  userId: string
+  quoteNumber: string
+  version: number
+  pendingEmailPayload: unknown
+}) {
+  const held = heldEmailOf(quote.pendingEmailPayload)
+  const kept: HeldEmail | null = held
+    ? { ...held, lastSendError: "it changed after approval was requested", approvalStale: true }
+    : null
+  if (kept) {
+    delete kept.approvedFingerprint
+    delete kept.requestedFingerprint
+  }
+  await prisma.quote.update({
+    where: { id: quote.id, companyId: quote.companyId },
+    data: { pendingEmailPayload: kept ? (kept as unknown as Prisma.InputJsonValue) : Prisma.JsonNull },
+  })
+
+  const displayNumber = quote.version > 1 ? `${quote.quoteNumber} v${quote.version}` : quote.quoteNumber
+  await prisma.notification.create({
+    data: {
+      companyId: quote.companyId,
+      userId: quote.userId,
+      // There is no notification type for approvals; this one shows the
+      // message as written
+      type: "QUOTE_COMMENT",
+      message: `Quote ${displayNumber} changed after approval was requested, so it was not sent. Request approval again.`,
+      link: `/dashboard/quotes/${quote.id}`,
+    },
+  })
+}
 
 type Sender = typeof sendQuoteEmail
 
@@ -66,7 +84,10 @@ type Sender = typeof sendQuoteEmail
 // claimed by moving it from PENDING_APPROVAL to DRAFT in one conditional
 // write, so only one request ever sends the held email. If the send fails
 // for any reason the quote simply stays in DRAFT with the email kept, never
-// sent from another mailbox and never stranded.
+// sent from another mailbox and never stranded. Before anything is sent the
+// quote is checked again as it is now (approvalsCoverQuote): if it changed
+// after approval was requested, or a workflow that matches now isn't
+// approved, it is not sent either (markStale).
 export async function completeApprovedQuote(
   quoteId: string,
   companyId: string,
@@ -84,8 +105,19 @@ export async function completeApprovedQuote(
   })
   if (!quote) return { outcome: "skipped" }
 
+  if (!(await approvalsCoverQuote(companyId, quote))) {
+    await markStale(quote)
+    return { outcome: "stale", warning: STALE_APPROVAL_WARNING }
+  }
+
+  // The quote only becomes sent here, so a quote using the company default
+  // terms freezes the default as it is now: worked out once, used for the
+  // held email's PDF, and stored in the write that marks it sent
+  const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
+
   async function markSent(internalNotes: string | null | undefined) {
     await prisma.$transaction(async (tx) => {
+      await applyTermsFreeze(tx, quoteId, freeze)
       await tx.quote.updateMany({
         where: { companyId, quoteNumber: quote!.quoteNumber, id: { not: quoteId } },
         data: { isActive: false },
@@ -97,7 +129,8 @@ export async function completeApprovedQuote(
     })
   }
 
-  const held = quote.pendingEmailPayload as HeldEmail | null
+  // A payload with only the recorded fingerprint means no email was held
+  const held = heldEmailOf(quote.pendingEmailPayload)
   if (!held) {
     await markSent(undefined)
     return { outcome: "marked_sent" }
@@ -114,6 +147,7 @@ export async function completeApprovedQuote(
       bodyHtml: held.bodyHtml,
       includePdf: held.includePdf,
       connectionId: held.connectionId ?? null,
+      termsFreeze: freeze,
     })
     if (!result.success) error = result.error || "the email service refused it"
   } catch (err) {

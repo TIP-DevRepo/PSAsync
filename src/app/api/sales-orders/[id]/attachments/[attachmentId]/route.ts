@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { requireAccess, notFound } from "@/lib/api-access"
 import { loadSalesOrderAttachment, salesOrderAttachmentWhere } from "@/lib/scoped-loaders"
+import { deleteStoredObject } from "@/lib/uploads"
 
 export async function DELETE(
   req: NextRequest,
@@ -17,7 +18,13 @@ export async function DELETE(
   const existing = await loadSalesOrderAttachment(ctx, id, attachmentId)
   if (!existing) return notFound()
 
-  await prisma.sOAttachment.delete({ where: salesOrderAttachmentWhere(ctx, id, attachmentId) })
+  const deleted = await prisma.sOAttachment.delete({
+    where: salesOrderAttachmentWhere(ctx, id, attachmentId),
+    select: { fileUrl: true, salesOrderId: true },
+  })
+
+  // Best effort once the row is gone: a failure is logged, never shown
+  await deleteStoredObject(deleted.fileUrl, `sales-orders/${deleted.salesOrderId}/`)
 
   return NextResponse.json({ deleted: true })
 }

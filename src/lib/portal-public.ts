@@ -1,4 +1,5 @@
 import type { Prisma } from "@/generated/prisma"
+import { resolveQuoteTerms } from "@/lib/quote-terms"
 
 // The only quote fields the customer portal ever sends to the browser.
 // Every portal route that returns quote data selects through these, so
@@ -37,6 +38,8 @@ export const portalQuoteSelect = {
   title: true,
   introText: true,
   terms: true,
+  // Read only to work out the effective terms; never sent to the browser
+  useDefaultTerms: true,
   sections: true,
   clientPoNumber: true,
   shipAddress: true,
@@ -62,7 +65,9 @@ export const portalQuoteSelect = {
       name: true,
       logoUrl: true,
       secondaryLogoUrl: true,
-      settings: { select: { primaryColor: true, accentColor: true } },
+      // quoteTerms is read only to work out the effective terms; it is
+      // removed by toPortalQuote and never sent to the browser
+      settings: { select: { primaryColor: true, accentColor: true, quoteTerms: true } },
     },
   },
   lineItems: { orderBy: { sortOrder: "asc" }, select: portalLineItemSelect },
@@ -70,6 +75,20 @@ export const portalQuoteSelect = {
 
 export type PortalQuoteRow = Prisma.QuoteGetPayload<{ select: typeof portalQuoteSelect }>
 
+// Every portal response (the customer link and the internal preview) goes
+// through here: terms are the effective terms from resolveQuoteTerms,
+// already sanitized, and the flag and the company default are left out
 export function toPortalQuote(row: PortalQuoteRow, isInternalPreview: boolean) {
-  return { ...row, isInternalPreview }
+  const { useDefaultTerms, company, ...rest } = row
+  const { settings, ...companyRest } = company
+  const companyDefault = settings?.quoteTerms ?? null
+  return {
+    ...rest,
+    terms: resolveQuoteTerms({ terms: row.terms, useDefaultTerms, sentAt: row.sentAt, status: row.status }, companyDefault),
+    company: {
+      ...companyRest,
+      settings: settings ? { primaryColor: settings.primaryColor, accentColor: settings.accentColor } : null,
+    },
+    isInternalPreview,
+  }
 }

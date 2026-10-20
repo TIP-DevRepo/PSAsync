@@ -9,6 +9,8 @@ import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { copyText } from "@/lib/clipboard"
+import { formatValidUntil } from "@/lib/quote-expiry"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
@@ -20,7 +22,9 @@ interface Quote {
   version: number
   status: string
   title: string | null
-  accessToken: string
+  // The internal preview token, for View Portal. The customer link is
+  // fetched on demand (GET /api/quotes/[id]/portal-link).
+  internalAccessToken: string
   flagged: boolean
   templateId: string | null
   clientName: string
@@ -431,28 +435,28 @@ function QuotesTab() {
         Array.from(selected).map((id) => fetch(`/api/quotes/${id}`, { method: "DELETE" }))
       )
       toast.success(`Deleted ${count} quote${count === 1 ? "" : "s"}`)
-    } else if (bulkAction === "mark_lost") {
-      await Promise.all(
+    } else if (bulkAction === "mark_lost" || bulkAction === "mark_expired") {
+      // Each quote is changed on its own, so one refusal never stops the rest
+      const status = bulkAction === "mark_lost" ? "DECLINED" : "EXPIRED"
+      const label = bulkAction === "mark_lost" ? "Lost" : "Expired"
+      const results = await Promise.all(
         Array.from(selected).map((id) =>
           fetch(`/api/quotes/${id}/status`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "DECLINED" }),
-          })
+            body: JSON.stringify({ status }),
+          }).then((res) => res.ok, () => false)
         )
       )
-      toast.success(`Marked ${count} quote${count === 1 ? "" : "s"} as Lost`)
-    } else if (bulkAction === "mark_expired") {
-      await Promise.all(
-        Array.from(selected).map((id) =>
-          fetch(`/api/quotes/${id}/status`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "EXPIRED" }),
-          })
+      const changed = results.filter(Boolean).length
+      const refused = count - changed
+      if (changed > 0) toast.success(`Marked ${changed} quote${changed === 1 ? "" : "s"} as ${label}`)
+      if (refused > 0) {
+        toast.warning(
+          `${refused} quote${refused === 1 ? "" : "s"} couldn't be marked as ${label}`,
+          "Open each one to see why."
         )
-      )
-      toast.success(`Marked ${count} quote${count === 1 ? "" : "s"} as Expired`)
+      }
     }
 
     setSelected(new Set())
@@ -469,7 +473,7 @@ function QuotesTab() {
       statusLabel(q.status),
       q.total.toFixed(2),
       fmtDate(q.sentAt),
-      fmtDate(q.expiresAt),
+      q.expiresAt ? formatValidUntil(q.expiresAt) : fmtDate(null),
       fmtDate(q.acceptedAt),
     ])
     const csv = [headers, ...rows]
@@ -642,7 +646,7 @@ function QuotesTab() {
                   </td>
                   <td className={`${ROW_PADDING[density]} pr-3 text-right tabular-nums font-medium text-foreground`}>${quote.total.toFixed(2)}</td>
                   <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{fmtDate(quote.sentAt)}</td>
-                  <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{fmtDate(quote.expiresAt)}</td>
+                  <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{quote.expiresAt ? formatValidUntil(quote.expiresAt) : fmtDate(null)}</td>
                   <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{fmtDate(quote.acceptedAt)}</td>
                   <td className={`${ROW_PADDING[density]} pr-3`} onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center gap-2 relative">
@@ -664,7 +668,7 @@ function QuotesTab() {
                       )}
                       <button
                         title="View Portal"
-                        onClick={() => window.open(`/portal/${quote.accessToken}`, "_blank")}
+                        onClick={() => window.open(`/portal/${quote.internalAccessToken}`, "_blank")}
                         className="text-muted-foreground hover:text-foreground"
                       >
                         <Search size={15} />
@@ -933,11 +937,16 @@ function QuoteActionsMenu({
   }
 
   async function handleChangeStatus(status: string) {
-    await fetch(`/api/quotes/${quote.id}/status`, {
+    const res = await fetch(`/api/quotes/${quote.id}/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status }),
     })
+    if (!res.ok) {
+      // For example a quote that needs approval before it can go out
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't change the status", data.error)
+    }
     setOpen(false)
     setSubPanel(null)
     onUpdated()
@@ -953,11 +962,20 @@ function QuoteActionsMenu({
     }
   }
 
-  function handleCopyPublicLink() {
-    const url = `${window.location.origin}/portal/${quote.accessToken}`
-    navigator.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+  async function handleCopyPublicLink() {
+    const res = await fetch(`/api/quotes/${quote.id}/portal-link`)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || typeof data.url !== "string") {
+      toast.error("Couldn't get the client link", data.error)
+      return
+    }
+    if (await copyText(data.url)) {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } else {
+      // Stays on screen so the link can be copied by hand
+      toast.warning("Couldn't copy the client link", data.url)
+    }
   }
 
   async function handleDelete() {
@@ -1044,12 +1062,14 @@ function QuoteActionsMenu({
               >
                 Quote Template <ExternalLink size={14} className="text-muted-foreground" />
               </button>
-              <button
-                onClick={handleCopyPublicLink}
-                className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
-              >
-                {copied ? "Copied!" : "Public Links"} <Link2 size={14} className="text-muted-foreground" />
-              </button>
+              {(can("quotes.edit") || can("quotes.sendEmail")) && (
+                <button
+                  onClick={handleCopyPublicLink}
+                  className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
+                >
+                  {copied ? "Copied!" : "Public Links"} <Link2 size={14} className="text-muted-foreground" />
+                </button>
+              )}
               <button
                 onClick={() => {
                   onShowRevisions()

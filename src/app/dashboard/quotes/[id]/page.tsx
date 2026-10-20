@@ -14,6 +14,8 @@ import {
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { copyText } from "@/lib/clipboard"
+import { formatValidUntil } from "@/lib/quote-expiry"
 import { promptDialog } from "@/lib/prompt-dialog"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
@@ -35,14 +37,24 @@ interface QuoteDetail {
   createdAt: string
   sentAt: string | null
   taxRate: number
-  accessToken: string
+  // Only the internal preview token; the customer link is fetched when
+  // needed (GET /api/quotes/[id]/portal-link)
   internalAccessToken: string
   version: number
   isActive: boolean
   sections: string[]
+  // The stored terms, for the editor
   terms: string | null
   paymentTerms: string | null
   useDefaultTerms: boolean
+  // What the quote shows everywhere, decided on the server
+  // (resolveQuoteTerms in src/lib/quote-terms.ts)
+  effectiveTerms: string | null
+  // Ticking the box would replace stored custom terms
+  termsDifferFromDefault: boolean
+  // Sent, or moved past draft: terms are shown read only (decided on the
+  // server by isTermsFrozen in src/lib/quote-terms.ts)
+  termsFrozen: boolean
   client: { id: string; name: string; email: string | null }
   contact: { id: string; firstName: string; lastName: string; email: string | null } | null
   user: { id: string; name: string }
@@ -51,7 +63,8 @@ interface QuoteDetail {
 }
 
 // The email composed in the Send Quote dialog and held on the quote. When
-// lastSendError is set, it was approved but couldn't be sent.
+// lastSendError is set, it was approved but couldn't be sent, or (with
+// approvalStale) the quote changed after approval was requested.
 interface HeldEmailView {
   to: string
   cc: string | null
@@ -60,6 +73,7 @@ interface HeldEmailView {
   includePdf: boolean
   connectionId?: string
   lastSendError?: string
+  approvalStale?: boolean
 }
 
 interface VersionSummary {
@@ -161,6 +175,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
   const [sending, setSending] = useState(false)
   const [copied, setCopied] = useState(false)
   const [copiedInternal, setCopiedInternal] = useState(false)
+  const [regenerating, setRegenerating] = useState(false)
   const [showSendModal, setShowSendModal] = useState(false)
   const [versions, setVersions] = useState<VersionSummary[]>([])
   const [creatingVersion, setCreatingVersion] = useState(false)
@@ -175,7 +190,6 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
   const [clients, setClients] = useState<ClientOption[]>([])
   const [contacts, setContacts] = useState<ContactOption[]>([])
   const [termsDraft, setTermsDraft] = useState("")
-  const [companyDefaultTerms, setCompanyDefaultTerms] = useState("")
 
   const loadQuote = useCallback(() => {
     fetch(`/api/quotes/${id}`)
@@ -221,9 +235,6 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
     fetch("/api/clients")
       .then((res) => res.json())
       .then((data) => Array.isArray(data) && setClients(data))
-    fetch("/api/quote-settings")
-      .then((res) => res.json())
-      .then((json) => setCompanyDefaultTerms(json.quoteTerms ?? ""))
     if (
       typeof window !== "undefined" &&
       new URLSearchParams(window.location.search).get("send") === "1" &&
@@ -284,6 +295,9 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
     setDecidingId(null)
     if (!res.ok) {
       toast.error("Couldn't approve", data.error)
+    } else if (data.stale) {
+      // The quote changed after approval was requested, so it was not sent
+      toast.warning("Approved, but the quote was not sent", data.warning)
     } else if (data.warning) {
       // The approval stands even though the held email didn't go out
       toast.warning(
@@ -328,12 +342,74 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
     if (versionId === id) loadQuote()
   }
 
-  function handleCopyLink() {
+  async function handleCopyLink() {
+    const res = await fetch(`/api/quotes/${id}/portal-link`)
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok || typeof data.url !== "string") {
+      toast.error("Couldn't get the client link", data.error)
+      return
+    }
+    const copiedOk = await copyText(data.url)
+    if (!copiedOk) {
+      // Stays on screen so the link can be copied by hand
+      toast.warning("Couldn't copy the client link", data.url)
+    } else {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 2000)
+    }
+    if (!data.opens) {
+      toast.info("This version hasn't been sent yet", "The customer can open the link once it is sent.")
+    }
+  }
+
+  // Ticking stores a copy of the company default and unticking starts the
+  // editor from it (the server does both); ticking over custom terms asks
+  // first, since it replaces them
+  async function handleUseDefaultTermsChange(useDefault: boolean) {
     if (!quote) return
-    const url = `${window.location.origin}/portal/${quote.accessToken}`
-    navigator.clipboard.writeText(url)
-    setCopied(true)
-    setTimeout(() => setCopied(false), 2000)
+    if (useDefault && (quote.termsDifferFromDefault || termsDraft !== (quote.terms ?? ""))) {
+      const confirmed = await confirmDialog({
+        title: "Use the company default terms?",
+        description: "This replaces the custom terms on this quote.",
+        confirmLabel: "Use Default Terms",
+      })
+      if (!confirmed) return
+    }
+    const res = await fetch(`/api/quotes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ useDefaultTerms: useDefault }),
+    })
+    const data = await res.json().catch(() => ({}))
+    if (!res.ok) {
+      toast.error("Couldn't update the terms", data.error)
+    } else {
+      setTermsDraft(data.terms ?? "")
+    }
+    loadQuote()
+  }
+
+  async function handleRegenerateLink() {
+    const confirmed = await confirmDialog({
+      title: "Regenerate the customer link?",
+      description:
+        "Every link already sent for this quote, including earlier versions, will stop working right away. The customer will need the new link to view or respond to the quote.",
+      confirmLabel: "Regenerate",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    setRegenerating(true)
+    const res = await fetch(`/api/quotes/${id}/portal-link/regenerate`, { method: "POST" })
+    const data = await res.json().catch(() => ({}))
+    setRegenerating(false)
+    if (!res.ok || typeof data.url !== "string") {
+      toast.error("Couldn't regenerate the customer link", data.error)
+      return
+    }
+    const copiedOk = await copyText(data.url)
+    if (copiedOk) toast.success("New customer link copied", data.url)
+    else toast.warning("New customer link, copy it from here", data.url)
+    loadQuote()
   }
 
   function handleCopyInternalLink() {
@@ -375,13 +451,19 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
 
   async function handleChangeStatus(newStatus: string) {
     setChangingStatus(true)
-    await fetch(`/api/quotes/${id}/status`, {
+    const res = await fetch(`/api/quotes/${id}/status`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: newStatus }),
     })
     setChangingStatus(false)
-    toast.success(`Status updated to ${statusLabel(newStatus)}`)
+    if (res.ok) {
+      toast.success(`Status updated to ${statusLabel(newStatus)}`)
+    } else {
+      // For example a quote that needs approval before it can go out
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't change the status", data.error)
+    }
     loadQuote()
     loadVersions()
   }
@@ -598,9 +680,16 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                 )}
               </>
             )}
-            <Button size="sm" variant="outline" onClick={handleCopyLink}>
-            {copied ? "Copied!" : "Copy Client Link"}
-          </Button>
+            {(canEditQuote || canSendEmail) && (
+              <Button size="sm" variant="outline" onClick={handleCopyLink}>
+                {copied ? "Copied!" : "Copy Client Link"}
+              </Button>
+            )}
+            {canEditQuote && (
+              <Button size="sm" variant="outline" onClick={handleRegenerateLink} disabled={regenerating}>
+                {regenerating ? "Regenerating..." : "Regenerate Customer Link"}
+              </Button>
+            )}
           <Button size="sm" variant="outline" onClick={handleCopyInternalLink}>
             {copiedInternal ? "Copied!" : "Copy Internal Link"}
           </Button>
@@ -641,8 +730,17 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
       {quote.status === "DRAFT" && quote.pendingEmailPayload?.lastSendError && (
         <div className="rounded-lg border border-warning/30 bg-warning-bg p-4 flex items-center justify-between gap-4">
           <p className="text-sm text-warning">
-            This quote was approved, but its email could not be sent: {quote.pendingEmailPayload.lastSendError}. The email is
-            still waiting to be sent.
+            {quote.pendingEmailPayload.approvalStale ? (
+              <>
+                This quote changed after approval was requested, so it was not sent. Send it again to request approval
+                again. The email is still saved.
+              </>
+            ) : (
+              <>
+                This quote was approved, but its email could not be sent: {quote.pendingEmailPayload.lastSendError}. The email
+                is still waiting to be sent.
+              </>
+            )}
           </p>
           {canSendEmail && (
             <Button size="sm" onClick={() => setShowSendModal(true)}>
@@ -730,10 +828,9 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
         </div>
       )}
 
-      <div className="overflow-x-auto">
-        <div className="w-full max-w-[2256px] mx-auto grid grid-cols-1 lg:grid-cols-[auto_minmax(20rem,1fr)] gap-6 items-start">
-          {/* Left: main content — sized to the Line Item table's own natural width, not a fraction of the container */}
-          <div className="space-y-6">
+        <div className="w-full max-w-[2256px] mx-auto grid grid-cols-1 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)] gap-6 items-start">
+          {/* Left: main content, always two thirds. Fixed tracks so content never changes the split; the line item table scrolls inside its own container */}
+          <div className="min-w-0 space-y-6">
           <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 text-sm">
             {!showEditableHeader ? (
               <>
@@ -745,17 +842,19 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                 <p><span className="text-muted-foreground">Rep:</span> <span className="text-foreground">{quote.user.name}</span></p>
                 <p>
                   <span className="text-muted-foreground">Expires:</span>{" "}
-                  <span className="text-foreground">{quote.expiresAt ? new Date(quote.expiresAt).toLocaleDateString() : "—"}</span>
+                  <span className="text-foreground">{quote.expiresAt ? formatValidUntil(quote.expiresAt) : "—"}</span>
                 </p>
                 <p>
                   <span className="text-muted-foreground">Payment Terms:</span>{" "}
                   <span className="text-foreground">{quote.paymentTerms || "—"}</span>
                 </p>
-                {(quote.useDefaultTerms ? companyDefaultTerms : quote.terms) && (
+                {quote.effectiveTerms && (
                   <CollapsibleField label="Terms & Conditions">
+                    {/* Only ever a terms string from an API response, sanitized on the server
+                        (src/lib/sanitize-terms.ts). Never render anything else here. */}
                     <div
                       className="text-sm text-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
-                      dangerouslySetInnerHTML={{ __html: quote.useDefaultTerms ? companyDefaultTerms : (quote.terms ?? "") }}
+                      dangerouslySetInnerHTML={{ __html: quote.effectiveTerms }}
                     />
                   </CollapsibleField>
                 )}
@@ -836,19 +935,33 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                   />
                 </div>
                 <CollapsibleField label="Terms & Conditions">
-                  <label className="flex items-center gap-2 text-sm text-foreground mb-2">
-                    <input
-                      type="checkbox"
-                      checked={quote.useDefaultTerms}
-                      onChange={(e) => updateQuoteField({ useDefaultTerms: e.target.checked })}
-                      className="accent-primary"
-                    />
-                    Use company default Terms &amp; Conditions
-                  </label>
-                  {quote.useDefaultTerms ? (
+                  {/* Only ever a terms string from an API response, sanitized on the server
+                      (src/lib/sanitize-terms.ts). Never render anything else here. */}
+                  {quote.termsFrozen ? (
+                    <>
+                      <p className="text-xs text-muted-foreground mb-2">
+                        These are the terms this quote was sent with. Create a new version to change them.
+                      </p>
+                      <div
+                        className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
+                        dangerouslySetInnerHTML={{ __html: quote.effectiveTerms || "No terms." }}
+                      />
+                    </>
+                  ) : (
+                    <label className="flex items-center gap-2 text-sm text-foreground mb-2">
+                      <input
+                        type="checkbox"
+                        checked={quote.useDefaultTerms}
+                        onChange={(e) => handleUseDefaultTermsChange(e.target.checked)}
+                        className="accent-primary"
+                      />
+                      Use company default Terms &amp; Conditions
+                    </label>
+                  )}
+                  {quote.termsFrozen ? null : quote.useDefaultTerms ? (
                     <div
                       className="rounded-md border border-border bg-muted p-3 text-sm text-muted-foreground [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0"
-                      dangerouslySetInnerHTML={{ __html: companyDefaultTerms || "No company default set." }}
+                      dangerouslySetInnerHTML={{ __html: quote.effectiveTerms || "No company default set." }}
                     />
                   ) : (
                     <RichTextEditor
@@ -929,8 +1042,8 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
           </div>
         </div>
 
-        {/* Right: Version History + Comments */}
-        <div className="space-y-6">
+        {/* Right: Version History + Comments, always one third */}
+        <div className="min-w-0 space-y-6">
           <div className="rounded-lg border border-border bg-card shadow-card p-4 text-sm">
               <h2 className="font-semibold text-sm mb-2 text-foreground">Version History</h2>
               <div className="space-y-1">
@@ -1009,7 +1122,6 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
           </div>
         </div>
         </div>
-      </div>
 
       {canDeleteQuote && (
         <div className="flex justify-end">
@@ -1030,7 +1142,6 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
           held={quote.pendingEmailPayload?.lastSendError ? quote.pendingEmailPayload : null}
           quoteNumber={quote.quoteNumber}
           version={quote.version}
-          accessToken={quote.accessToken}
           onClose={() => setShowSendModal(false)}
           onSent={() => {
             setShowSendModal(false)
@@ -1070,7 +1181,6 @@ function SendQuoteModal({
   held: heldProp,
   quoteNumber,
   version,
-  accessToken,
   onClose,
   onSent,
 }: {
@@ -1080,13 +1190,12 @@ function SendQuoteModal({
   held: HeldEmailView | null
   quoteNumber: string
   version: number
-  accessToken: string
   onClose: () => void
   onSent: () => void
 }) {
-  const portalLink =
-    typeof window !== "undefined" ? `${window.location.origin}/portal/${accessToken}` : ""
   const displayNumber = version > 1 ? `${quoteNumber} v${version}` : quoteNumber
+  const defaultMessage = (portalLink: string) =>
+    `Hi,\n\nPlease find your quote ${displayNumber} attached. You can also view it and respond online here:\n${portalLink}\n\nLet us know if you have any questions.`
 
   // Fixed for as long as the dialog is open, so a quote reload behind it
   // never resets what the user is editing
@@ -1094,10 +1203,7 @@ function SendQuoteModal({
   const [to, setTo] = useState(held?.to ?? defaultTo)
   const [cc, setCc] = useState(held?.cc ?? "")
   const [subject, setSubject] = useState(held?.subject ?? `Quote ${displayNumber}`)
-  const [message, setMessage] = useState(
-    held?.message ??
-      `Hi,\n\nPlease find your quote ${displayNumber} attached. You can also view it and respond online here:\n${portalLink}\n\nLet us know if you have any questions.`
-  )
+  const [message, setMessage] = useState(held?.message ?? defaultMessage(""))
   const [includePdf, setIncludePdf] = useState(held?.includePdf ?? true)
   const [sending, setSending] = useState(false)
   const [error, setError] = useState("")
@@ -1105,6 +1211,23 @@ function SendQuoteModal({
   const [senderOptions, setSenderOptions] = useState<SendOptions | null>(null)
   const [senderLoadFailed, setSenderLoadFailed] = useState(false)
   const [senderId, setSenderId] = useState<string | null>(null)
+
+  // The customer link is fetched for the message, never kept in the quote
+  // data. It only fills the default message, so nothing the user has typed
+  // is replaced.
+  useEffect(() => {
+    if (held) return
+    fetch(`/api/quotes/${quoteId}/portal-link`)
+      .then(async (res) => {
+        const data = await res.json().catch(() => ({}))
+        if (!res.ok || typeof data.url !== "string") throw new Error(data.error || "Please try again.")
+        const blank = defaultMessage("")
+        setMessage((current) => (current === blank ? defaultMessage(data.url) : current))
+      })
+      .catch((err: Error) => toast.error("Couldn't load the customer link", err.message))
+    // defaultMessage only depends on the quote number, fixed while open
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [quoteId, held])
 
   useEffect(() => {
     fetch("/api/quote-settings")

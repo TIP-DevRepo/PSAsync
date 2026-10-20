@@ -5,6 +5,7 @@ import { Upload, FileText, ArrowRight, CheckCircle2, AlertTriangle } from "lucid
 import { Modal } from "@/components/Modal"
 import { Button } from "@/components/ui/button"
 import { parseCsvFile, type ParsedCsv } from "@/lib/csv"
+import { CSV_IMPORT_MAX_BYTES, fileExtension, formatMegabytes } from "@/lib/upload-rules"
 
 // ─── Shared Import Modal ────────────────────────────────────────────────
 // Generic 4-step flow: Upload -> Map Columns -> Preview -> Results.
@@ -47,6 +48,14 @@ export function ImportModal({
 
   async function handleFileSelected(file: File) {
     setError(null)
+    if (fileExtension(file.name) !== "csv") {
+      setError("That file type is not allowed. Choose a .csv file.")
+      return
+    }
+    if (file.size > CSV_IMPORT_MAX_BYTES) {
+      setError(`That file is larger than ${formatMegabytes(CSV_IMPORT_MAX_BYTES)}`)
+      return
+    }
     try {
       const data = await parseCsvFile(file)
       if (data.rows.length === 0) {
@@ -118,7 +127,7 @@ export function ImportModal({
           >
             <Upload className="mx-auto h-8 w-8 text-muted-foreground" />
             <p className="mt-3 text-sm font-medium text-foreground">Click to choose a CSV file, or drag one here</p>
-            <p className="mt-1 text-xs text-muted-foreground">Only .csv files are supported.</p>
+            <p className="mt-1 text-xs text-muted-foreground">Only .csv files up to {formatMegabytes(CSV_IMPORT_MAX_BYTES)} are supported.</p>
           </div>
           <input
             ref={fileInputRef}

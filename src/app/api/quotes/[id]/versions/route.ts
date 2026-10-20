@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { quoteListWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
+import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
+import { termsForStorage } from "@/lib/sanitize-terms"
 
 export async function GET(
   req: NextRequest,
@@ -60,12 +62,17 @@ export async function POST(
       userId: current.userId,
       quoteNumber: current.quoteNumber,
       version: nextVersion,
+      // Each version is its own row with its own tokens
+      accessToken: newAccessToken(),
+      internalAccessToken: newAccessToken(),
       parentId: current.id,
       isActive: false,
       status: "DRAFT",
       title: current.title,
       introText: current.introText,
-      terms: current.terms,
+      terms: termsForStorage(current.terms),
+      // The new version is a draft: with the flag ticked it follows the current default
+      useDefaultTerms: current.useDefaultTerms,
       internalNotes: current.internalNotes,
       clientPoNumber: current.clientPoNumber,
       expiresAt: current.expiresAt,
@@ -98,5 +105,5 @@ export async function POST(
     },
   })
 
-  return NextResponse.json(newQuote)
+  return NextResponse.json(withoutPortalTokens(newQuote))
 }

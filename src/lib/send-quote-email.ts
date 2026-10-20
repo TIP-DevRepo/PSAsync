@@ -1,5 +1,7 @@
 import { prisma } from "@/lib/prisma"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
+import { asSent, resolveQuoteTerms, type TermsFreeze } from "@/lib/quote-terms"
+import { quotePdfName } from "@/lib/content-disposition"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
 
@@ -16,11 +18,24 @@ export interface SendQuoteEmailInput {
   // Only emails held for approval before this was stored arrive without
   // it, and those keep the sender they would have had when they were held.
   connectionId?: string | null
+  // The terms this send freezes (termsFreezeFor), worked out by the caller
+  // before sending and written by it when it marks the quote sent, so the
+  // attached PDF carries exactly what gets stored. null when the send
+  // leaves the stored terms as they are.
+  termsFreeze?: TermsFreeze | null
 }
 
 export interface SendQuoteEmailResult {
   success: boolean
   error?: string
+}
+
+// A failed Graph call for the server log: the status and Graph's error
+// code only. The message can name the recipients' addresses.
+async function graphErrorSummary(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null
+  const code = typeof body?.error?.code === "string" ? ` ${body.error.code}` : ""
+  return `${res.status}${code}`
 }
 
 function toRecipients(list: string) {
@@ -139,7 +154,9 @@ async function sendFromConnection(
   // Optionally attach the branded PDF
   const attachments: Record<string, unknown>[] = []
   if (input.includePdf) {
-    const html = buildQuotePdfHtml(quote, {
+    // The quote as it reads once this send marks it sent
+    const effectiveTerms = resolveQuoteTerms(asSent(quote, input.termsFreeze ?? null), settings.quoteTerms)
+    const html = buildQuotePdfHtml({ ...quote, effectiveTerms }, {
       name: quote.company.name,
       logoUrl: quote.company.logoUrl,
       primaryColor: settings.primaryColor,
@@ -165,7 +182,7 @@ async function sendFromConnection(
       })
       attachments.push({
         "@odata.type": "#microsoft.graph.fileAttachment",
-        name: `${quote.quoteNumber}${quote.version > 1 ? `-v${quote.version}` : ""}.pdf`,
+        name: quotePdfName(quote.quoteNumber, quote.version),
         contentType: "application/pdf",
         contentBytes: Buffer.from(pdfBuffer).toString("base64"),
       })
@@ -192,8 +209,7 @@ async function sendFromConnection(
   })
 
   if (!sendRes.ok) {
-    const errText = await sendRes.text()
-    console.error("Microsoft Graph sendMail failed:", errText)
+    console.error(`Microsoft Graph sendMail failed: ${await graphErrorSummary(sendRes)}`)
     return { success: false, error: "Microsoft rejected the email. Please try again." }
   }
 
@@ -275,8 +291,7 @@ export async function sendCompanyNotificationEmail(
   })
 
   if (!sendRes.ok) {
-    const errText = await sendRes.text()
-    console.error("Microsoft Graph sendMail failed:", errText)
+    console.error(`Microsoft Graph sendMail failed: ${await graphErrorSummary(sendRes)}`)
     return { success: false, error: "Microsoft rejected the email." }
   }
 

@@ -3,6 +3,21 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { acceptAttribute, checkUploadBasics } from "@/lib/upload-rules"
+
+// Checked when a logo is picked, so a file the server would refuse is
+// never queued for Save
+function pickLogo(input: HTMLInputElement, setFile: (file: File | null) => void) {
+  const file = input.files?.[0] ?? null
+  const problem = file ? checkUploadBasics(file, "LOGO") : null
+  if (file && problem) {
+    toast.error(problem, file.name)
+    input.value = ""
+    setFile(null)
+    return
+  }
+  setFile(file)
+}
 
 interface CompanyData {
   name: string
@@ -122,8 +137,8 @@ export function CompanySettingsPanel() {
         )}
         <input
           type="file"
-          accept="image/*"
-          onChange={(e) => setLogoFile(e.target.files?.[0] ?? null)}
+          accept={acceptAttribute("LOGO")}
+          onChange={(e) => pickLogo(e.target, setLogoFile)}
           className="text-sm"
         />
       </div>
@@ -143,8 +158,8 @@ export function CompanySettingsPanel() {
         )}
         <input
           type="file"
-          accept="image/*"
-          onChange={(e) => setSecondaryLogoFile(e.target.files?.[0] ?? null)}
+          accept={acceptAttribute("LOGO")}
+          onChange={(e) => pickLogo(e.target, setSecondaryLogoFile)}
           className="text-sm"
         />
       </div>

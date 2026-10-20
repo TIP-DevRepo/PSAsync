@@ -36,6 +36,16 @@ export interface TestConnectionResult {
   status: string
 }
 
+// A failed connection test. The status is stored on the integration and
+// shown in Settings, so it never carries the distributor's own error text
+// (which can echo a response body); the reason is logged on the server as
+// one short line instead.
+export function connectionFailed(label: string, err: unknown): TestConnectionResult {
+  const reason = err instanceof Error ? err.message.trim().split("\n")[0].slice(0, 200) : typeof err
+  console.error(`${label} connection test failed: ${reason}`)
+  return { success: false, status: "Connection failed. Check the credentials and try again." }
+}
+
 // One distributor's price/stock offer for a specific product
 export interface DistributorOffer {
   distributorKey: DistributorKey

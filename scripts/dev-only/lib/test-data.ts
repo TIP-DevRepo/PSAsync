@@ -108,6 +108,20 @@ export function testNames(letter: TestLetter) {
     viewerRole: `Test Viewer Role ${letter}`,
     viewerName: `Test Viewer ${letter}`,
     viewerEmail: `test-viewer-${lower}@example.test`,
+    // Only created by the check-permissions script: manages users without
+    // being a Global Admin, for the invite rank rule
+    managerRole: `Test Manager Role ${letter}`,
+    managerName: `Test Manager ${letter}`,
+    managerEmail: `test-manager-${lower}@example.test`,
+    // Only created by the check-permissions script, and removed at the end:
+    // an ad hoc (not inventory tracked) line on Test Orders' purchase order
+    untrackedPoLine: `Dev Check Untracked Line ${letter}`,
+    // Only created by the check-permissions script: decides approvals
+    // (pages.quotes and quotes.approve) without being a Global Admin, for
+    // the approval re-check
+    approverRole: `Test Approver Role ${letter}`,
+    approverName: `Test Approver ${letter}`,
+    approverEmail: `test-approver-${lower}@example.test`,
   }
 }
 

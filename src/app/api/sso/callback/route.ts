@@ -3,6 +3,7 @@ import { signIn } from "@/auth"
 import { createSsoRelayToken } from "@/lib/sso-relay-token"
 import { prisma } from "@/lib/prisma"
 import { checkSsoTenant } from "@/lib/sso-tenant"
+import { decideFirstSignIn, firstSignInName, readSsoClaims } from "@/lib/sso-match"
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code")
@@ -65,21 +66,49 @@ export async function GET(req: NextRequest) {
     return NextResponse.redirect(new URL("/login?error=could_not_read_profile", req.url))
   }
   const me = await meRes.json()
+  // The mailbox address, used only for the mailbox connection saved below.
+  // It is never used to decide who is signing in, since a directory admin
+  // can set the mail attribute to any address.
   const email: string | undefined = me.mail || me.userPrincipalName
-  const msId: string | undefined = me.id
+  const claims = readSsoClaims(tokens.id_token)
+  // The id token's oid and Graph's id are the same object id
+  const msId: string | null = claims?.oid ?? (typeof me.id === "string" && me.id ? me.id : null)
 
   if (!email) {
     return NextResponse.redirect(new URL("/login?error=no_email_on_account", req.url))
   }
 
-  // Identity comes only from what Microsoft just verified — never from
-  // anything the browser sent us. Match by Microsoft ID first (once
-  // linked), falling back to email for the very first sign-in.
+  // Identity comes only from what Microsoft just verified, never from
+  // anything the browser sent us. A user already linked to this Microsoft
+  // account signs in by that link, as before.
   let user = msId
     ? await prisma.user.findFirst({ where: { companyId, microsoftId: msId } })
     : null
+
+  // First sign in: the stored PSAsync email must equal the id token's sign
+  // in name (preferred_username, the UPN), ignoring case. The email claim
+  // is the directory mail attribute, which an admin can set to anything,
+  // so it is never used. The rules (one match only, never relink an
+  // account or overwrite a link) are in decideFirstSignIn.
   if (!user) {
-    user = await prisma.user.findFirst({ where: { companyId, email } })
+    const signInName = firstSignInName(claims)
+    if (!signInName) {
+      // Never logs the address or any other claim
+      console.warn("SSO first sign in refused: the ID token has no sign in name (preferred_username)")
+      return NextResponse.redirect(new URL("/login?error=no_account_found", req.url))
+    }
+    const [matches, linked] = await Promise.all([
+      prisma.user.findMany({
+        where: { companyId, email: { equals: signInName, mode: "insensitive" } },
+        select: { id: true, email: true, active: true, microsoftId: true },
+      }),
+      msId ? prisma.user.findFirst({ where: { microsoftId: msId }, select: { id: true } }) : null,
+    ])
+    const decision = decideFirstSignIn(signInName, matches, msId, linked?.id ?? null)
+    if (!decision.ok) {
+      return NextResponse.redirect(new URL(`/login?error=${decision.error}`, req.url))
+    }
+    user = await prisma.user.findFirst({ where: { id: decision.userId, companyId } })
   }
 
   if (!user || !user.active) {
@@ -99,10 +128,10 @@ export async function GET(req: NextRequest) {
     !!existingConnection?.connectedByUserId && existingConnection.connectedByUserId !== user.id
 
   await prisma.$transaction([
-    prisma.user.update({
-      where: { id: user.id },
-      data: { microsoftId: msId },
-    }),
+    // Only written when it changes: a first sign in, never a different link
+    ...(msId && user.microsoftId !== msId
+      ? [prisma.user.update({ where: { id: user.id }, data: { microsoftId: msId } })]
+      : []),
     ...(ownedByOther
       ? []
       : [

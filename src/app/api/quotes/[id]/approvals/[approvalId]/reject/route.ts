@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { withoutPortalTokensOrNull } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { loadViewableQuote } from "@/lib/scoped-loaders"
 
@@ -76,5 +77,5 @@ export async function POST(
   ])
 
   const updatedQuote = await prisma.quote.findUnique({ where: { id } })
-  return NextResponse.json({ quote: updatedQuote })
+  return NextResponse.json({ quote: withoutPortalTokensOrNull(updatedQuote) })
 }

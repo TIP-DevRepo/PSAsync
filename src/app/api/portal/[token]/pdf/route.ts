@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
-import { resolveClientQuoteId } from "@/lib/portal-quote"
+import { resolveQuoteTerms } from "@/lib/quote-terms"
+import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
+import { consumeSubject, linkLimitedResponse } from "@/lib/rate-limit"
+import { attachmentDisposition, quotePdfName } from "@/lib/content-disposition"
 import { prisma } from "@/lib/prisma"
 
 export const runtime = "nodejs"
@@ -14,9 +17,17 @@ export async function GET(
 ) {
   const { token } = await params
 
-  const activeId = await resolveClientQuoteId(token)
-  if (!activeId) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
+  // A read: works for an accepted quote past its expiry date, and for the
+  // staff internal preview
+  const access = await resolvePortalAccess(token, "view", { allowInternal: true, request: req })
+  if (!access.ok) return access.response
+  const activeId = access.quoteId
+
+  // Each download starts a headless browser, so a customer link has its own
+  // limit per hour (the signed in internal preview is not limited)
+  if (!access.isInternal) {
+    const limit = await consumeSubject("portal-pdf", token)
+    if (limit.blocked) return linkLimitedResponse(limit.retryAfterSeconds)
   }
 
   const quote = await prisma.quote.findUnique({
@@ -29,18 +40,17 @@ export async function GET(
         select: {
           name: true,
           logoUrl: true,
-          settings: { select: { primaryColor: true, accentColor: true } },
+          settings: { select: { primaryColor: true, accentColor: true, quoteTerms: true } },
         },
       },
       lineItems: { orderBy: { sortOrder: "asc" } },
     },
   })
 
-  if (!quote) {
-    return NextResponse.json({ error: "Quote not found" }, { status: 404 })
-  }
+  if (!quote) return linkInvalidResponse()
 
-  const html = buildQuotePdfHtml(quote, {
+  const effectiveTerms = resolveQuoteTerms(quote, quote.company.settings?.quoteTerms)
+  const html = buildQuotePdfHtml({ ...quote, effectiveTerms }, {
     name: quote.company.name,
     logoUrl: quote.company.logoUrl,
     primaryColor: quote.company.settings?.primaryColor ?? "#1B3A5C",
@@ -69,9 +79,8 @@ export async function GET(
     return new NextResponse(Buffer.from(pdfBuffer), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${quote.quoteNumber}${
-          quote.version > 1 ? `-v${quote.version}` : ""
-        }.pdf"`,
+        // Built from the stored quote number, so through the shared helper
+        "Content-Disposition": attachmentDisposition(quotePdfName(quote.quoteNumber, quote.version), "quote.pdf"),
       },
     })
   } finally {

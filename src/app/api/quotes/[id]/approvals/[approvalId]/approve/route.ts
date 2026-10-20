@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { withoutPortalTokensOrNull } from "@/lib/portal-token"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { loadViewableQuote } from "@/lib/scoped-loaders"
 import { completeApprovedQuote, recordApproval } from "@/lib/quote-approval"
@@ -58,6 +59,8 @@ export async function POST(
   // If every requirement on this quote is now approved, complete the send.
   // A failed send leaves the approval standing and the quote in DRAFT with
   // the email still held for the owner to send, and comes back as a warning.
+  // So does a quote that changed after approval was requested (stale),
+  // which is not sent and needs approval again.
   const remaining = await prisma.quoteApproval.count({
     where: { quoteId: id, status: "PENDING" },
   })
@@ -65,9 +68,10 @@ export async function POST(
 
   const updatedQuote = await prisma.quote.findUnique({ where: { id } })
   return NextResponse.json({
-    quote: updatedQuote,
+    quote: withoutPortalTokensOrNull(updatedQuote),
     allApproved: remaining === 0,
     emailSent: completion?.outcome === "sent",
     ...(completion?.outcome === "send_failed" ? { warning: completion.warning } : {}),
+    ...(completion?.outcome === "stale" ? { warning: completion.warning, stale: true } : {}),
   })
 }
