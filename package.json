@@ -9,6 +9,7 @@
     "lint": "eslint",
     "check:routes": "tsx scripts/check-route-access.ts",
     "check:headers": "tsx scripts/check-headers.ts",
+    "check:auth": "tsx scripts/check-auth-session.ts",
     "seed": "npx tsx prisma/seed.ts",
     "postinstall": "node -e \"require('fs').closeSync(require('fs').openSync('.env','a'))\" && prisma generate"
   },
