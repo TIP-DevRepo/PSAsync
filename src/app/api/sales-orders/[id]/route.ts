@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, canSeeCost, notFound, omitCost, omitUnitCost, requireAccess } from "@/lib/api-access"
-import { loadViewableSalesOrder, salesOrderWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
+import { loadViewableSalesOrder, purchaseOrderVisibilityWhere, salesOrderWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
 import { deleteStoredObjects } from "@/lib/uploads"
 import { notifySalesOrderStatusChange } from "@/lib/notify"
 
@@ -68,7 +68,15 @@ export async function GET(
           vendor: { select: { id: true, name: true } },
         },
       },
+      // How many purchase orders were generated from it, all of them, so the
+      // page can lock the same fields the PATCH below locks (the list shows
+      // this count already)
+      _count: { select: { purchaseOrders: true } },
+      // Only the linked purchase orders this user may open (VPO): none
+      // without pages.purchaseOrders, otherwise their own unless they hold
+      // purchaseOrders.viewAll
       purchaseOrders: {
+        where: purchaseOrderVisibilityWhere(ctx),
         include: {
           vendor: { select: { name: true } },
           lineItems: { orderBy: { sortOrder: "asc" } },

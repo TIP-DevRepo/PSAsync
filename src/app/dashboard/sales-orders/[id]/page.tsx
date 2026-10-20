@@ -87,7 +87,10 @@ interface SalesOrderDetail {
   user: { id: string; name: string }
   quote: { id: string; quoteNumber: string } | null
   lineItems: SOLineItem[]
+  // Only the linked purchase orders this user may open
   purchaseOrders: PurchaseOrderSummary[]
+  // Every purchase order generated from it, including ones this user can't open
+  _count?: { purchaseOrders: number }
 }
 
 interface SOCommentType {
@@ -447,7 +450,8 @@ function SalesOrderDetail({ params }: { params: Promise<{ id: string }> }) {
   // Same line the Delete block already draws: once a Purchase Order has
   // been generated from this order, payment and billing/shipping details
   // stop being editable.
-  const locked = so.purchaseOrders.length > 0
+  // Counted over every linked purchase order, not only the ones listed
+  const locked = (so._count?.purchaseOrders ?? so.purchaseOrders.length) > 0
   const canEditFields = canEdit && !locked
 
   const bundleChildIds = new Set<string>()
@@ -797,7 +801,11 @@ function SalesOrderDetail({ params }: { params: Promise<{ id: string }> }) {
             <div className="space-y-3">
               <h2 className="font-semibold text-sm text-foreground">Purchase Orders</h2>
               {so.purchaseOrders.length === 0 && (
-                <p className="text-sm text-muted-foreground">No Purchase Orders generated yet.</p>
+                <p className="text-sm text-muted-foreground">
+                  {(so._count?.purchaseOrders ?? 0) > 0
+                    ? "Purchase Orders were generated from this order, but you don't have access to view them."
+                    : "No Purchase Orders generated yet."}
+                </p>
               )}
               {so.purchaseOrders.map((po) => (
                 <div key={po.id} className="rounded-lg border border-border bg-card shadow-card overflow-hidden">
