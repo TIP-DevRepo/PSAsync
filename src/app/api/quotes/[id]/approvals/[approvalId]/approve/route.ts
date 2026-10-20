@@ -59,6 +59,8 @@ export async function POST(
   // If every requirement on this quote is now approved, complete the send.
   // A failed send leaves the approval standing and the quote in DRAFT with
   // the email still held for the owner to send, and comes back as a warning.
+  // So does a quote that changed after approval was requested (stale),
+  // which is not sent and needs approval again.
   const remaining = await prisma.quoteApproval.count({
     where: { quoteId: id, status: "PENDING" },
   })
@@ -70,5 +72,6 @@ export async function POST(
     allApproved: remaining === 0,
     emailSent: completion?.outcome === "sent",
     ...(completion?.outcome === "send_failed" ? { warning: completion.warning } : {}),
+    ...(completion?.outcome === "stale" ? { warning: completion.warning, stale: true } : {}),
   })
 }

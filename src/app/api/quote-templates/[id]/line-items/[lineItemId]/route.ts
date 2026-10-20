@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
+import { RecurringInterval } from "@/generated/prisma"
+import { apiError, canSeeCost, isEnumValue, notFound, omitCost, requireAccess } from "@/lib/api-access"
 import { mayWriteCost } from "@/lib/line-item-cost"
 
 // Templates are maintained from Quote Settings
@@ -29,6 +30,16 @@ export async function PATCH(
   if (!existing) return notFound()
 
   const body = await req.json()
+
+  // Same rules as the writes below, and as the quote line item PATCH:
+  // turning recurring on falls back to MONTHLY, and an interval sent on its
+  // own is written as is, so either must be a real interval
+  const interval = body.recurringInterval
+  const writesInterval =
+    body.isRecurring !== undefined ? Boolean(body.isRecurring) && !!interval : interval !== undefined && interval !== null
+  if (writesInterval && !isEnumValue(RecurringInterval, interval)) {
+    return apiError(400, "Invalid recurring interval")
+  }
 
   // Only update fields that were actually sent, so partial saves (e.g. one
   // field losing focus) don't clobber the rest of the row

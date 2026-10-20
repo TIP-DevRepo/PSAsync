@@ -3,7 +3,7 @@ import { signIn } from "@/auth"
 import { createSsoRelayToken } from "@/lib/sso-relay-token"
 import { prisma } from "@/lib/prisma"
 import { checkSsoTenant } from "@/lib/sso-tenant"
-import { decideFirstSignIn, firstSignInEmails, readSsoClaims } from "@/lib/sso-match"
+import { decideFirstSignIn, firstSignInName, readSsoClaims } from "@/lib/sso-match"
 
 export async function GET(req: NextRequest) {
   const code = req.nextUrl.searchParams.get("code")
@@ -86,22 +86,25 @@ export async function GET(req: NextRequest) {
     : null
 
   // First sign in: the stored PSAsync email must equal the id token's sign
-  // in name (preferred_username) or email claim, ignoring case. The rules
-  // (one match only, never relink an account or overwrite a link) are in
-  // decideFirstSignIn.
+  // in name (preferred_username, the UPN), ignoring case. The email claim
+  // is the directory mail attribute, which an admin can set to anything,
+  // so it is never used. The rules (one match only, never relink an
+  // account or overwrite a link) are in decideFirstSignIn.
   if (!user) {
-    const emails = firstSignInEmails(claims)
-    if (emails.length === 0) {
-      return NextResponse.redirect(new URL("/login?error=no_email_on_account", req.url))
+    const signInName = firstSignInName(claims)
+    if (!signInName) {
+      // Never logs the address or any other claim
+      console.warn("SSO first sign in refused: the ID token has no sign in name (preferred_username)")
+      return NextResponse.redirect(new URL("/login?error=no_account_found", req.url))
     }
     const [matches, linked] = await Promise.all([
       prisma.user.findMany({
-        where: { companyId, OR: emails.map((e) => ({ email: { equals: e, mode: "insensitive" as const } })) },
+        where: { companyId, email: { equals: signInName, mode: "insensitive" } },
         select: { id: true, email: true, active: true, microsoftId: true },
       }),
       msId ? prisma.user.findFirst({ where: { microsoftId: msId }, select: { id: true } }) : null,
     ])
-    const decision = decideFirstSignIn(emails, matches, msId, linked?.id ?? null)
+    const decision = decideFirstSignIn(signInName, matches, msId, linked?.id ?? null)
     if (!decision.ok) {
       return NextResponse.redirect(new URL(`/login?error=${decision.error}`, req.url))
     }

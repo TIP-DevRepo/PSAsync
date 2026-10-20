@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteEvent } from "@/lib/notify"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
-import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
+import { alreadyRespondedResponse, AWAITING_RESPONSE_STATUSES, linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { checkAcceptBody, readPortalBody } from "@/lib/portal-input"
 import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
@@ -28,8 +28,12 @@ export async function POST(
   // A field that wasn't sent keeps the quote's value; an empty PO number
   // keeps it too, as before
   const keep = <T>(sent: T | undefined, current: T) => (sent !== undefined ? sent : current)
-  const updated = await prisma.quote.update({
-    where: { id: quote.id },
+  // The decision is one conditional write on the quote still waiting on
+  // the customer, so of an accept and a decline (or two accepts) sent at
+  // the same time exactly one wins. Only the winner notifies and creates
+  // the sales order.
+  const decided = await prisma.quote.updateMany({
+    where: { id: quote.id, status: { in: [...AWAITING_RESPONSE_STATUSES] } },
     data: {
       status: "ACCEPTED",
       acceptedAt: new Date(),
@@ -45,8 +49,11 @@ export async function POST(
       shipCountry: keep(input.shipCountry, quote.shipCountry),
       shipContactName: keep(input.shipContactName, quote.shipContactName),
     },
-    select: portalQuoteSelect,
   })
+  if (decided.count !== 1) return alreadyRespondedResponse()
+
+  const updated = await prisma.quote.findUnique({ where: { id: quote.id }, select: portalQuoteSelect })
+  if (!updated) return linkInvalidResponse()
 
   notifyQuoteEvent(quote.id, "QUOTE_APPROVED").catch((err) =>
     console.error("notifyQuoteEvent failed:", err)

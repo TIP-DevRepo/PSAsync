@@ -29,11 +29,24 @@
 // refused before any mail would go out. The success path of the sender
 // rules is checked through send-options instead.
 //
-// The last step, checkHeldEmailApproval, holds an email for approval and
+// The step checkHeldEmailApproval holds an email for approval and
 // approves it. With no Microsoft credentials the held email can't be sent,
 // which is exactly the failed send it checks: the approval stands, the
 // quote returns to DRAFT with the email kept, and nothing is sent twice.
 // Everything it changes is put back afterwards.
+//
+// The round two steps after it: checkStatusApproval switches the sample
+// workflow on and checks that Test Admin B can't move the draft sample
+// quote to SENT or ACCEPTED through the status route (DECLINED works), and
+// can with the workflow off. checkStaleApproval has Test Admin B request
+// approval with an email (never sent, no credentials), change a line price,
+// and Test Approver B (made by this script: the Quotes page and approving,
+// not a Global Admin) approve it, which must not send it: the quote goes
+// back to DRAFT with the email kept and the approvals no longer counting.
+// checkSalesOrderLinkedPurchaseOrders links Test Admin B's second sample
+// purchase order to Test Orders B's sales order and checks Orders B can't
+// see it there. Each step puts the quote, the workflow, the line price,
+// the purchase order link, and any notification it made back.
 
 import bcrypt from "bcryptjs"
 import { Prisma, type PrismaClient } from "@/generated/prisma"
@@ -911,6 +924,13 @@ const ATTEMPTS: Attempt[] = [
       return shared?.isShared ? null : "the shared mailbox should be marked isShared"
     },
   },
+  // ── Number prefixes (round two, N-25): letters, digits, and hyphens only ──
+  { name: "Quote number prefix with a quote and a space", actor: "admin", kind: "refused", method: "PATCH", path: () => "/api/quote-settings", body: () => ({ quotePrefix: 'Q "bad"' }), expect: 400, expectError: "Quote number prefix can only use" },
+  { name: "Sales order number prefix with a space", actor: "admin", kind: "refused", method: "PATCH", path: () => "/api/so-po-settings", body: () => ({ soPrefix: "S O" }), expect: 400, expectError: "Sales order number prefix can only use" },
+  { name: "Purchase order number prefix over 10 characters", actor: "admin", kind: "refused", method: "PATCH", path: () => "/api/so-po-settings", body: () => ({ poPrefix: "PURCHASEORD" }), expect: 400, expectError: "Purchase order number prefix can only use" },
+  // ── Template lines (round two, #80): a bad recurring interval is a 400 ──
+  { name: "Template line with a made up recurring interval", actor: "templater", kind: "refused", method: "PATCH", path: (c) => `/api/quote-templates/${c.fx.costTemplateId}/line-items/${c.fx.costTemplateLineId}`, body: () => ({ recurringInterval: "WEEKLY" }), expect: 400, expectError: "Invalid recurring interval" },
+
   { name: "Disconnect someone else's shared mailbox", actor: "sender", kind: "refused", sharedMode: "admin", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
   // Even one's own mailbox needs Integrations access while it is the shared sender
   { name: "Disconnect own mailbox while it is the shared sender", actor: "sender", kind: "refused", sharedMode: "sender", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.senderMailboxId}`, expect: 403, expectError: "shared quote sender" },
@@ -1209,6 +1229,249 @@ async function checkHeldEmailApproval(prisma: PrismaClient, admin: Session, ctx:
   }
 }
 
+// Test Approver B inside Test Company B: the Quotes page and approving,
+// not a Global Admin, so it decides an approval it didn't request. Reset to
+// the same known state every run, password in memory only.
+async function ensureApproverFixture(prisma: PrismaClient, b: SampleIds) {
+  const n = testNames("B")
+  const companyId = b.companyId
+  const approverPermissions = { pages: { quotes: true }, quotes: { approve: true } }
+
+  const existingRole = await prisma.role.findFirst({ where: { companyId, name: n.approverRole } })
+  const role = existingRole
+    ? await prisma.role.update({ where: { id: existingRole.id }, data: { rank: 7, permissions: approverPermissions } })
+    : await prisma.role.create({ data: { companyId, name: n.approverRole, rank: 7, permissions: approverPermissions } })
+
+  const password = generatePassword(20)
+  const hashed = await bcrypt.hash(password, BCRYPT_COST)
+  const existing = await prisma.user.findUnique({ where: { email: n.approverEmail } })
+  if (existing && existing.companyId !== companyId) {
+    throw new HarnessBroken(`${n.approverEmail} belongs to a different company, refusing to change it`)
+  }
+  const reset = { password: hashed, active: true, mustChangePassword: false, loginFailedAttempts: 0, loginLockedUntil: null }
+  const user = existing
+    ? await prisma.user.update({ where: { id: existing.id }, data: { name: n.approverName, ...reset } })
+    : await prisma.user.create({ data: { companyId, name: n.approverName, email: n.approverEmail, ...reset } })
+  await setUserRoles(prisma, user.id, [role.id])
+
+  return { email: n.approverEmail, password, roleId: role.id }
+}
+
+// The quote fields the round two steps below change, for every version of
+// Test Company B's sample quote, so each step can put them back exactly
+const SAMPLE_QUOTE_FIELDS = {
+  id: true,
+  status: true,
+  sentAt: true,
+  viewedAt: true,
+  acceptedAt: true,
+  declinedAt: true,
+  isActive: true,
+  terms: true,
+  useDefaultTerms: true,
+  internalNotes: true,
+  pendingEmailPayload: true,
+} as const
+
+async function saveSampleQuote(prisma: PrismaClient, quoteId: string) {
+  const q = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { companyId: true, quoteNumber: true } })
+  return prisma.quote.findMany({ where: { companyId: q.companyId, quoteNumber: q.quoteNumber }, select: SAMPLE_QUOTE_FIELDS })
+}
+
+async function restoreSampleQuote(prisma: PrismaClient, saved: Awaited<ReturnType<typeof saveSampleQuote>>) {
+  for (const { id, pendingEmailPayload, ...fields } of saved) {
+    await prisma.quote.update({
+      where: { id },
+      data: { ...fields, pendingEmailPayload: pendingEmailPayload === null ? Prisma.DbNull : (pendingEmailPayload as Prisma.InputJsonValue) },
+    })
+  }
+}
+
+// Round two, N-1: changing a draft quote's status by hand runs the same
+// approval workflow check as Send Quote. Runs as Test Admin B (who holds
+// quotes.changeStatus) on its own sample quote, with the sample workflow
+// switched on and then off, and puts everything back.
+async function checkStatusApproval(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const quoteId = ctx.b.quoteId
+  const workflowId = ctx.b.workflowId
+  const label = (name: string) => `[Admin B] Status needs approval: ${name}`
+  const row = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const status = (s: string) => admin.request("POST", `/api/quotes/${quoteId}/status`, { json: { status: s } })
+  const current = async () => (await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { status: true } })).status
+
+  const workflow = await prisma.approvalWorkflow.findUniqueOrThrow({ where: { id: workflowId } })
+  const saved = await saveSampleQuote(prisma, quoteId)
+  const salesOrdersBefore = await prisma.salesOrder.count({ where: { quoteId } })
+  try {
+    // Every quote of the company now needs approval
+    await prisma.approvalWorkflow.update({
+      where: { id: workflowId },
+      data: { active: true, triggerType: "TOTAL_THRESHOLD", thresholdValue: 0, triggerUserId: null },
+    })
+    for (const target of ["SENT", "ACCEPTED"]) {
+      const res = await status(target)
+      const now = await current()
+      const ok = res.status === 400 && errorText(res.text).includes("needs approval before it can be changed") && now === "DRAFT"
+      row(`${target} with an active workflow is refused`, '400 "needs approval", still DRAFT', `${res.status}, ${now}`, ok ? null : errorText(res.text))
+    }
+    const madeSalesOrder = (await prisma.salesOrder.count({ where: { quoteId } })) !== salesOrdersBefore
+    row("refused ACCEPTED made no sales order", "no new sales order", madeSalesOrder ? "a sales order" : "none", madeSalesOrder ? "a sales order was created" : null)
+
+    const declined = await status("DECLINED")
+    const afterDecline = await current()
+    row("DECLINED is always allowed", "200, DECLINED", `${declined.status}, ${afterDecline}`, declined.status === 200 && afterDecline === "DECLINED" ? null : errorText(declined.text))
+    await restoreSampleQuote(prisma, saved)
+
+    // With the workflow off, the same change goes through as before
+    await prisma.approvalWorkflow.update({ where: { id: workflowId }, data: { active: false } })
+    const sent = await status("SENT")
+    const afterSend = await current()
+    row("SENT with the workflow off is allowed", "200, SENT", `${sent.status}, ${afterSend}`, sent.status === 200 && afterSend === "SENT" ? null : errorText(sent.text))
+  } finally {
+    await prisma.approvalWorkflow.update({
+      where: { id: workflowId },
+      data: { active: workflow.active, triggerType: workflow.triggerType, thresholdValue: workflow.thresholdValue, triggerUserId: workflow.triggerUserId },
+    })
+    await restoreSampleQuote(prisma, saved)
+  }
+}
+
+// Round two, N-2: a quote changed after approval was requested is not sent
+// when the approval comes in. Test Admin B requests approval with an email
+// (it can't go out: the test company has no Microsoft credentials), changes
+// a line price through the API, and Test Approver B approves. Everything is
+// put back, the notification it makes included.
+async function checkStaleApproval(
+  prisma: PrismaClient,
+  admin: Session,
+  approver: Session,
+  approverRoleId: string,
+  ctx: AttemptContext,
+  rows: Row[]
+) {
+  const quoteId = ctx.b.quoteId
+  const workflowId = ctx.b.workflowId
+  const lineId = ctx.b.quoteLineId
+  const label = (name: string) => `[Admin B, Approver B] Stale approval: ${name}`
+  const row = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+
+  const workflow = await prisma.approvalWorkflow.findUniqueOrThrow({ where: { id: workflowId } })
+  const line = await prisma.quoteLineItem.findUniqueOrThrow({ where: { id: lineId }, select: { unitPrice: true } })
+  const saved = await saveSampleQuote(prisma, quoteId)
+  const startedAt = new Date()
+  try {
+    await prisma.approvalWorkflow.update({
+      where: { id: workflowId },
+      data: { active: true, triggerType: "TOTAL_THRESHOLD", thresholdValue: 0, triggerUserId: null, requiredRoleId: approverRoleId },
+    })
+    const send = await admin.request("POST", `/api/quotes/${quoteId}/send-email`, { json: sendBody() })
+    const held = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { status: true } })
+    const heldOk = send.status === 200 && held.status === "PENDING_APPROVAL"
+    row("send is held for approval", "200, PENDING_APPROVAL", `${send.status}, ${held.status}`, heldOk ? null : errorText(send.text))
+    if (!heldOk) return
+
+    const edit = await admin.request("PATCH", `/api/quotes/${quoteId}/line-items/${lineId}`, { json: { unitPrice: line.unitPrice + 1 } })
+    row("owner changes a line price while pending", "200", String(edit.status), edit.status === 200 ? null : errorText(edit.text))
+
+    const approval = await prisma.quoteApproval.findFirst({ where: { quoteId, workflowId, status: "PENDING" }, select: { id: true } })
+    if (!approval) {
+      row("approval was requested", "a pending approval", "none", "no pending approval was created")
+      return
+    }
+    const approve = await approver.request("POST", `/api/quotes/${quoteId}/approvals/${approval.id}/approve`)
+    let body: { warning?: string; stale?: boolean } = {}
+    try {
+      body = JSON.parse(approve.text)
+    } catch {
+      // reported below
+    }
+    const after = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { status: true, sentAt: true, pendingEmailPayload: true } })
+    const kept = after.pendingEmailPayload as { to?: string; approvalStale?: boolean; approvedFingerprint?: string } | null
+    const notified = await prisma.notification.count({ where: { link: `/dashboard/quotes/${quoteId}`, createdAt: { gte: startedAt } } })
+    const problem =
+      approve.status !== 200
+        ? `approve returned ${approve.status}: ${errorText(approve.text)}`
+        : !body.stale || !body.warning?.includes("changed after approval was requested")
+          ? "no stale warning in the response"
+          : after.status !== "DRAFT" || after.sentAt
+            ? `quote is ${after.status}${after.sentAt ? " and was marked sent" : ""}`
+            : !kept?.to
+              ? "the held email was not kept"
+              : !kept.approvalStale || kept.approvedFingerprint
+                ? "the approvals still count"
+                : notified === 0
+                  ? "the owner was not notified"
+                  : null
+    row("approving a changed quote does not send it", "200 stale warning, DRAFT, email kept, owner notified", `${approve.status}, ${after.status}`, problem)
+  } finally {
+    await prisma.approvalWorkflow.update({
+      where: { id: workflowId },
+      data: {
+        active: workflow.active,
+        triggerType: workflow.triggerType,
+        thresholdValue: workflow.thresholdValue,
+        triggerUserId: workflow.triggerUserId,
+        requiredRoleId: workflow.requiredRoleId,
+      },
+    })
+    await prisma.quoteLineItem.update({ where: { id: lineId }, data: { unitPrice: line.unitPrice } })
+    await prisma.quoteApproval.deleteMany({ where: { quoteId } })
+    await prisma.notification.deleteMany({ where: { link: `/dashboard/quotes/${quoteId}`, createdAt: { gte: startedAt } } })
+    await restoreSampleQuote(prisma, saved)
+  }
+}
+
+// Round two, #56: a sales order lists only the linked purchase orders the
+// user may open. Test Company B's second sample purchase order (owned by
+// Test Admin B) is linked to Test Orders B's sales order for the step and
+// unlinked afterwards.
+async function checkSalesOrderLinkedPurchaseOrders(prisma: PrismaClient, admin: Session, orders: Session, ctx: AttemptContext, rows: Row[]) {
+  const poId = ctx.b.purchaseOrder2Id
+  const soId = ctx.fx.ordersSalesOrderId
+  const label = (who: string, name: string) => `[${who}] Linked purchase orders: ${name}`
+  const original = await prisma.purchaseOrder.findUniqueOrThrow({ where: { id: poId }, select: { salesOrderId: true } })
+  try {
+    await prisma.purchaseOrder.update({ where: { id: poId }, data: { salesOrderId: soId } })
+
+    const asOrders = await orders.request("GET", `/api/sales-orders/${soId}`)
+    let count = -1
+    try {
+      count = (JSON.parse(asOrders.text) as { _count?: { purchaseOrders?: number } })._count?.purchaseOrders ?? -1
+    } catch {
+      // reported below
+    }
+    const ordersProblem =
+      asOrders.status !== 200
+        ? `got ${asOrders.status}: ${errorText(asOrders.text)}`
+        : asOrders.text.includes(poId)
+          ? "the admin's purchase order is in the response"
+          : count < 1
+            ? "the linked purchase order count is missing"
+            : null
+    rows.push({
+      attempt: label("Orders B", "another user's purchase order is not shown"),
+      expected: "200 without the admin's purchase order",
+      actual: String(asOrders.status),
+      result: ordersProblem ? "FAIL" : "PASS",
+      note: ordersProblem ?? undefined,
+    })
+
+    const asAdmin = await admin.request("GET", `/api/sales-orders/${soId}`)
+    const adminProblem = asAdmin.status !== 200 ? `got ${asAdmin.status}` : !asAdmin.text.includes(poId) ? "the purchase order is missing" : null
+    rows.push({
+      attempt: label("Admin B", "Global Admin still sees it"),
+      expected: "200 with the purchase order",
+      actual: String(asAdmin.status),
+      result: adminProblem ? "FAIL" : "PASS",
+      note: adminProblem ?? undefined,
+    })
+  } finally {
+    await prisma.purchaseOrder.update({ where: { id: poId }, data: { salesOrderId: original.salesOrderId } })
+  }
+}
+
 function expectedText(a: Attempt) {
   if (a.location) return `${a.expect} to ${a.location}`
   return `${a.expect}${a.expectError ? ` "${a.expectError}"` : ""}`
@@ -1425,6 +1688,16 @@ async function main() {
     // Approval of a held email whose send fails
     await setSenderMode("CREATOR", null)
     await checkHeldEmailApproval(prisma, sessions.admin, ctx, rows)
+
+    // Round two: a manual status change needs approval (N-1), a quote
+    // changed after approval was requested is not sent (N-2), and a sales
+    // order shows only the purchase orders the user may open (#56)
+    await checkStatusApproval(prisma, sessions.admin, ctx, rows)
+    const approverFixture = await ensureApproverFixture(prisma, b)
+    const approver = new Session("Test Approver B", baseUrl)
+    await approver.signIn(approverFixture.email, approverFixture.password)
+    await checkStaleApproval(prisma, sessions.admin, approver, approverFixture.roleId, ctx, rows)
+    await checkSalesOrderLinkedPurchaseOrders(prisma, sessions.admin, sessions.orders, ctx, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length

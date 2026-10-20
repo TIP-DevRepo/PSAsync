@@ -11,6 +11,13 @@ import {
 } from "@/lib/distributors/types"
 import { generateMockResults, generateMockOffer } from "@/lib/distributors/mock-data"
 
+// One short line for a failed distributor call: the first line of our own
+// adapters' messages (status codes only), never the error object, which for
+// the Ingram SDK carries the request and its bearer token
+function failureReason(err: unknown): string {
+  return err instanceof Error ? err.message.trim().split("\n")[0].slice(0, 200) : typeof err
+}
+
 // An offer without the dealer price and cost, for users who can't see cost.
 // Availability and SKU are kept.
 function withoutPricing(offer: DistributorOffer): DistributorOffer {
@@ -92,7 +99,7 @@ export async function GET(req: NextRequest) {
         const results = await adapter.search(query, credsFor(record), isSandboxFor(record))
         results.forEach((result) => discovered.push({ result }))
       } catch (err) {
-        console.error(`${distributorKey} discovery search failed:`, err)
+        console.error(`${distributorKey} discovery search failed: ${failureReason(err)}`)
       }
     })
   )
@@ -201,7 +208,7 @@ export async function GET(req: NextRequest) {
                 }
           )
         } catch (err) {
-          console.error(`${distributorKey} fill-in lookup failed:`, err)
+          console.error(`${distributorKey} fill-in lookup failed: ${failureReason(err)}`)
           product.offers.push({
             distributorKey,
             distributorLabel: label,

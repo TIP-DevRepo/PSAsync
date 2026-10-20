@@ -3,6 +3,7 @@ import { notFound, requireAccess } from "@/lib/api-access"
 import { assertRefs, loadViewablePurchaseOrder } from "@/lib/scoped-loaders"
 import { prisma } from "@/lib/prisma"
 import { generateAssetTag } from "@/lib/inventory/generateAssetTag"
+import { userFacingError } from "@/lib/user-error"
 
 export async function POST(
   req: NextRequest,
@@ -211,8 +212,9 @@ export async function POST(
       // shipToClient non-serialized: intentionally not tracked in Inventory.
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Couldn't complete receiving"
-    return NextResponse.json({ error: message }, { status: 400 })
+    // Only our own UserError messages (the asset tag rules) reach the user
+    const { message, status } = userFacingError(err, "Receiving a purchase order line")
+    return NextResponse.json({ error: message }, { status })
   }
 
   const updatedLineItem = await prisma.pOLineItem.update({

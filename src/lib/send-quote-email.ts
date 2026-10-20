@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
 import { asSent, resolveQuoteTerms, type TermsFreeze } from "@/lib/quote-terms"
+import { quotePdfName } from "@/lib/content-disposition"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
 
@@ -27,6 +28,14 @@ export interface SendQuoteEmailInput {
 export interface SendQuoteEmailResult {
   success: boolean
   error?: string
+}
+
+// A failed Graph call for the server log: the status and Graph's error
+// code only. The message can name the recipients' addresses.
+async function graphErrorSummary(res: Response): Promise<string> {
+  const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null
+  const code = typeof body?.error?.code === "string" ? ` ${body.error.code}` : ""
+  return `${res.status}${code}`
 }
 
 function toRecipients(list: string) {
@@ -173,7 +182,7 @@ async function sendFromConnection(
       })
       attachments.push({
         "@odata.type": "#microsoft.graph.fileAttachment",
-        name: `${quote.quoteNumber}${quote.version > 1 ? `-v${quote.version}` : ""}.pdf`,
+        name: quotePdfName(quote.quoteNumber, quote.version),
         contentType: "application/pdf",
         contentBytes: Buffer.from(pdfBuffer).toString("base64"),
       })
@@ -200,8 +209,7 @@ async function sendFromConnection(
   })
 
   if (!sendRes.ok) {
-    const errText = await sendRes.text()
-    console.error("Microsoft Graph sendMail failed:", errText)
+    console.error(`Microsoft Graph sendMail failed: ${await graphErrorSummary(sendRes)}`)
     return { success: false, error: "Microsoft rejected the email. Please try again." }
   }
 
@@ -283,8 +291,7 @@ export async function sendCompanyNotificationEmail(
   })
 
   if (!sendRes.ok) {
-    const errText = await sendRes.text()
-    console.error("Microsoft Graph sendMail failed:", errText)
+    console.error(`Microsoft Graph sendMail failed: ${await graphErrorSummary(sendRes)}`)
     return { success: false, error: "Microsoft rejected the email." }
   }
 

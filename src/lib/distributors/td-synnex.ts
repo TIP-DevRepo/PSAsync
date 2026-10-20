@@ -3,6 +3,7 @@ import {
   DistributorCredentials,
   DistributorSearchResult,
   TestConnectionResult,
+  connectionFailed,
 } from "./types"
 
 // TD Synnex's OAuth token endpoint is shared across all regions/environments —
@@ -71,10 +72,7 @@ export const tdSynnexAdapter: DistributorAdapter = {
         status: `Connected (${sandboxMode ? "Sandbox" : "Production"})`,
       }
     } catch (err) {
-      return {
-        success: false,
-        status: `Connection failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-      }
+      return connectionFailed("TD Synnex", err)
     }
   },
 

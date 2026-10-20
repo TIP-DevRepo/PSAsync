@@ -6,6 +6,7 @@ import { resolveQuoteTerms } from "@/lib/quote-terms"
 import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
+import { attachmentDisposition, quotePdfName } from "@/lib/content-disposition"
 
 // PDF rendering needs the Node.js runtime (not Edge) and more time than the
 // default serverless timeout allows
@@ -72,9 +73,8 @@ export async function GET(
     return new NextResponse(Buffer.from(pdfBuffer), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${quote.quoteNumber}${
-          quote.version > 1 ? `-v${quote.version}` : ""
-        }.pdf"`,
+        // Built from the stored quote number, so through the shared helper
+        "Content-Disposition": attachmentDisposition(quotePdfName(quote.quoteNumber, quote.version), "quote.pdf"),
       },
     })
   } finally {

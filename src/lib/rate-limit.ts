@@ -223,6 +223,79 @@ export function isKnownBlocked(key: RateLimitKey, ip: string | null): LimitStatu
   }
 }
 
+// ─── Per subject limits ─────────────────────────────────────────────────
+// Some public work is expensive even for a request that is allowed: each
+// portal PDF starts a headless browser and each portal comment emails the
+// rep. Those count EVERY request per customer link, whatever the network,
+// in the same table and fixed windows as the IP limits. The subject (the
+// link's token) is hashed with the key like an IP, never stored as is.
+
+export const SUBJECT_LIMITS = {
+  // Portal PDF downloads per customer link
+  "portal-pdf": { limit: 20, windowSeconds: 60 * 60 },
+  // Portal comments posted per customer link
+  "portal-comment": { limit: 30, windowSeconds: 60 * 60 },
+} as const satisfies Record<string, RateLimitRule>
+
+export type SubjectLimitKey = keyof typeof SUBJECT_LIMITS
+
+export function hashSubject(key: string, subject: string): string {
+  return createHash("sha256").update(`${key}:${subject}`).digest("hex")
+}
+
+// Counts one request for this key and subject and reports blocked once the
+// count passes limit within the window. One upsert per request (none for a
+// subject this instance already knows is blocked). Fails open like every
+// other limit: any error lets the request through. Never throws.
+export async function consume(key: string, subject: string, limit: number, windowMs: number): Promise<LimitStatus> {
+  if (!subject) return NOT_BLOCKED
+  const windowSeconds = Math.max(1, Math.round(windowMs / 1000))
+  const nowMs = Date.now()
+  try {
+    const hashed = hashSubject(key, subject)
+    const known = knownBlock(hashed, nowMs)
+    if (known.blocked) return known
+    const start = windowStartSeconds(nowMs, windowSeconds)
+    const rows = await withTimeout(prisma.$queryRaw<{ count: number }[]>`
+      INSERT INTO "rate_limits" ("id", "key", "hashedIp", "windowStart", "count", "createdAt", "updatedAt")
+      VALUES (${randomUUID()}, ${key}, ${hashed}, (to_timestamp(${start}) AT TIME ZONE 'UTC'), 1, NOW(), NOW())
+      ON CONFLICT ("key", "hashedIp", "windowStart")
+      DO UPDATE SET "count" = "rate_limits"."count" + 1, "updatedAt" = NOW()
+      RETURNING "count"
+    `)
+    cleanupIfDue(nowMs)
+    const count = Number(rows[0]?.count ?? 0)
+    if (count > limit) {
+      rememberBlock(hashed, (start + windowSeconds) * 1000)
+      return { blocked: true, retryAfterSeconds: retryAfterSeconds(nowMs, windowSeconds) }
+    }
+    return NOT_BLOCKED
+  } catch (err) {
+    warnFailOpen(`consume ${key}`, err)
+    return NOT_BLOCKED
+  }
+}
+
+// consume with a SUBJECT_LIMITS rule
+export function consumeSubject(key: SubjectLimitKey, subject: string): Promise<LimitStatus> {
+  const rule = SUBJECT_LIMITS[key]
+  return consume(key, subject, rule.limit, rule.windowSeconds * 1000)
+}
+
+// The 429 for a customer link that has been used too often, worded for the
+// customer (it is the link, not their network)
+export function linkLimitedResponse(retryAfter: number) {
+  const minutes = minutesUntil(retryAfter)
+  return NextResponse.json(
+    {
+      error: `This quote link has been used too often. Please try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`,
+      code: RATE_LIMITED_CODE,
+      retryAfterSeconds: retryAfter,
+    },
+    { status: 429, headers: { "Retry-After": String(retryAfter) } }
+  )
+}
+
 export function minutesUntil(retryAfter: number): number {
   return Math.max(1, Math.ceil(retryAfter / 60))
 }

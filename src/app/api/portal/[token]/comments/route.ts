@@ -3,6 +3,7 @@ import { notifyQuoteComment } from "@/lib/notify"
 import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { PORTAL_COMMENT_MAX, readPortalBody, requiredText } from "@/lib/portal-input"
 import { prisma } from "@/lib/prisma"
+import { consumeSubject, linkLimitedResponse } from "@/lib/rate-limit"
 
 export async function GET(
   req: NextRequest,
@@ -32,6 +33,11 @@ export async function POST(
   const access = await resolvePortalAccess(token, "act", { request: req })
   if (!access.ok) return access.response
   const activeId = access.quoteId
+
+  // Each comment emails the rep, so a customer link has its own limit per
+  // hour (only a customer link can comment)
+  const limit = await consumeSubject("portal-comment", token)
+  if (limit.blocked) return linkLimitedResponse(limit.retryAfterSeconds)
 
   const body = await readPortalBody(req)
   const checked = requiredText(body.message, "Message", PORTAL_COMMENT_MAX)

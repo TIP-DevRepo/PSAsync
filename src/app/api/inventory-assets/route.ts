@@ -6,6 +6,7 @@ import { logAssetEvent } from "@/lib/inventory/logAssetEvent"
 import type { InventoryRemovedReason } from "@/generated/prisma"
 import { requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
+import { userFacingError } from "@/lib/user-error"
 
 const VALID_STATUSES = ["IN_STOCK", "INTERNAL", "LOANED", "SOLD", "PENDING_OFFBOARD", "REMOVED"] as const
 
@@ -275,7 +276,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(asset)
   } catch (err) {
-    const message = err instanceof Error ? err.message : "Couldn't add this asset"
-    return NextResponse.json({ error: message }, { status: 400 })
+    // Only our own UserError messages (the asset tag rules) reach the user
+    const { message, status } = userFacingError(err, "Adding an inventory asset")
+    return NextResponse.json({ error: message }, { status })
   }
 }

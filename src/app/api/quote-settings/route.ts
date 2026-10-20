@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { quoteSettingsSelect } from "@/lib/safe-selects"
 import { apiError, requireAccess } from "@/lib/api-access"
 import { termsForStorage, termsToDisplayHtml } from "@/lib/sanitize-terms"
+import { numberPrefixProblem } from "@/lib/number-prefix"
 
 // Any active user, since the quote pages read these defaults
 export async function GET() {
@@ -51,6 +52,17 @@ export async function PATCH(req: NextRequest) {
   const approvalThreshold = body.quoteApprovalThreshold ? readNumberField(body.quoteApprovalThreshold) : undefined
   if (approvalThreshold !== undefined && !Number.isFinite(approvalThreshold)) {
     return apiError(400, "Approval threshold must be a number")
+  }
+
+  // The prefix becomes part of every quote number and PDF name. Checked
+  // only when it changes, so a company whose stored prefix predates the
+  // rule can still save its other settings.
+  if (body.quotePrefix !== undefined) {
+    const stored = await prisma.companySettings.findUnique({ where: { companyId: ctx.companyId }, select: { quotePrefix: true } })
+    if (body.quotePrefix !== (stored?.quotePrefix ?? "Q")) {
+      const problem = numberPrefixProblem(body.quotePrefix, "Quote number")
+      if (problem) return apiError(400, problem)
+    }
   }
 
   // If a specific mailbox was chosen, make sure it actually belongs to

@@ -5,6 +5,7 @@ import { Button as HeroButton } from "@heroui/react"
 import { AcceptFlowModal } from "./AcceptFlowModal"
 import { formatValidUntil } from "@/lib/quote-expiry"
 import { PORTAL_COMMENT_MAX, PORTAL_DECLINE_REASON_MAX, PORTAL_QUANTITY_MAX } from "@/lib/portal-input"
+import { toast } from "@/lib/toast"
 
 const pdfButtonStyle = `
   .pdf-download-btn {
@@ -154,6 +155,9 @@ export default function PortalPage({
   const [expired, setExpired] = useState<ExpiredBranding | null>(null)
   // Too many links that didn't open from this network (429)
   const [rateLimited, setRateLimited] = useState<string | null>(null)
+  // An internal preview link opened without a signed in session (401)
+  const [signInRequired, setSignInRequired] = useState(false)
+  const [downloadingPdf, setDownloadingPdf] = useState(false)
   const [showDeclineForm, setShowDeclineForm] = useState(false)
   const [declineReason, setDeclineReason] = useState("")
   const [comment, setComment] = useState("")
@@ -182,6 +186,9 @@ export default function PortalPage({
         } else if (res.status === 429) {
           setRateLimited(typeof data?.error === "string" ? data.error : "Too many attempts from your network. Try again later.")
           setQuote(null)
+        } else if (res.status === 401 && data?.code === "SIGN_IN_REQUIRED") {
+          setSignInRequired(true)
+          setQuote(null)
         } else if (!res.ok || !data || !Array.isArray(data.lineItems)) {
           setNotFound(true)
           setQuote(null)
@@ -201,6 +208,21 @@ export default function PortalPage({
   if (loading) return <div className="p-10 text-center text-zinc-500">Loading your quote...</div>
   if (expired) return <ExpiredQuote company={expired} />
   if (rateLimited) return <div className="p-10 text-center text-zinc-500">{rateLimited}</div>
+  // The login page always goes on to the dashboard after signing in, so the
+  // preview link is opened again from there
+  if (signInRequired)
+    return (
+      <div className="p-10 text-center text-zinc-500 space-y-4">
+        <p>Sign in to PSAsync to view this internal preview.</p>
+        <a
+          href="/login"
+          className="inline-block rounded-md bg-zinc-900 px-4 py-2 text-sm font-medium text-white hover:bg-zinc-700"
+        >
+          Sign in
+        </a>
+        <p className="text-xs">After signing in, open the preview link again.</p>
+      </div>
+    )
   if (notFound || !quote)
     return <div className="p-10 text-center text-zinc-500">This link is no longer valid.</div>
 
@@ -379,6 +401,35 @@ export default function PortalPage({
     setSubmitting(false)
   }
 
+  // Fetched rather than linked, so a link that has been used too often (429)
+  // shows a short note instead of an error page
+  async function handleDownloadPdf() {
+    setDownloadingPdf(true)
+    try {
+      const res = await fetch(`/api/portal/${token}/pdf`)
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}))
+        if (res.status === 429) toast.warning("Please wait before downloading again", data.error)
+        else toast.error("Couldn't download the PDF", data.error || "Please try again.")
+        return
+      }
+      const blob = await res.blob()
+      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] || "quote.pdf"
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = name
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
+    } catch {
+      toast.error("Couldn't download the PDF", "Please try again.")
+    } finally {
+      setDownloadingPdf(false)
+    }
+  }
+
   async function handleComment() {
     if (!comment.trim()) return
     setSubmitting(true)
@@ -496,9 +547,9 @@ export default function PortalPage({
             )}
           </div>
           
-            <a href={`/api/portal/${token}/pdf`} target="_blank" rel="noopener noreferrer" className="pdf-download-btn">
-            Download PDF
-          </a>
+            <button type="button" onClick={handleDownloadPdf} disabled={downloadingPdf} className="pdf-download-btn">
+            {downloadingPdf ? "Preparing PDF..." : "Download PDF"}
+          </button>
         </div>
 
         {quote.introText && (

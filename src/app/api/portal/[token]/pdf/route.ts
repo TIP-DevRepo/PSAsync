@@ -4,6 +4,8 @@ import puppeteer from "puppeteer-core"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
 import { resolveQuoteTerms } from "@/lib/quote-terms"
 import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
+import { consumeSubject, linkLimitedResponse } from "@/lib/rate-limit"
+import { attachmentDisposition, quotePdfName } from "@/lib/content-disposition"
 import { prisma } from "@/lib/prisma"
 
 export const runtime = "nodejs"
@@ -20,6 +22,13 @@ export async function GET(
   const access = await resolvePortalAccess(token, "view", { allowInternal: true, request: req })
   if (!access.ok) return access.response
   const activeId = access.quoteId
+
+  // Each download starts a headless browser, so a customer link has its own
+  // limit per hour (the signed in internal preview is not limited)
+  if (!access.isInternal) {
+    const limit = await consumeSubject("portal-pdf", token)
+    if (limit.blocked) return linkLimitedResponse(limit.retryAfterSeconds)
+  }
 
   const quote = await prisma.quote.findUnique({
     where: { id: activeId },
@@ -70,9 +79,8 @@ export async function GET(
     return new NextResponse(Buffer.from(pdfBuffer), {
       headers: {
         "Content-Type": "application/pdf",
-        "Content-Disposition": `attachment; filename="${quote.quoteNumber}${
-          quote.version > 1 ? `-v${quote.version}` : ""
-        }.pdf"`,
+        // Built from the stored quote number, so through the shared helper
+        "Content-Disposition": attachmentDisposition(quotePdfName(quote.quoteNumber, quote.version), "quote.pdf"),
       },
     })
   } finally {

@@ -7,7 +7,7 @@
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and only
 // talks to a server on this machine. Run from the repo root, with the dev
 // server running and the password set in the shell (never in a file):
-//   TEST_ADMIN_B_PASSWORD=... npx tsx scripts/dev-only/check-portal.ts --yes
+//   TEST_ADMIN_B_PASSWORD=... TEST_ADMIN_C_PASSWORD=... TEST_EVERYONE_B_PASSWORD=... npx tsx scripts/dev-only/check-portal.ts --yes
 // Optional: --base-url http://localhost:3000 (the default)
 //
 // The quotes are put into each scene's state directly in the database
@@ -18,7 +18,7 @@
 //
 // No real email is ever sent: the test companies have no Microsoft
 // credentials and no distributor turned on (findExternalServices, checked
-// before anything runs). No attempt accepts, declines, or comments
+// before anything runs). No scene attempt accepts, declines, or comments
 // successfully, and the one client visit to a quote that is SENT is never
 // made, so no notification fires. Nothing is uploaded anywhere.
 //
@@ -49,6 +49,18 @@
 // deleted right after the scene, and again at the end if a check broke.
 // The awaiting scene also sends customer input that is too long or the
 // wrong type, which every portal route must refuse with a 400.
+//
+// Round two: the internal preview link needs a signed in user who may open
+// the quote (N-5). The sentUnviewed scene opens it with no session (401
+// SIGN_IN_REQUIRED, no quote data), as Test Admin C and Test Everyone B
+// (the generic 404), and as Test Admin B (the preview). The last step,
+// checkResponseRace, sets Company B's sample quote waiting on the customer
+// and sends an accept and a decline at the same time, then two accepts,
+// through the customer link: exactly one may win each time and at most one
+// sales order may exist (N-19). The sales order an accept creates is
+// deleted, and the quote and its notifications are put back with the rest.
+// The per link limits (20 PDFs, 30 comments an hour) count this script's
+// requests too: a run downloads Company B's customer PDF about four times.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -94,7 +106,7 @@ type Scene =
 //   check        extra checks, returning a problem or null
 //   after        runs after the attempt, for the regenerate steps
 
-type Actor = "anonymous" | "admin"
+type Actor = "anonymous" | "admin" | "adminC" | "everyone"
 
 interface Ctx {
   b: SampleIds
@@ -253,7 +265,18 @@ const ATTEMPTS: Attempt[] = [
     path: (ctx) => `/api/portal/${ctx.bClient}/line-items/${ctx.b.quoteLineId}`, body: () => ({ optionalSelected: "yes" }), expect: 400, expectError: "Invalid option selection" },
 
   // ── The internal preview never changes the quote ──
-  { scene: "sentUnviewed", name: "internal GET is a preview", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.bInternal}`,
+  // ── The internal preview needs a signed in user who may open the quote ──
+  { scene: "sentUnviewed", name: "internal GET with no session asks to sign in", kind: "refused", method: "GET", path: (ctx) => `/api/portal/${ctx.bInternal}`,
+    expect: 401, code: "SIGN_IN_REQUIRED", expectError: "Sign in to PSAsync", notContains: (ctx) => [...privateValues(ctx), B.quoteLine, '"quoteNumber"'] },
+  { scene: "sentUnviewed", name: "internal comments with no session ask to sign in", kind: "refused", method: "GET", path: (ctx) => `/api/portal/${ctx.bInternal}/comments`,
+    expect: 401, code: "SIGN_IN_REQUIRED" },
+  { scene: "sentUnviewed", name: "internal PDF with no session asks to sign in", kind: "refused", method: "GET", path: (ctx) => `/api/portal/${ctx.bInternal}/pdf`,
+    expect: 401, code: "SIGN_IN_REQUIRED" },
+  { scene: "sentUnviewed", as: "adminC", name: "another company's Global Admin gets the generic 404", kind: "refused", method: "GET",
+    path: (ctx) => `/api/portal/${ctx.bInternal}`, expect: 404, code: "LINK_INVALID", expectError: LINK_INVALID, notContains: () => [B.quoteLine] },
+  { scene: "sentUnviewed", as: "everyone", name: "a user without the Quotes page gets the generic 404", kind: "refused", method: "GET",
+    path: (ctx) => `/api/portal/${ctx.bInternal}`, expect: 404, code: "LINK_INVALID", expectError: LINK_INVALID, notContains: () => [B.quoteLine] },
+  { scene: "sentUnviewed", as: "admin", name: "internal GET is a preview", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.bInternal}`,
     expect: 200, contains: () => ['"isInternalPreview":true'], notContains: privateValues,
     check: async (_res, ctx, prisma) => {
       const q = await prisma.quote.findUnique({ where: { id: ctx.b.quoteId }, select: { status: true, viewedAt: true } })
@@ -322,12 +345,12 @@ const ATTEMPTS: Attempt[] = [
     } },
 
   // ── A draft using the company default shows the current default everywhere ──
-  { scene: "defaultDraft", name: "internal preview shows the default, not old custom text", kind: "allowed", method: "GET",
+  { scene: "defaultDraft", as: "admin", name: "internal preview shows the default, not old custom text", kind: "allowed", method: "GET",
     path: (ctx) => `/api/portal/${ctx.bInternal}`, expect: 200, contains: () => [DEFAULT_ONE_TEXT, '"isInternalPreview":true'],
     notContains: () => [CUSTOM_OLD_TEXT, '"useDefaultTerms"', '"quoteTerms"'] },
   { scene: "defaultDraft", name: "customer link does not open the unsent draft", kind: "refused", method: "GET", path: p(bClient),
     expect: 404, expectError: LINK_INVALID },
-  { scene: "defaultDraft", name: "internal preview PDF uses the default", kind: "allowed", method: "GET",
+  { scene: "defaultDraft", as: "admin", name: "internal preview PDF uses the default", kind: "allowed", method: "GET",
     path: (ctx) => `/api/portal/${ctx.bInternal}/pdf`, expect: 200, contains: () => ["%PDF"],
     check: async (_res, ctx, prisma) => textsProblem(await pdfHtml(prisma, ctx.b.quoteId), "the PDF HTML", [DEFAULT_ONE_TEXT], [CUSTOM_OLD_TEXT]) },
   { scene: "defaultDraft", as: "admin", name: "staff PDF renders for the draft", kind: "allowed", method: "GET",
@@ -542,13 +565,79 @@ async function judge(a: Attempt, res: { status: number; text: string }, ctx: Ctx
   return problem ? { result: "FAIL", note: problem } : { result: "PASS" }
 }
 
+// ─── Concurrent responses (round two, N-19) ─────────────────────────────────
+
+// Sends two customer responses at the same time through Company B's
+// customer link, twice: an accept and a decline, then two accepts. Exactly
+// one may win each time, and at most one sales order may exist. The sales
+// order an accept creates is deleted after each round; the quote and the
+// notifications are put back by main.
+async function checkResponseRace(
+  prisma: PrismaClient,
+  anonymous: Session,
+  ctx: Ctx,
+  b: SampleIds,
+  repQuoteId: string,
+  cQuoteId: string,
+  rows: Row[]
+) {
+  const quoteId = b.quoteId
+  // The cleanup below deletes this quote's sales orders, so there must be
+  // none of its own to begin with
+  if ((await prisma.salesOrder.count({ where: { quoteId } })) > 0) {
+    throw new HarnessBroken("Company B's sample quote already has a sales order. Run create-test-companies again to reset it.")
+  }
+  // What an accept writes beyond the fields main puts back
+  const signature = await prisma.quote.findUniqueOrThrow({
+    where: { id: quoteId },
+    select: { signatureType: true, signatureData: true, signerName: true, termsAgreedAt: true, clientPoNumber: true },
+  })
+  const rounds: [string, [string, unknown][]][] = [
+    ["accept and decline at once", [["/accept", SIGNED], ["/decline", { reason: "dev only" }]]],
+    ["two accepts at once", [["/accept", SIGNED], ["/accept", SIGNED]]],
+  ]
+  for (const [name, requests] of rounds) {
+    await setScene(prisma, "awaiting", { b: quoteId, rep: repQuoteId, c: cQuoteId, companyB: b.companyId })
+    try {
+      const results = await Promise.all(
+        requests.map(([path, body]) => anonymous.request("POST", `/api/portal/${ctx.bClient}${path}`, { json: body }))
+      )
+      const won = results.filter((r) => r.status === 200).length
+      const lost = results.filter((r) => r.status === 400 && errorText(r.text).includes("already been responded to")).length
+      const quote = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { status: true } })
+      const salesOrders = await prisma.salesOrder.count({ where: { quoteId } })
+      const problem =
+        won !== 1 || lost !== 1
+          ? `answers were ${results.map((r) => r.status).join(" and ")}`
+          : salesOrders > (quote.status === "ACCEPTED" ? 1 : 0)
+            ? `${salesOrders} sales orders for a ${quote.status} quote`
+            : null
+      rows.push({
+        attempt: `[race] ${name}`,
+        expected: "one 200, one 400, at most one sales order",
+        actual: `${results.map((r) => r.status).join(", ")}, ${quote.status}, ${salesOrders} SO`,
+        result: problem ? "FAIL" : "PASS",
+        note: problem ?? undefined,
+      })
+    } finally {
+      // Sales order lines, comments, and attachments go with it
+      await prisma.salesOrder.deleteMany({ where: { quoteId } })
+      await prisma.quote.update({ where: { id: quoteId }, data: signature })
+    }
+  }
+}
+
 // ─── Run ────────────────────────────────────────────────────────────────────
 
 async function main() {
   const baseUrl = readBaseUrl(process.argv.slice(2))
   const adminPassword = process.env.TEST_ADMIN_B_PASSWORD
-  if (!adminPassword) {
-    throw new HarnessBroken("Set TEST_ADMIN_B_PASSWORD in your shell (the password create-test-companies printed).")
+  const adminCPassword = process.env.TEST_ADMIN_C_PASSWORD
+  const everyonePassword = process.env.TEST_EVERYONE_B_PASSWORD
+  if (!adminPassword || !adminCPassword || !everyonePassword) {
+    throw new HarnessBroken(
+      "Set TEST_ADMIN_B_PASSWORD, TEST_ADMIN_C_PASSWORD, and TEST_EVERYONE_B_PASSWORD in your shell (the passwords create-test-companies printed)."
+    )
   }
 
   // Imported only after the guard passed
@@ -657,17 +746,25 @@ async function main() {
     const anonymous = new Session("Anonymous", baseUrl)
     const admin = new Session("Test Admin B", baseUrl)
     await admin.signIn(B.adminEmail, adminPassword)
-    console.log(`Calling the portal on ${baseUrl} without signing in. Test Admin B is signed in for the staff checks only.`)
+    const adminC = new Session("Test Admin C", baseUrl)
+    await adminC.signIn(C.adminEmail, adminCPassword)
+    const everyone = new Session("Test Everyone B", baseUrl)
+    await everyone.signIn(B.everyoneEmail, everyonePassword)
+    const sessions: Record<Actor, Session> = { anonymous, admin, adminC, everyone }
+    const ACTOR_LABEL: Record<Actor, string> = { anonymous: "", admin: ", Admin B", adminC: ", Admin C", everyone: ", Everyone B" }
+    console.log(
+      `Calling the portal on ${baseUrl} without signing in. Test Admin B, Test Admin C, and Test Everyone B are signed in for the staff and internal preview checks only.`
+    )
 
     for (const scene of SCENE_ORDER) {
       await setScene(prisma, scene, { b: b.quoteId, rep: fx.repQuoteId, c: c.quoteId, companyB: b.companyId })
       if (scene === "superseded") await addNewerVersion()
       let before = await snapshot(prisma, familyIds, [b.companyId, c.companyId])
       for (const a of ATTEMPTS.filter((x) => x.scene === scene)) {
-        const label = `[${scene}${a.as === "admin" ? ", Admin B" : ""}] ${a.name}`
+        const label = `[${scene}${ACTOR_LABEL[a.as ?? "anonymous"]}] ${a.name}`
         let res: { status: number; text: string }
         try {
-          res = await (a.as === "admin" ? admin : anonymous).request(a.method, a.path(ctx), { json: a.body?.(ctx) })
+          res = await sessions[a.as ?? "anonymous"].request(a.method, a.path(ctx), { json: a.body?.(ctx) })
         } catch (err) {
           rows.push({ attempt: label, expected: expectedText(a), actual: "no response", result: "UNEXPECTED", note: err instanceof Error ? err.message : String(err) })
           continue
@@ -689,6 +786,9 @@ async function main() {
       }
       if (scene === "superseded") await removeNewerVersion()
     }
+
+    // Round two, N-19: concurrent responses through the customer link
+    await checkResponseRace(prisma, anonymous, ctx, b, fx.repQuoteId, c.quoteId, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
