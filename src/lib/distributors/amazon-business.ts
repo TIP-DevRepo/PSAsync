@@ -34,9 +34,9 @@ async function getAccessToken(creds: DistributorCredentials): Promise<string> {
     }),
   })
 
+  // Only the status: the response body can echo the credentials sent
   if (!res.ok) {
-    const bodyText = await res.text().catch(() => "")
-    throw new Error(`Amazon Business auth failed: ${res.status} ${res.statusText} — ${bodyText}`)
+    throw new Error(`Amazon Business auth failed: ${res.status} ${res.statusText}`)
   }
 
   const data = await res.json()
@@ -122,7 +122,6 @@ export const amazonBusinessAdapter: DistributorAdapter = {
     })
 
     if (!res.ok) {
-      const bodyText = await res.text().catch(() => "")
       // The static sandbox only recognizes a small set of pre-canned
       // magic input values ("keywords=keyword" being the one confirmed
       // example) and rejects anything else with a 400 InvalidInput, even
@@ -130,7 +129,8 @@ export const amazonBusinessAdapter: DistributorAdapter = {
       // behavior, not a real failure — degrade gracefully to an empty
       // result rather than throwing, so one distributor's sandbox
       // limitation doesn't disrupt search results from others.
-      console.error(`Amazon Business search returned ${res.status}:`, bodyText)
+      // Status only: the body can carry the account's email and pricing
+      console.error(`Amazon Business search returned ${res.status}`)
       return []
     }
 

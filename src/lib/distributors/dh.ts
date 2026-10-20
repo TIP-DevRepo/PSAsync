@@ -40,9 +40,9 @@ async function getAccessToken(
     }),
   })
 
+  // Only the status: the response body can echo the credentials sent
   if (!res.ok) {
-    const bodyText = await res.text().catch(() => "")
-    throw new Error(`D&H auth failed: ${res.status} ${res.statusText} — ${bodyText}`)
+    throw new Error(`D&H auth failed: ${res.status} ${res.statusText}`)
   }
 
   const data = await res.json()
@@ -104,7 +104,7 @@ async function getPriceAndAvailability(
       if (item.itemId) map.set(item.itemId, item)
     }
   } catch (err) {
-    console.error("D&H price/availability call failed:", err)
+    console.error(`D&H price/availability call failed: ${err instanceof Error ? err.name : typeof err}`)
   }
 
   return map
@@ -154,9 +154,6 @@ export const dhAdapter: DistributorAdapter = {
 
     const catalogUrl = `${getApiBasePath(sandboxMode)}/catalog/v1/customers/${accountNumber}/items?${searchParams.toString()}`
 
-    // TEMPORARY DEBUG LOGGING — remove once search is confirmed working.
-    console.log("[D&H DEBUG] catalog request URL:", catalogUrl)
-
     const catalogRes = await fetch(catalogUrl, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -165,8 +162,6 @@ export const dhAdapter: DistributorAdapter = {
     })
 
     const rawBody = await catalogRes.text()
-    console.log("[D&H DEBUG] catalog response status:", catalogRes.status)
-    console.log("[D&H DEBUG] catalog response body:", rawBody)
 
     if (!catalogRes.ok) {
       // A 404 on a list endpoint would be unusual (D&H's docs suggest an
