@@ -6,8 +6,9 @@ import { readIdTokenPayload } from "@/lib/sso-tenant"
 
 // The id token claims the callback reads. oid is the account's object id
 // in the directory (the same value as Graph's /me id) and never changes
-// for the life of the account. preferred_username is the sign in name;
-// email is the mail attribute and is often missing.
+// for the life of the account. preferred_username is the sign in name
+// (UPN). email is the directory mail attribute, which an admin can set to
+// any address, so it is read but never used to decide who signs in.
 export interface SsoIdTokenClaims {
   oid: string | null
   preferredUsername: string | null
@@ -29,18 +30,14 @@ export function readSsoClaims(idToken: unknown): SsoIdTokenClaims | null {
   }
 }
 
-// The addresses a first sign in may match a stored PSAsync email against,
-// sign in name first. Only values shaped like an email address count, and
-// they're compared ignoring case.
-export function firstSignInEmails(claims: SsoIdTokenClaims | null): string[] {
-  if (!claims) return []
-  const found: string[] = []
-  for (const value of [claims.preferredUsername, claims.email]) {
-    if (!value || !/^[^@\s]+@[^@\s]+$/.test(value)) continue
-    const lower = value.toLowerCase()
-    if (!found.includes(lower)) found.push(lower)
-  }
-  return found
+// The one address a first sign in may match a stored PSAsync email
+// against: the sign in name (preferred_username, the UPN), lower case, and
+// only when it is shaped like an email address. Null when it is missing,
+// which refuses the sign in. The email claim is never used.
+export function firstSignInName(claims: SsoIdTokenClaims | null): string | null {
+  const value = claims?.preferredUsername
+  if (!value || !/^[^@\s]+@[^@\s]+$/.test(value)) return null
+  return value.toLowerCase()
 }
 
 export interface SsoCandidateUser {
@@ -56,28 +53,22 @@ export type FirstSignInDecision =
 
 // Picks the user for a first sign in (no user in the company holds this
 // Microsoft account id yet) from the company's users whose email matched
-// one of the candidate addresses.
-// - The sign in name match wins over the email claim match. Two users in
-//   the company with the same address in different case can't be told
-//   apart, so that address matches nobody.
+// the sign in name (firstSignInName).
+// - Exact match ignoring case. Two users in the company with the same
+//   address in different case can't be told apart, so that address
+//   matches nobody.
 // - A Microsoft account id already linked to any other user, in any
 //   company, is never linked again.
 // - A user already linked to a different Microsoft account is never
 //   relinked: the existing link stays and the sign in is refused.
 export function decideFirstSignIn(
-  emails: string[],
+  signInName: string,
   matches: SsoCandidateUser[],
   msId: string | null,
   linkedToUserId: string | null
 ): FirstSignInDecision {
-  let picked: SsoCandidateUser | null = null
-  for (const email of emails) {
-    const sameAddress = matches.filter((u) => u.email.toLowerCase() === email)
-    if (sameAddress.length === 1) {
-      picked = sameAddress[0]
-      break
-    }
-  }
+  const sameAddress = matches.filter((u) => u.email.toLowerCase() === signInName.toLowerCase())
+  const picked = sameAddress.length === 1 ? sameAddress[0] : null
   if (!picked || !picked.active) return { ok: false, error: "no_account_found" }
 
   if (msId && linkedToUserId && linkedToUserId !== picked.id) return { ok: false, error: "account_already_linked" }
