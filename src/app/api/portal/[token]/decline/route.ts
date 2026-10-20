@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteEvent } from "@/lib/notify"
-import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
+import { alreadyRespondedResponse, AWAITING_RESPONSE_STATUSES, linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { optionalText, PORTAL_DECLINE_REASON_MAX, readPortalBody } from "@/lib/portal-input"
 import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
@@ -22,15 +22,21 @@ export async function POST(
   const quote = await prisma.quote.findUnique({ where: { id: access.quoteId } })
   if (!quote) return linkInvalidResponse()
 
-  const updated = await prisma.quote.update({
-    where: { id: quote.id },
+  // One conditional write on the quote still waiting on the customer, so of
+  // a decline and an accept sent at the same time exactly one wins. Only
+  // the winner notifies.
+  const decided = await prisma.quote.updateMany({
+    where: { id: quote.id, status: { in: [...AWAITING_RESPONSE_STATUSES] } },
     data: {
       status: "DECLINED",
       declinedAt: new Date(),
       declineReason: reason.value ?? null,
     },
-    select: portalQuoteSelect,
   })
+  if (decided.count !== 1) return alreadyRespondedResponse()
+
+  const updated = await prisma.quote.findUnique({ where: { id: quote.id }, select: portalQuoteSelect })
+  if (!updated) return linkInvalidResponse()
 
   notifyQuoteEvent(quote.id, "QUOTE_LOST").catch((err) =>
     console.error("notifyQuoteEvent failed:", err)

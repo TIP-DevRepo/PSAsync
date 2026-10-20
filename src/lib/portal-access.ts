@@ -111,6 +111,13 @@ export function decidePortalAccess(
   return { ok: true, expired: false }
 }
 
+export const ALREADY_RESPONDED_MESSAGE = "This quote has already been responded to"
+
+// For the accept or decline that lost a race to another response
+export function alreadyRespondedResponse() {
+  return NextResponse.json({ error: ALREADY_RESPONDED_MESSAGE, code: "NOT_AWAITING_RESPONSE" }, { status: 400 })
+}
+
 export function linkInvalidResponse() {
   return NextResponse.json({ error: LINK_INVALID_MESSAGE, code: "LINK_INVALID" }, { status: 404 })
 }
