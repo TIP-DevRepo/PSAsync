@@ -3,6 +3,7 @@ import {
   DistributorCredentials,
   DistributorSearchResult,
   TestConnectionResult,
+  connectionFailed,
 } from "./types"
 
 // Amazon Business's DistributorCredentials fields are repurposed since it
@@ -90,10 +91,7 @@ export const amazonBusinessAdapter: DistributorAdapter = {
       await getAccessToken(creds)
       return { success: true, status: "Connected" }
     } catch (err) {
-      return {
-        success: false,
-        status: `Connection failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-      }
+      return connectionFailed("Amazon Business", err)
     }
   },
 

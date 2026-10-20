@@ -3,6 +3,7 @@ import {
   DistributorCredentials,
   DistributorSearchResult,
   TestConnectionResult,
+  connectionFailed,
 } from "./types"
 
 // TIPINC is US-based — change this if that's ever not true. D&H's header
@@ -129,10 +130,7 @@ export const dhAdapter: DistributorAdapter = {
         status: `Connected (${sandboxMode ? "Sandbox" : "Production"})`,
       }
     } catch (err) {
-      return {
-        success: false,
-        status: `Connection failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-      }
+      return connectionFailed("D&H", err)
     }
   },
 

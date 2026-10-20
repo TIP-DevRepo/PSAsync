@@ -3,6 +3,7 @@ import {
   DistributorCredentials,
   DistributorSearchResult,
   TestConnectionResult,
+  connectionFailed,
 } from "./types"
 import XiSdkResellers from "xi_sdk_resellers"
 
@@ -116,10 +117,7 @@ export const ingramMicroAdapter: DistributorAdapter = {
         status: `Connected (${sandboxMode ? "Sandbox" : "Production"})`,
       }
     } catch (err) {
-      return {
-        success: false,
-        status: `Connection failed: ${err instanceof Error ? err.message : "Unknown error"}`,
-      }
+      return connectionFailed("Ingram Micro", err)
     }
   },
 
