@@ -121,7 +121,7 @@ export function QuoteSettingsPanel() {
           />
           {expiryError && <p className="text-xs text-danger mt-1">{expiryError}</p>}
           <p className="text-xs text-zinc-500 mt-1">
-            New quotes will automatically expire this many days after being sent, unless overridden.
+            New quotes will automatically expire this many days after they are created, unless overridden.
           </p>
         </div>
 

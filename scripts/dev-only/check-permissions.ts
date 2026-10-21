@@ -3,16 +3,18 @@
 // Rep B (only the Rep role), Test Clerk B (only the Clerk role), Test Orders
 // B (only the Orders role), Test Templater B (only the Templater role), and
 // Test Everyone B (only the Everyone role, with no permissions), all made by
-// create-test-companies.ts, plus Test Sender B, Test Viewer B, and Test
+// this run (lib/run-data.ts), plus Test Sender B, Test Viewer B, and Test
 // Manager B users this script sets up itself, and checks every attempt in
 // the ATTEMPTS list below. It also adds an ad hoc line to Test Orders B's
 // purchase order for the received flag checks and removes it at the end.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and only
 // talks to a server on this machine. Run from the repo root, with the dev
-// server running and the passwords set in the shell (never in a file):
-//   TEST_ADMIN_B_PASSWORD=... TEST_REP_B_PASSWORD=... TEST_EVERYONE_B_PASSWORD=... TEST_CLERK_B_PASSWORD=... TEST_ORDERS_B_PASSWORD=... TEST_TEMPLATER_B_PASSWORD=... npx tsx scripts/dev-only/check-permissions.ts --yes
+// server running:
+//   npx tsx scripts/dev-only/check-permissions.ts --yes
 // Optional: --base-url http://localhost:3000 (the default)
+// On its own it sets up and removes its own temporary data; run-checks.ts
+// runs it with the data it shares between all three checks.
 //
 // Order of work: guard, safety checks, sign in, every positive control (if
 // any fails the harness itself is broken and nothing else runs), then every
@@ -49,7 +51,7 @@
 // the purchase order link, and any notification it made back.
 //
 // Quote correctness: checkQuoteCopy has Test Admin B copy the copy fixture
-// quote (create-test-companies: a bundle, a choice group with a selected
+// quote (lib/run-data.ts: a bundle, a choice group with a selected
 // option, a text block, an optional line, an adjustable quantity, and a
 // recurring line over two sections and an empty one) for the copy client,
 // then copy that copy, and Test Rep B copy its own quote. Each copy must
@@ -61,23 +63,11 @@
 // without quotes.viewAllUsersQuotes, and blank, 0, negative, and
 // fractional Default Expiry values.
 
-import bcrypt from "bcryptjs"
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
-import {
-  BCRYPT_COST,
-  PLACEHOLDER_TOKEN,
-  SAMPLE_ITEM_COST,
-  generatePassword,
-  loadPermissionFixtureIds,
-  loadSampleIds,
-  testNames,
-  type PermissionFixtureIds,
-  type SampleIds,
-} from "./lib/test-data"
-import { HarnessBroken, Session, errorText, isJsonError, printTable, readBaseUrl, type Method, type Row } from "./lib/harness"
-// Only imports Prisma types, so loading it can't reach the database
-import { setUserRoles } from "@/lib/user-roles"
+import { PLACEHOLDER_TOKEN, SAMPLE_ITEM_COST, type PermissionFixtureIds, type SampleIds, type TestNames } from "./lib/test-data"
+import { HarnessBroken, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
+import { addRunMailbox, addRunRole, addRunUser, isEntryScript, withRunData, type RunData } from "./lib/run-data"
 
 // Must stay first: nothing below may run before the guard has passed
 enforceDevGuard("check-permissions")
@@ -119,7 +109,9 @@ interface AttemptContext {
   c: SampleIds
   fx: PermissionFixtureIds
   fxC: PermissionFixtureIds
-  names: ReturnType<typeof testNames>
+  names: TestNames
+  // Test Company C's names, for the invite of another company's email
+  namesC: TestNames
   senderMailboxId: string
   repUserId: string
   // Test Manager B's own role, and the ad hoc purchase order line this
@@ -880,12 +872,12 @@ const ATTEMPTS: Attempt[] = [
 
   // ── Invites: another company's email gets the generic answer, and a
   // non Global Admin can't invite at or above their own rank ──
-  { name: "Invite another company's user email", actor: "admin", kind: "refused", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: testNames("C").adminEmail, tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "This email cannot be used" },
+  { name: "Invite another company's user email", actor: "admin", kind: "refused", method: "POST", path: () => "/api/users", body: (c) => ({ name: "Should Not Exist", email: c.namesC.adminEmail, tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "This email cannot be used" },
   { name: "Invite an email that isn't an email", actor: "admin", kind: "refused", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: "not-an-email", tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "This email cannot be used" },
   { name: "Invite an email already used in this company", actor: "admin", kind: "refused", method: "POST", path: () => "/api/users", body: (c) => ({ name: "Should Not Exist", email: c.names.repEmail, tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "A user with that email already exists" },
   { name: "Invite into own role (same rank)", actor: "manager", kind: "refused", method: "POST", path: () => "/api/users", body: (c) => ({ name: "Should Not Exist", email: "should-not-exist-manager@example.test", tempPassword: "ShouldNotExist123", roleIds: [c.managerRoleId] }), expect: 403, expectError: "at or above your own rank" },
   { name: "Invite into Global Admin", actor: "manager", kind: "refused", method: "POST", path: () => "/api/users", body: (c) => ({ name: "Should Not Exist", email: "should-not-exist-manager@example.test", tempPassword: "ShouldNotExist123", roleIds: [c.b.globalAdminRoleId] }), expect: 403, expectError: "at or above your own rank" },
-  { name: "Invite another company's user email", actor: "manager", kind: "refused", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: testNames("C").adminEmail, tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "This email cannot be used" },
+  { name: "Invite another company's user email", actor: "manager", kind: "refused", method: "POST", path: () => "/api/users", body: (c) => ({ name: "Should Not Exist", email: c.namesC.adminEmail, tempPassword: "ShouldNotExist123" }), expect: 400, expectError: "This email cannot be used" },
 
   // ── Clients, catalog, vendors, company settings lists, and inventory ──
   // Test Everyone B and Test Rep B: refused every guarded route, allowed the open pickers
@@ -1057,112 +1049,57 @@ function changedSections(before: Record<string, string>, after: Record<string, s
   return Object.keys(after).filter((k) => before[k] !== after[k])
 }
 
-// Test Sender B inside Test Company B, reset to the same known state every
-// run, with its own mailbox row (placeholder tokens). The password exists
-// only in memory for this run.
-async function ensureSenderFixture(prisma: PrismaClient, b: SampleIds) {
-  const n = testNames("B")
-  const companyId = b.companyId
+// Test Sender B inside Test Company B, made for this run, with its own
+// mailbox row (placeholder tokens). The password exists only in memory for
+// this run.
+async function ensureSenderFixture(prisma: PrismaClient, run: RunData) {
+  const n = run.companies.B.names
+  const companyId = run.companies.B.ids.companyId
   const senderPermissions = { pages: { quotes: true }, quotes: { sendEmail: true, viewAllUsersQuotes: true } }
 
-  const existingRole = await prisma.role.findFirst({ where: { companyId, name: n.senderRole } })
-  const role = existingRole
-    ? await prisma.role.update({ where: { id: existingRole.id }, data: { rank: 6, permissions: senderPermissions } })
-    : await prisma.role.create({ data: { companyId, name: n.senderRole, rank: 6, permissions: senderPermissions } })
+  const roleId = await addRunRole(prisma, run, { companyId, name: n.senderRole, rank: 6, permissions: senderPermissions })
+  const userId = await addRunUser(prisma, run, { companyId, name: n.senderName, email: n.senderEmail, roleIds: [roleId] })
+  const mailboxId = await addRunMailbox(prisma, run, { companyId, email: n.senderMailboxEmail, label: n.senderName, connectedByUserId: userId })
 
-  const password = generatePassword(20)
-  const hashed = await bcrypt.hash(password, BCRYPT_COST)
-  const existing = await prisma.user.findUnique({ where: { email: n.senderEmail } })
-  if (existing && existing.companyId !== companyId) {
-    throw new HarnessBroken(`${n.senderEmail} belongs to a different company, refusing to change it`)
-  }
-  const reset = { password: hashed, active: true, mustChangePassword: false, loginFailedAttempts: 0, loginLockedUntil: null }
-  const user = existing
-    ? await prisma.user.update({ where: { id: existing.id }, data: { name: n.senderName, ...reset } })
-    : await prisma.user.create({ data: { companyId, name: n.senderName, email: n.senderEmail, ...reset } })
-  await setUserRoles(prisma, user.id, [role.id])
-
-  const mailbox = await prisma.microsoftConnection.upsert({
-    where: { companyId_email: { companyId, email: n.senderMailboxEmail } },
-    update: { label: n.senderName, connectedByUserId: user.id, accessToken: PLACEHOLDER_TOKEN, refreshToken: PLACEHOLDER_TOKEN },
-    create: {
-      companyId,
-      email: n.senderMailboxEmail,
-      label: n.senderName,
-      connectedByUserId: user.id,
-      accessToken: PLACEHOLDER_TOKEN,
-      refreshToken: PLACEHOLDER_TOKEN,
-    },
-    select: { id: true },
-  })
-
-  return { email: n.senderEmail, password, mailboxId: mailbox.id }
+  return { email: n.senderEmail, mailboxId }
 }
 
 // Test Viewer B inside Test Company B: both order pages and both viewAll
-// keys, no edit, so it opens every order without seeing cost. Reset to the
-// same known state every run, password in memory only.
-async function ensureViewerFixture(prisma: PrismaClient, b: SampleIds) {
-  const n = testNames("B")
-  const companyId = b.companyId
+// keys, no edit, so it opens every order without seeing cost. Made for this
+// run, password in memory only.
+async function ensureViewerFixture(prisma: PrismaClient, run: RunData) {
+  const n = run.companies.B.names
+  const companyId = run.companies.B.ids.companyId
   const viewerPermissions = {
     pages: { salesOrders: true, purchaseOrders: true },
     salesOrders: { viewAll: true },
     purchaseOrders: { viewAll: true },
   }
 
-  const existingRole = await prisma.role.findFirst({ where: { companyId, name: n.viewerRole } })
-  const role = existingRole
-    ? await prisma.role.update({ where: { id: existingRole.id }, data: { rank: 1, permissions: viewerPermissions } })
-    : await prisma.role.create({ data: { companyId, name: n.viewerRole, rank: 1, permissions: viewerPermissions } })
+  const roleId = await addRunRole(prisma, run, { companyId, name: n.viewerRole, rank: 1, permissions: viewerPermissions })
+  await addRunUser(prisma, run, { companyId, name: n.viewerName, email: n.viewerEmail, roleIds: [roleId] })
 
-  const password = generatePassword(20)
-  const hashed = await bcrypt.hash(password, BCRYPT_COST)
-  const existing = await prisma.user.findUnique({ where: { email: n.viewerEmail } })
-  if (existing && existing.companyId !== companyId) {
-    throw new HarnessBroken(`${n.viewerEmail} belongs to a different company, refusing to change it`)
-  }
-  const reset = { password: hashed, active: true, mustChangePassword: false, loginFailedAttempts: 0, loginLockedUntil: null }
-  const user = existing
-    ? await prisma.user.update({ where: { id: existing.id }, data: { name: n.viewerName, ...reset } })
-    : await prisma.user.create({ data: { companyId, name: n.viewerName, email: n.viewerEmail, ...reset } })
-  await setUserRoles(prisma, user.id, [role.id])
-
-  return { email: n.viewerEmail, password }
+  return { email: n.viewerEmail }
 }
 
 // Test Manager B inside Test Company B: manages users (Manage Users) but
-// is not a Global Admin, for the invite rank rule. Reset to the same known
-// state every run, password in memory only.
-async function ensureManagerFixture(prisma: PrismaClient, b: SampleIds) {
-  const n = testNames("B")
-  const companyId = b.companyId
+// is not a Global Admin, for the invite rank rule. Made for this run,
+// password in memory only.
+async function ensureManagerFixture(prisma: PrismaClient, run: RunData) {
+  const n = run.companies.B.names
+  const companyId = run.companies.B.ids.companyId
   const managerPermissions = { settingsSections: { users: true } }
 
-  const existingRole = await prisma.role.findFirst({ where: { companyId, name: n.managerRole } })
-  const role = existingRole
-    ? await prisma.role.update({ where: { id: existingRole.id }, data: { rank: 5, permissions: managerPermissions } })
-    : await prisma.role.create({ data: { companyId, name: n.managerRole, rank: 5, permissions: managerPermissions } })
+  const roleId = await addRunRole(prisma, run, { companyId, name: n.managerRole, rank: 5, permissions: managerPermissions })
+  await addRunUser(prisma, run, { companyId, name: n.managerName, email: n.managerEmail, roleIds: [roleId] })
 
-  const password = generatePassword(20)
-  const hashed = await bcrypt.hash(password, BCRYPT_COST)
-  const existing = await prisma.user.findUnique({ where: { email: n.managerEmail } })
-  if (existing && existing.companyId !== companyId) {
-    throw new HarnessBroken(`${n.managerEmail} belongs to a different company, refusing to change it`)
-  }
-  const reset = { password: hashed, active: true, mustChangePassword: false, loginFailedAttempts: 0, loginLockedUntil: null }
-  const user = existing
-    ? await prisma.user.update({ where: { id: existing.id }, data: { name: n.managerName, ...reset } })
-    : await prisma.user.create({ data: { companyId, name: n.managerName, email: n.managerEmail, ...reset } })
-  await setUserRoles(prisma, user.id, [role.id])
-
-  return { email: n.managerEmail, password, roleId: role.id }
+  return { email: n.managerEmail, roleId }
 }
 
 // An ad hoc line (no catalog item, so not inventory tracked) on Test
 // Orders B's purchase order, not yet received. Removed at the end of the run.
-async function ensureUntrackedPoLine(prisma: PrismaClient, fx: PermissionFixtureIds) {
-  const name = testNames("B").untrackedPoLine
+async function ensureUntrackedPoLine(prisma: PrismaClient, fx: PermissionFixtureIds, names: TestNames) {
+  const name = names.untrackedPoLine
   const existing = await prisma.pOLineItem.findFirst({ where: { purchaseOrderId: fx.ordersPurchaseOrderId, name }, select: { id: true } })
   if (existing) {
     await prisma.pOLineItem.update({ where: { id: existing.id }, data: { received: false, catalogItemId: null } })
@@ -1268,31 +1205,17 @@ async function checkHeldEmailApproval(prisma: PrismaClient, admin: Session, ctx:
 }
 
 // Test Approver B inside Test Company B: the Quotes page and approving,
-// not a Global Admin, so it decides an approval it didn't request. Reset to
-// the same known state every run, password in memory only.
-async function ensureApproverFixture(prisma: PrismaClient, b: SampleIds) {
-  const n = testNames("B")
-  const companyId = b.companyId
+// not a Global Admin, so it decides an approval it didn't request. Made for
+// this run, password in memory only.
+async function ensureApproverFixture(prisma: PrismaClient, run: RunData) {
+  const n = run.companies.B.names
+  const companyId = run.companies.B.ids.companyId
   const approverPermissions = { pages: { quotes: true }, quotes: { approve: true } }
 
-  const existingRole = await prisma.role.findFirst({ where: { companyId, name: n.approverRole } })
-  const role = existingRole
-    ? await prisma.role.update({ where: { id: existingRole.id }, data: { rank: 7, permissions: approverPermissions } })
-    : await prisma.role.create({ data: { companyId, name: n.approverRole, rank: 7, permissions: approverPermissions } })
+  const roleId = await addRunRole(prisma, run, { companyId, name: n.approverRole, rank: 7, permissions: approverPermissions })
+  await addRunUser(prisma, run, { companyId, name: n.approverName, email: n.approverEmail, roleIds: [roleId] })
 
-  const password = generatePassword(20)
-  const hashed = await bcrypt.hash(password, BCRYPT_COST)
-  const existing = await prisma.user.findUnique({ where: { email: n.approverEmail } })
-  if (existing && existing.companyId !== companyId) {
-    throw new HarnessBroken(`${n.approverEmail} belongs to a different company, refusing to change it`)
-  }
-  const reset = { password: hashed, active: true, mustChangePassword: false, loginFailedAttempts: 0, loginLockedUntil: null }
-  const user = existing
-    ? await prisma.user.update({ where: { id: existing.id }, data: { name: n.approverName, ...reset } })
-    : await prisma.user.create({ data: { companyId, name: n.approverName, email: n.approverEmail, ...reset } })
-  await setUserRoles(prisma, user.id, [role.id])
-
-  return { email: n.approverEmail, password, roleId: role.id }
+  return { email: n.approverEmail, roleId }
 }
 
 // The quote fields the round two steps below change, for every version of
@@ -1646,36 +1569,16 @@ function judgeRefusal(a: Attempt, res: { status: number; text: string }, changed
   return { result: "FAIL", note: `wrong refusal: ${message}` }
 }
 
-async function main() {
-  const baseUrl = readBaseUrl(process.argv.slice(2))
-  const passwords = {
-    admin: process.env.TEST_ADMIN_B_PASSWORD,
-    rep: process.env.TEST_REP_B_PASSWORD,
-    everyone: process.env.TEST_EVERYONE_B_PASSWORD,
-    clerk: process.env.TEST_CLERK_B_PASSWORD,
-    orders: process.env.TEST_ORDERS_B_PASSWORD,
-    templater: process.env.TEST_TEMPLATER_B_PASSWORD,
-  }
-  const missing = [
-    !passwords.admin && "TEST_ADMIN_B_PASSWORD",
-    !passwords.rep && "TEST_REP_B_PASSWORD",
-    !passwords.everyone && "TEST_EVERYONE_B_PASSWORD",
-    !passwords.clerk && "TEST_CLERK_B_PASSWORD",
-    !passwords.orders && "TEST_ORDERS_B_PASSWORD",
-    !passwords.templater && "TEST_TEMPLATER_B_PASSWORD",
-  ].filter(Boolean)
-  if (missing.length > 0) {
-    throw new HarnessBroken(`Set ${missing.join(", ")} in your shell (the passwords create-test-companies printed).`)
-  }
-
-  // Imported only after the guard passed
-  const { prisma } = await import("@/lib/prisma")
+// Runs every attempt against this run's data and returns the result (exit code 0
+// all passed, 1 a FAIL or UNEXPECTED). A broken harness throws HarnessBroken.
+export async function checkPermissions(prisma: PrismaClient, run: RunData, baseUrl: string): Promise<CheckResult> {
   const rows: Row[] = []
 
-  const b = await loadSampleIds(prisma, "B")
-  const c = await loadSampleIds(prisma, "C")
-  const fx = await loadPermissionFixtureIds(prisma, "B")
-  const fxC = await loadPermissionFixtureIds(prisma, "C")
+  const b = run.companies.B.ids
+  const c = run.companies.C.ids
+  const fx = run.companies.B.fixtures
+  const fxC = run.companies.C.fixtures
+  const names = run.companies.B.names
 
   // Safety: with no Microsoft credentials and no distributor turned on, a
   // quote email can't be sent and no real distributor can be reached from
@@ -1684,7 +1587,7 @@ async function main() {
   if (external) throw new HarnessBroken(external)
   const quotes = await prisma.quote.findMany({ where: { id: { in: [b.quoteId, fx.repQuoteId] } }, select: { status: true } })
   if (quotes.length !== 2 || quotes.some((q) => q.status !== "DRAFT")) {
-    throw new HarnessBroken("The sample quotes must be drafts. Run create-test-companies again to reset them.")
+    throw new HarnessBroken("The sample quotes must be drafts, so this run's data isn't as it was set up.")
   }
 
   // Creator mode for the run, put back the way it was at the end
@@ -1707,23 +1610,22 @@ async function main() {
       originalSettings?.quoteSendFromConnectionId ?? null
     )
     // The ad hoc purchase order line exists only for this run
-    await prisma.pOLineItem.deleteMany({ where: { purchaseOrderId: fx.ordersPurchaseOrderId, name: testNames("B").untrackedPoLine } })
-    await prisma.$disconnect()
+    await prisma.pOLineItem.deleteMany({ where: { purchaseOrderId: fx.ordersPurchaseOrderId, name: names.untrackedPoLine } })
   }
 
   async function runChecks() {
     await setSenderMode("CREATOR", null)
-    const sender = await ensureSenderFixture(prisma, b)
-    const viewer = await ensureViewerFixture(prisma, b)
-    const manager = await ensureManagerFixture(prisma, b)
-    const untrackedPoLineId = await ensureUntrackedPoLine(prisma, fx)
-    const names = testNames("B")
+    const sender = await ensureSenderFixture(prisma, run)
+    const viewer = await ensureViewerFixture(prisma, run)
+    const manager = await ensureManagerFixture(prisma, run)
+    const untrackedPoLineId = await ensureUntrackedPoLine(prisma, fx, names)
     const ctx: AttemptContext = {
       b,
       c,
       fx,
       fxC,
       names,
+      namesC: run.companies.C.names,
       senderMailboxId: sender.mailboxId,
       repUserId: fx.repUserId,
       managerRoleId: manager.roleId,
@@ -1731,7 +1633,7 @@ async function main() {
       fakeId: "devonlynotarealid000000000",
     }
 
-    // Sign in
+    // Sign in, once per user for the whole check
     const sessions: Record<Actor, Session> = {
       admin: new Session("Test Admin B", baseUrl),
       rep: new Session("Test Rep B", baseUrl),
@@ -1743,15 +1645,15 @@ async function main() {
       viewer: new Session("Test Viewer B", baseUrl),
       manager: new Session("Test Manager B", baseUrl),
     }
-    await sessions.admin.signIn(names.adminEmail, passwords.admin as string)
-    await sessions.rep.signIn(names.repEmail, passwords.rep as string)
-    await sessions.everyone.signIn(names.everyoneEmail, passwords.everyone as string)
-    await sessions.clerk.signIn(names.clerkEmail, passwords.clerk as string)
-    await sessions.sender.signIn(sender.email, sender.password)
-    await sessions.orders.signIn(names.ordersEmail, passwords.orders as string)
-    await sessions.templater.signIn(names.templaterEmail, passwords.templater as string)
-    await sessions.viewer.signIn(viewer.email, viewer.password)
-    await sessions.manager.signIn(manager.email, manager.password)
+    await run.credentials.signIn(sessions.admin, names.adminEmail)
+    await run.credentials.signIn(sessions.rep, names.repEmail)
+    await run.credentials.signIn(sessions.everyone, names.everyoneEmail)
+    await run.credentials.signIn(sessions.clerk, names.clerkEmail)
+    await run.credentials.signIn(sessions.sender, sender.email)
+    await run.credentials.signIn(sessions.orders, names.ordersEmail)
+    await run.credentials.signIn(sessions.templater, names.templaterEmail)
+    await run.credentials.signIn(sessions.viewer, viewer.email)
+    await run.credentials.signIn(sessions.manager, manager.email)
     console.log(
       `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, and Test Manager B.`
     )
@@ -1825,9 +1727,9 @@ async function main() {
     // changed after approval was requested is not sent (N-2), and a sales
     // order shows only the purchase orders the user may open (#56)
     await checkStatusApproval(prisma, sessions.admin, ctx, rows)
-    const approverFixture = await ensureApproverFixture(prisma, b)
+    const approverFixture = await ensureApproverFixture(prisma, run)
     const approver = new Session("Test Approver B", baseUrl)
-    await approver.signIn(approverFixture.email, approverFixture.password)
+    await run.credentials.signIn(approver, approverFixture.email)
     await checkStaleApproval(prisma, sessions.admin, approver, approverFixture.roleId, ctx, rows)
     await checkSalesOrderLinkedPurchaseOrders(prisma, sessions.admin, sessions.orders, ctx, rows)
 
@@ -1838,13 +1740,21 @@ async function main() {
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
     console.log(`\n${rows.length} checks: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("UNEXPECTED")} UNEXPECTED`)
 
-    return count("FAIL") + count("UNEXPECTED") > 0 ? 1 : 0
+    return checkResult(rows)
   }
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    console.error(err instanceof Error ? err.message : err)
-    process.exit(err instanceof HarnessBroken ? 2 : 1)
-  })
+// On its own: this check's own temporary data, set up and removed around it
+async function main() {
+  const baseUrl = readBaseUrl(process.argv.slice(2))
+  return withRunData("check-permissions", (prisma, run) => checkPermissions(prisma, run, baseUrl))
+}
+
+if (isEntryScript("check-permissions")) {
+  main()
+    .then((result) => process.exit(result.code))
+    .catch((err) => {
+      console.error(err instanceof Error ? err.message : err)
+      process.exit(err instanceof HarnessBroken ? 2 : 1)
+    })
+}

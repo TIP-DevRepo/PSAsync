@@ -1,25 +1,26 @@
 // DEV ONLY. Proves multi company isolation against the locally running dev
-// server: signs in as Test Admin B and Test Admin C (made by
-// create-test-companies.ts) and tries to read and change the OTHER
+// server: signs in as Test Admin B and Test Admin C (temporary users this
+// run makes, lib/run-data.ts) and tries to read and change the OTHER
 // company's records, expecting every attempt to be refused.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and only
 // talks to a server on this machine. Run from the repo root, with the dev
-// server running and both passwords set in the shell (never in a file):
-//   TEST_ADMIN_B_PASSWORD=... TEST_ADMIN_C_PASSWORD=... npx tsx scripts/dev-only/check-cross-company.ts --yes
+// server running:
+//   npx tsx scripts/dev-only/check-cross-company.ts --yes
 // Optional: --base-url http://localhost:3000 (the default)
+// On its own it sets up and removes its own temporary data; run-checks.ts
+// runs it with the data it shares between all three checks.
 //
 // Order of work: guard, sign in, positive controls on each user's OWN
 // records (if any fails the harness itself is broken and nothing else
 // runs), then every attempt below in both directions, then the
 // deactivated user check. Any FAIL or UNEXPECTED exits non zero.
 
-import bcrypt from "bcryptjs"
 import type { PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
-import { BCRYPT_COST, generatePassword, loadSampleIds, testNames, type SampleIds, type TestLetter } from "./lib/test-data"
-// Only imports Prisma types, so loading it can't reach the database
-import { setUserRoles } from "@/lib/user-roles"
+import type { SampleIds, TestLetter, TestNames } from "./lib/test-data"
+import { HarnessBroken as SharedHarnessBroken, checkResult, type CheckResult } from "./lib/harness"
+import { addRunRole, addRunUser, isEntryScript, withRunData, type RunData } from "./lib/run-data"
 
 // Must stay first: nothing below may run before the guard has passed
 enforceDevGuard("check-cross-company")
@@ -43,7 +44,7 @@ enforceDevGuard("check-cross-company")
 interface AttemptContext {
   own: SampleIds
   other: SampleIds
-  ownNames: ReturnType<typeof testNames>
+  ownNames: TestNames
   // Only for B, from the role escalation fixture
   targetRoleId: string
 }
@@ -316,8 +317,8 @@ function errorText(text: string): string {
 }
 
 // Strings that only appear in the other company's data
-function markersFor(ids: SampleIds, letter: TestLetter): string[] {
-  const names = Object.values(testNames(letter)).filter((v) => v.length > 6 && v !== "Sample")
+function markersFor(ids: SampleIds, otherNames: TestNames): string[] {
+  const names = Object.values(otherNames).filter((v) => v.length > 6 && v !== "Sample")
   return [ids.companyId, ...names]
 }
 
@@ -382,36 +383,18 @@ function changedSections(before: Record<string, string>, after: Record<string, s
 }
 
 // Limited role and user inside Test Company B for the escalation attempt,
-// reset to the same known state every run. The password exists only in
-// memory for this run.
-async function ensureLimitedFixture(prisma: PrismaClient, b: SampleIds) {
-  const n = testNames("B")
-  const companyId = b.companyId
+// made for this run (removed with the rest of its data). The password
+// exists only in memory for this run.
+async function ensureLimitedFixture(prisma: PrismaClient, run: RunData) {
+  const n = run.companies.B.names
+  const companyId = run.companies.B.ids.companyId
   const limitedPermissions = { pages: { settings: true }, settingsSections: { users: true } }
 
-  const limitedRole = await prisma.role.findFirst({ where: { companyId, name: n.limitedRole } })
-  const limited = limitedRole
-    ? await prisma.role.update({ where: { id: limitedRole.id }, data: { rank: 20, permissions: limitedPermissions } })
-    : await prisma.role.create({ data: { companyId, name: n.limitedRole, rank: 20, permissions: limitedPermissions } })
+  const limitedRoleId = await addRunRole(prisma, run, { companyId, name: n.limitedRole, rank: 20, permissions: limitedPermissions })
+  const targetRoleId = await addRunRole(prisma, run, { companyId, name: n.targetRole, rank: 10, permissions: {} })
+  await addRunUser(prisma, run, { companyId, name: n.limitedUserName, email: n.limitedUserEmail, roleIds: [limitedRoleId] })
 
-  const targetRole = await prisma.role.findFirst({ where: { companyId, name: n.targetRole } })
-  const target = targetRole
-    ? await prisma.role.update({ where: { id: targetRole.id }, data: { rank: 10, permissions: {} } })
-    : await prisma.role.create({ data: { companyId, name: n.targetRole, rank: 10, permissions: {} } })
-
-  const password = generatePassword(20)
-  const hashed = await bcrypt.hash(password, BCRYPT_COST)
-  const existing = await prisma.user.findUnique({ where: { email: n.limitedUserEmail } })
-  if (existing && existing.companyId !== companyId) {
-    throw new HarnessBroken(`${n.limitedUserEmail} belongs to a different company, refusing to change it`)
-  }
-  const reset = { password: hashed, active: true, mustChangePassword: false, loginFailedAttempts: 0, loginLockedUntil: null }
-  const user = existing
-    ? await prisma.user.update({ where: { id: existing.id }, data: { name: n.limitedUserName, ...reset } })
-    : await prisma.user.create({ data: { companyId, name: n.limitedUserName, email: n.limitedUserEmail, ...reset } })
-  await setUserRoles(prisma, user.id, [limited.id])
-
-  return { email: n.limitedUserEmail, password, targetRoleId: target.id, targetRoleName: n.targetRole }
+  return { email: n.limitedUserEmail, targetRoleId, targetRoleName: n.targetRole }
 }
 
 function printTable(rows: Row[]) {
@@ -431,40 +414,34 @@ function printTable(rows: Row[]) {
   }
 }
 
-async function main() {
-  const baseUrl = readBaseUrl(process.argv.slice(2))
-  const passwords = { B: process.env.TEST_ADMIN_B_PASSWORD, C: process.env.TEST_ADMIN_C_PASSWORD }
-  const missing = (["B", "C"] as const).filter((l) => !passwords[l]).map((l) => `TEST_ADMIN_${l}_PASSWORD`)
-  if (missing.length > 0) {
-    throw new HarnessBroken(`Set ${missing.join(" and ")} in your shell (the passwords create-test-companies printed).`)
-  }
-
-  // Imported only after the guard passed
-  const { prisma } = await import("@/lib/prisma")
+// Runs every attempt against this run's data and returns the result (exit code 0
+// all passed, 1 a FAIL or UNEXPECTED). A broken harness throws HarnessBroken.
+export async function checkCrossCompany(prisma: PrismaClient, run: RunData, baseUrl: string): Promise<CheckResult> {
   const rows: Row[] = []
 
-  const ids: Record<TestLetter, SampleIds> = { B: await loadSampleIds(prisma, "B"), C: await loadSampleIds(prisma, "C") }
+  const ids: Record<TestLetter, SampleIds> = { B: run.companies.B.ids, C: run.companies.C.ids }
+  const names: Record<TestLetter, TestNames> = { B: run.companies.B.names, C: run.companies.C.names }
 
   // Safety: no test company may be able to reach a real mailbox or a real
   // distributor, even if a refusal below were broken
   const external = await findExternalServices(prisma, [ids.B.companyId, ids.C.companyId])
   if (external) throw new HarnessBroken(external)
 
-  const fixture = await ensureLimitedFixture(prisma, ids.B)
+  const fixture = await ensureLimitedFixture(prisma, run)
 
-  // Sign in
+  // Sign in, once per user for the whole check
   const admins: Record<TestLetter, Session> = { B: new Session("Test Admin B", baseUrl), C: new Session("Test Admin C", baseUrl) }
-  await admins.B.signIn(testNames("B").adminEmail, passwords.B as string)
-  await admins.C.signIn(testNames("C").adminEmail, passwords.C as string)
+  await run.credentials.signIn(admins.B, names.B.adminEmail)
+  await run.credentials.signIn(admins.C, names.C.adminEmail)
   const limited = new Session("Test Limited B", baseUrl)
-  await limited.signIn(fixture.email, fixture.password)
+  await run.credentials.signIn(limited, fixture.email)
   console.log(`Signed in to ${baseUrl} as Test Admin B, Test Admin C, and Test Limited B.`)
 
   // Positive controls: each user on their OWN records must succeed, or the
   // refusals below would prove nothing
   for (const letter of ["B", "C"] as const) {
     const own = ids[letter]
-    const n = testNames(letter)
+    const n = names[letter]
     const s = admins[letter]
     const controls: { name: string; method: Method; path: string; json?: unknown; mustContain: string }[] = [
       { name: "GET own client", method: "GET", path: `/api/clients/${own.clientId}`, mustContain: own.clientId },
@@ -508,7 +485,7 @@ async function main() {
       const ctx: AttemptContext = {
         own: ids[ownLetter],
         other: ids[otherLetter],
-        ownNames: testNames(ownLetter),
+        ownNames: names[ownLetter],
         targetRoleId: fixture.targetRoleId,
       }
       const session = attempt.actor === "limited" ? limited : admins[ownLetter]
@@ -533,7 +510,7 @@ async function main() {
         before = after
       }
 
-      const leaked = markersFor(ids[otherLetter], otherLetter).filter((m) => res.text.includes(m))
+      const leaked = markersFor(ids[otherLetter], names[otherLetter]).filter((m) => res.text.includes(m))
       const message = errorText(res.text)
       const row: Row = { attempt: label, expected, actual: String(res.status), result: "PASS" }
 
@@ -594,13 +571,20 @@ async function main() {
   const count = (r: Result) => rows.filter((row) => row.result === r).length
   console.log(`\n${rows.length} checks: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("UNEXPECTED")} UNEXPECTED`)
 
-  await prisma.$disconnect()
-  return count("FAIL") + count("UNEXPECTED") > 0 ? 1 : 0
+  return checkResult(rows)
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    console.error(err instanceof Error ? err.message : err)
-    process.exit(err instanceof HarnessBroken ? 2 : 1)
-  })
+// On its own: this check's own temporary data, set up and removed around it
+async function main() {
+  const baseUrl = readBaseUrl(process.argv.slice(2))
+  return withRunData("check-cross-company", (prisma, run) => checkCrossCompany(prisma, run, baseUrl))
+}
+
+if (isEntryScript("check-cross-company")) {
+  main()
+    .then((result) => process.exit(result.code))
+    .catch((err) => {
+      console.error(err instanceof Error ? err.message : err)
+      process.exit(err instanceof HarnessBroken || err instanceof SharedHarnessBroken ? 2 : 1)
+    })
+}

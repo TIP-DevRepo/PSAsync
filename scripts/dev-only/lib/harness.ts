@@ -119,6 +119,22 @@ export function errorText(text: string): string {
   return text.slice(0, 120)
 }
 
+// What a check returns: its exit code (0 all passed, 1 a FAIL or
+// UNEXPECTED) and the counts its summary line printed, for run-checks.ts
+export interface CheckResult {
+  code: 0 | 1
+  total: number
+  pass: number
+  fail: number
+  unexpected: number
+}
+
+export function checkResult(rows: { result: string }[]): CheckResult {
+  const count = (r: Result) => rows.filter((row) => row.result === r).length
+  const [pass, fail, unexpected] = [count("PASS"), count("FAIL"), count("UNEXPECTED")]
+  return { code: fail + unexpected > 0 ? 1 : 0, total: rows.length, pass, fail, unexpected }
+}
+
 export function printTable(rows: Row[]) {
   const headers = ["Attempt", "Expected", "Actual", "Result"]
   const cells = rows.map((r) => [r.attempt, r.expected, r.actual, r.result])
