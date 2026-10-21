@@ -19,7 +19,7 @@
 import type { PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import type { SampleIds, TestLetter, TestNames } from "./lib/test-data"
-import { HarnessBroken as SharedHarnessBroken, checkResult, type CheckResult } from "./lib/harness"
+import { HarnessBroken as SharedHarnessBroken, ServerUnreachable, checkResult, fetchOrExplain, pathForMessage, type CheckResult } from "./lib/harness"
 import { addRunRole, addRunUser, isEntryScript, withRunData, type RunData } from "./lib/run-data"
 
 // Must stay first: nothing below may run before the guard has passed
@@ -270,7 +270,7 @@ class Session {
       headers["Content-Type"] = "application/json"
       body = JSON.stringify(options.json)
     }
-    const res = await fetch(`${this.baseUrl}${path}`, { method, headers, body, redirect: "manual" })
+    const res = await fetchOrExplain(`${this.baseUrl}${path}`, { method, headers, body, redirect: "manual" }, `${this.label}: ${method} ${pathForMessage(path)}`)
     this.store(res)
     const text = await res.text()
     return { status: res.status, text, location: res.headers.get("location") ?? "" }
@@ -496,6 +496,8 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       try {
         res = await session.request(attempt.method, attempt.path(ctx), { json: attempt.body?.(ctx), multipart: attempt.multipart })
       } catch (err) {
+        // The server stopped answering: no later attempt can run either
+        if (err instanceof ServerUnreachable) throw err
         rows.push({ attempt: label, expected, actual: "no response", result: "UNEXPECTED", note: err instanceof Error ? err.message : String(err) })
         continue
       }

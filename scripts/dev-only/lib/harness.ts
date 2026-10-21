@@ -21,6 +21,62 @@ export interface Row {
 // in, failed positive control). Scripts exit with code 2 for it.
 export class HarnessBroken extends Error {}
 
+// Thrown when a request gets no HTTP answer at all (the dev server isn't
+// running, crashed, or stopped responding). Its message names the
+// underlying cause, which fetch itself only reports as "fetch failed".
+// Checks let it through instead of recording a row, so run-checks.ts can
+// stop and say the server stopped responding.
+export class ServerUnreachable extends HarnessBroken {}
+
+// "ECONNREFUSED: connect ECONNREFUSED 127.0.0.1:3000" from the error fetch
+// rejects with, whose real reason sits in its cause (a timeout shows as
+// UND_ERR_CONNECT_TIMEOUT or UND_ERR_HEADERS_TIMEOUT)
+export function fetchFailureCause(err: unknown): string {
+  const parts: string[] = []
+  let current: unknown = err
+  for (let depth = 0; current && depth < 4; depth++) {
+    const e = current as { code?: unknown; name?: unknown; message?: unknown; cause?: unknown; errors?: unknown }
+    const code = typeof e.code === "string" ? e.code : typeof e.name === "string" && e.name !== "Error" && e.name !== "TypeError" ? e.name : ""
+    const message = typeof e.message === "string" ? e.message.split("\n")[0] : ""
+    if (message && message !== "fetch failed") parts.push(code ? `${code}: ${message}` : message)
+    // A connection to localhost tries IPv6 and IPv4; the reasons are listed in errors
+    if (!e.cause && Array.isArray(e.errors) && e.errors.length > 0) current = e.errors[0]
+    else current = e.cause
+  }
+  return parts.length > 0 ? parts[parts.length - 1] : "no cause given"
+}
+
+// A request path for a message: no query string, and a customer link token
+// (32 characters or longer, longer than any record id) shown as [token]
+export function pathForMessage(path: string): string {
+  return path
+    .split("?")[0]
+    .split("/")
+    .map((segment) => (segment.length >= 32 ? "[token]" : segment))
+    .join("/")
+}
+
+// fetch, with a connection failure turned into ServerUnreachable naming
+// its cause. Only the method and path are named, never a body or cookie.
+export async function fetchOrExplain(url: string, init: RequestInit, label: string): Promise<Response> {
+  try {
+    return await fetch(url, init)
+  } catch (err) {
+    throw new ServerUnreachable(`${label} got no response from the server (${fetchFailureCause(err)})`)
+  }
+}
+
+// True when the server answers anything at all, for telling a server that
+// stopped from one request that failed
+export async function serverAnswers(baseUrl: string): Promise<boolean> {
+  try {
+    await fetch(`${baseUrl}/api/auth/csrf`, { redirect: "manual", signal: AbortSignal.timeout(10_000) })
+    return true
+  } catch {
+    return false
+  }
+}
+
 export function readBaseUrl(argv: readonly string[]): string {
   let value = "http://localhost:3000"
   argv.forEach((arg, i) => {
@@ -73,7 +129,7 @@ export class Session {
       headers["Content-Type"] = "application/json"
       body = JSON.stringify(options.json)
     }
-    const res = await fetch(`${this.baseUrl}${path}`, { method, headers, body, redirect: "manual" })
+    const res = await fetchOrExplain(`${this.baseUrl}${path}`, { method, headers, body, redirect: "manual" }, `${this.label}: ${method} ${pathForMessage(path)}`)
     this.store(res)
     const text = await res.text()
     return { status: res.status, text, location: res.headers.get("location") ?? "" }

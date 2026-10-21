@@ -66,7 +66,7 @@
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import { PLACEHOLDER_TOKEN, SAMPLE_ITEM_COST, type PermissionFixtureIds, type SampleIds, type TestNames } from "./lib/test-data"
-import { HarnessBroken, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
+import { HarnessBroken, ServerUnreachable, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
 import { addRunMailbox, addRunRole, addRunUser, isEntryScript, withRunData, type RunData } from "./lib/run-data"
 
 // Must stay first: nothing below may run before the guard has passed
@@ -1689,6 +1689,8 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
         try {
           res = await sessions[a.actor].request(a.method, a.path(ctx), { json: a.body?.(ctx) })
         } catch (err) {
+          // The server stopped answering: no later attempt can run either
+          if (err instanceof ServerUnreachable) throw err
           rows.push({ attempt: label(a), expected: expectedText(a), actual: "no response", result: "UNEXPECTED", note: err instanceof Error ? err.message : String(err) })
           continue
         }
