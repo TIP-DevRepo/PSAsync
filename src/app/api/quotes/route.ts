@@ -4,6 +4,8 @@ import { apiError, requireAccess } from "@/lib/api-access"
 import { assertRefs, quoteListWhere } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
 import { termsForStorage } from "@/lib/sanitize-terms"
+import { copiedLineData, COPY_SOURCE_LINE_ORDER } from "@/lib/quote-line-copy"
+import type { Prisma } from "@/generated/prisma"
 
 export async function GET() {
   const { ctx, response } = await requireAccess({ page: "quotes", message: "You do not have permission to view quotes" })
@@ -110,32 +112,11 @@ export async function POST(req: NextRequest) {
   const prefix = settings?.quotePrefix ?? "Q"
 
   // If a template was selected, load it (with its line items) to prefill from.
-  // Every field carries over as-is from the template line item — pricing,
-  // bundles, choice groups, text blocks, recurring settings, everything —
-  // so a template is a true starting point, not just a name/qty shell.
-  let templateLineItems: {
-    catalogItemId: string | null
-    section: string | null
-    sortOrder: number
-    name: string
-    description: string | null
-    sku: string | null
-    quantity: number
-    unitPrice: number
-    cost: number
-    discount: number
-    taxable: boolean
-    isRecurring: boolean
-    recurringInterval: "MONTHLY" | "QUARTERLY" | "ANNUALLY" | null
-    isOptional: boolean
-    optionalSelected: boolean
-    quantityAdjustable: boolean
-    choiceGroup: string | null
-    isTextBlock: boolean
-    bundleName: string | null
-    bundleDisplayMode: string | null
-    isBundleHeader: boolean
-  }[] = []
+  // Every field carries over as-is from the template line item (pricing,
+  // bundles, choice groups, text blocks, recurring settings, everything,
+  // see copiedLineData) so a template is a true starting point, not just a
+  // name/qty shell.
+  let templateLineItems: Prisma.QuoteLineItemUncheckedCreateWithoutQuoteInput[] = []
   let templateTerms: string | null = null
   let templateUsesDefault: boolean | null = null
   let templateSections: string[] = []
@@ -143,7 +124,7 @@ export async function POST(req: NextRequest) {
   if (body.templateId) {
     const template = await prisma.quoteTemplate.findUnique({
       where: { id: body.templateId, companyId },
-      include: { lineItems: true },
+      include: { lineItems: { orderBy: COPY_SOURCE_LINE_ORDER } },
     })
     if (!template) {
       return apiError(400, "Invalid template", "INVALID_REFERENCE")
@@ -153,29 +134,7 @@ export async function POST(req: NextRequest) {
       templateTerms = template.terms
       templateUsesDefault = template.useDefaultTerms
       templateSections = template.sections
-      templateLineItems = template.lineItems.map((tli) => ({
-        catalogItemId: tli.catalogItemId,
-        section: tli.section,
-        sortOrder: tli.sortOrder,
-        name: tli.name,
-        description: tli.description,
-        sku: tli.sku,
-        quantity: tli.quantity,
-        unitPrice: tli.unitPrice,
-        cost: tli.cost,
-        discount: tli.discount,
-        taxable: tli.taxable,
-        isRecurring: tli.isRecurring,
-        recurringInterval: tli.recurringInterval,
-        isOptional: tli.isOptional,
-        optionalSelected: tli.optionalSelected,
-        quantityAdjustable: tli.quantityAdjustable,
-        choiceGroup: tli.choiceGroup,
-        isTextBlock: tli.isTextBlock,
-        bundleName: tli.bundleName,
-        bundleDisplayMode: tli.bundleDisplayMode,
-        isBundleHeader: tli.isBundleHeader,
-      }))
+      templateLineItems = template.lineItems.map(copiedLineData)
     }
   }
 

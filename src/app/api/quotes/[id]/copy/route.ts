@@ -4,6 +4,7 @@ import { notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
 import { termsForStorage } from "@/lib/sanitize-terms"
+import { copiedLineData, COPY_SOURCE_LINE_ORDER } from "@/lib/quote-line-copy"
 
 export async function POST(
   req: NextRequest,
@@ -20,7 +21,7 @@ export async function POST(
 
   const source = await prisma.quote.findFirst({
     where: viewableQuoteWhere(ctx, id),
-    include: { lineItems: true },
+    include: { lineItems: { orderBy: COPY_SOURCE_LINE_ORDER } },
   })
   if (!source) return notFound()
 
@@ -50,25 +51,10 @@ export async function POST(
       clientPoNumber: source.clientPoNumber,
       expiresAt: source.expiresAt,
       taxRate: source.taxRate,
-      lineItems: {
-        create: source.lineItems.map((li) => ({
-          catalogItemId: li.catalogItemId,
-          section: li.section,
-          sortOrder: li.sortOrder,
-          name: li.name,
-          description: li.description,
-          sku: li.sku,
-          quantity: li.quantity,
-          unitPrice: li.unitPrice,
-          cost: li.cost,
-          discount: li.discount,
-          taxable: li.taxable,
-          isRecurring: li.isRecurring,
-          recurringInterval: li.recurringInterval,
-          isOptional: li.isOptional,
-          optionalSelected: li.optionalSelected,
-        })),
-      },
+      // The section list keeps the order and any section with no lines yet
+      sections: source.sections,
+      // Every kind of line, cost from the stored rows
+      lineItems: { create: source.lineItems.map(copiedLineData) },
     },
   })
 

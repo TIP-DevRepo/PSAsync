@@ -4,6 +4,7 @@ import { notFound, requireAccess } from "@/lib/api-access"
 import { quoteListWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
 import { termsForStorage } from "@/lib/sanitize-terms"
+import { copiedLineData, COPY_SOURCE_LINE_ORDER } from "@/lib/quote-line-copy"
 
 export async function GET(
   req: NextRequest,
@@ -43,7 +44,7 @@ export async function POST(
 
   const current = await prisma.quote.findFirst({
     where: viewableQuoteWhere(ctx, id),
-    include: { lineItems: true },
+    include: { lineItems: { orderBy: COPY_SOURCE_LINE_ORDER } },
   })
   if (!current) return notFound()
 
@@ -77,31 +78,9 @@ export async function POST(
       clientPoNumber: current.clientPoNumber,
       expiresAt: current.expiresAt,
       taxRate: current.taxRate,
-      lineItems: {
-        create: current.lineItems.map((li) => ({
-          catalogItemId: li.catalogItemId,
-          section: li.section,
-          sortOrder: li.sortOrder,
-          name: li.name,
-          description: li.description,
-          sku: li.sku,
-          quantity: li.quantity,
-          unitPrice: li.unitPrice,
-          cost: li.cost,
-          discount: li.discount,
-          taxable: li.taxable,
-          isRecurring: li.isRecurring,
-          recurringInterval: li.recurringInterval,
-          isOptional: li.isOptional,
-          optionalSelected: li.optionalSelected,
-          quantityAdjustable: li.quantityAdjustable,
-          choiceGroup: li.choiceGroup,
-          isTextBlock: li.isTextBlock,
-          bundleName: li.bundleName,
-          bundleDisplayMode: li.bundleDisplayMode,
-          isBundleHeader: li.isBundleHeader,
-        })),
-      },
+      // The section list keeps the order and any section with no lines yet
+      sections: current.sections,
+      lineItems: { create: current.lineItems.map(copiedLineData) },
     },
   })
 
