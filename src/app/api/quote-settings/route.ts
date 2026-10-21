@@ -4,6 +4,7 @@ import { quoteSettingsSelect } from "@/lib/safe-selects"
 import { apiError, requireAccess } from "@/lib/api-access"
 import { termsForStorage, termsToDisplayHtml } from "@/lib/sanitize-terms"
 import { numberPrefixProblem } from "@/lib/number-prefix"
+import { EXPIRY_DAYS_MESSAGE, isValidExpiryDays } from "@/lib/quote-expiry"
 
 // Any active user, since the quote pages read these defaults
 export async function GET() {
@@ -34,6 +35,12 @@ function readNumberField(value: unknown): number | undefined {
   return typeof value === "number" || typeof value === "string" ? Number(value) : NaN
 }
 
+// The Default Expiry days, or null when the value can't be saved
+function readExpiryDays(value: unknown): number | null {
+  const days = readNumberField(value)
+  return days !== undefined && isValidExpiryDays(days) ? days : null
+}
+
 export async function PATCH(req: NextRequest) {
   const { ctx, response } = await requireAccess({
     permission: "settingsSections.quotes",
@@ -43,11 +50,12 @@ export async function PATCH(req: NextRequest) {
 
   const body = await req.json()
 
-  // Never written as NaN: left out keeps the stored value, anything that
-  // isn't a whole number is refused
-  const quoteExpiryDays = readNumberField(body.quoteExpiryDays)
-  if (quoteExpiryDays !== undefined && !Number.isInteger(quoteExpiryDays)) {
-    return apiError(400, "Quote expiry days must be a whole number")
+  // Left out keeps the stored value. Anything sent must be a whole number of
+  // days, 1 or more: a blank field is refused rather than saved as 0, and 0
+  // never meant "no expiry" (new quotes fell back to 30 days).
+  const quoteExpiryDays = body.quoteExpiryDays === undefined ? undefined : readExpiryDays(body.quoteExpiryDays)
+  if (quoteExpiryDays === null) {
+    return apiError(400, EXPIRY_DAYS_MESSAGE)
   }
   const approvalThreshold = body.quoteApprovalThreshold ? readNumberField(body.quoteApprovalThreshold) : undefined
   if (approvalThreshold !== undefined && !Number.isFinite(approvalThreshold)) {

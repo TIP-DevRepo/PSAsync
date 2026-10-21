@@ -61,6 +61,23 @@ export function isPastExpiry(expiresAt: Date | null, now: Date): boolean {
 // Used when nothing else gives a quote's expiry days
 export const DEFAULT_QUOTE_EXPIRY_DAYS = 30
 
+// The company Default Expiry (days) setting: a whole number, 1 or more.
+// Shared by the Quote Settings panel and its API route.
+export const EXPIRY_DAYS_MESSAGE = "Default expiry must be a whole number of days, 1 or more"
+
+export function isValidExpiryDays(days: number): boolean {
+  return Number.isInteger(days) && days >= 1
+}
+
+// The panel's field as typed: the days to save, or null when it is blank or
+// anything but a whole number of 1 or more
+export function parseExpiryDaysInput(text: string): number | null {
+  const trimmed = text.trim()
+  if (!/^\d+$/.test(trimmed)) return null
+  const days = Number(trimmed)
+  return isValidExpiryDays(days) ? days : null
+}
+
 // A new quote's expiry date `days` days from today, as a date only value
 // the way the New Quote form's date input stores it, so it is valid through
 // that calendar day. "Today" is the date in PORTAL_EXPIRY_TIME_ZONE.
