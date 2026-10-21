@@ -13,7 +13,12 @@
 // a sales order and purchase order of their own, each with a line, and "Test
 // Templater" (only a "Templater" role with Quote Settings) gets a quote
 // template with one line for the line item cost checks. The sample catalog
-// item's cost is reset to SAMPLE_ITEM_COST on every run.
+// item's cost is reset to SAMPLE_ITEM_COST on every run. For the quote copy
+// checks, each company also gets "Sample Copy Client" (its own contact,
+// payment terms, and shipping location) and the admin's "Sample Copy
+// Quote", reset on every run to a bundle, a choice group with a selected
+// option, a text block, an optional line, an adjustable quantity, and a
+// recurring line over two sections and an empty one.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and
 // refuses to touch a test company that has Microsoft credentials or an
@@ -470,6 +475,85 @@ async function main() {
     // don't own
     if (quote.userId !== admin.id || quote.status !== "DRAFT") {
       await prisma.quote.update({ where: { id: quote.id }, data: { userId: admin.id, status: "DRAFT" } })
+    }
+
+    // ── Quote copy fixtures (check-permissions) ──
+    // A second client with its own contact, payment terms, and shipping
+    // location, for copying a quote to a different client
+    const copyClient =
+      (await prisma.client.findFirst({ where: { companyId, name: n.copyClient } })) ??
+      (await prisma.client.create({ data: { companyId, name: n.copyClient, status: "ACTIVE", paymentTerms: n.copyClientPaymentTerms } }))
+    const copyLocation =
+      (await prisma.clientLocation.findFirst({ where: { clientId: copyClient.id, name: n.copyClientLocation } })) ??
+      (await prisma.clientLocation.create({
+        data: { clientId: copyClient.id, name: n.copyClientLocation, address: "2 Copy Street", city: "Copyton", isPrimary: true },
+      }))
+    if (copyClient.paymentTerms !== n.copyClientPaymentTerms || copyClient.mainShippingLocationId !== copyLocation.id) {
+      await prisma.client.update({
+        where: { id: copyClient.id },
+        data: { paymentTerms: n.copyClientPaymentTerms, mainShippingLocationId: copyLocation.id, mainBillingLocationId: copyLocation.id },
+      })
+    }
+    if (
+      !(await prisma.contact.findFirst({
+        where: { clientId: copyClient.id, firstName: n.copyContactFirstName, lastName: n.copyContactLastName },
+      }))
+    ) {
+      await prisma.contact.create({
+        data: { clientId: copyClient.id, firstName: n.copyContactFirstName, lastName: n.copyContactLastName, locationId: copyLocation.id },
+      })
+    }
+    // An admin quote on the sample client with every kind of line, reset to
+    // exactly these lines and sections on every run
+    const copySections = ["Hardware", "Empty section", "Services"]
+    let copyQuote = await prisma.quote.findFirst({ where: { companyId, title: n.copyQuote } })
+    if (!copyQuote) {
+      const count = await prisma.quote.count({ where: { companyId, version: 1 } })
+      const expiryDays = settings?.quoteExpiryDays || 30
+      copyQuote = await prisma.quote.create({
+        data: {
+          companyId,
+          clientId: client.id,
+          contactId: contact.id,
+          userId: admin.id,
+          quoteNumber: `${settings?.quotePrefix ?? "Q"}-${year}-${pad4(count + 1)}`,
+          title: n.copyQuote,
+          terms: settings?.quoteTerms ?? null,
+          expiresAt: new Date(Date.now() + expiryDays * 24 * 60 * 60 * 1000),
+          sections: copySections,
+        },
+      })
+    }
+    await prisma.quote.update({
+      where: { id: copyQuote.id },
+      // A PO number and internal notes the copy must leave behind
+      data: {
+        userId: admin.id,
+        status: "DRAFT",
+        clientId: client.id,
+        contactId: contact.id,
+        sections: copySections,
+        clientPoNumber: "DEV-PO-1",
+        internalNotes: "Dev only internal note",
+      },
+    })
+    const copyLines = [
+      { section: "Hardware", sortOrder: 0, name: `${n.copyLinePrefix} switch`, catalogItemId: catalogItem.id, quantity: 2, unitPrice: 100, cost: 60, discount: 10, taxable: false },
+      { section: "Hardware", sortOrder: 1, name: `${n.copyLinePrefix} bundle`, bundleName: "Dev Bundle", isBundleHeader: true, bundleDisplayMode: "EXPANDED", unitPrice: 500, cost: 300 },
+      { section: "Hardware", sortOrder: 0, name: `${n.copyLinePrefix} bundle child one`, bundleName: "Dev Bundle", unitPrice: 0, cost: 250 },
+      { section: "Hardware", sortOrder: 1, name: `${n.copyLinePrefix} bundle child two`, bundleName: "Dev Bundle", quantity: 2, unitPrice: 0, cost: 25 },
+      { section: "Hardware", sortOrder: 2, name: `${n.copyLinePrefix} text block`, isTextBlock: true, description: "Dev only text block", unitPrice: 0 },
+      { section: "Services", sortOrder: 0, name: `${n.copyLinePrefix} choice one`, choiceGroup: "Dev Choice", isOptional: true, optionalSelected: false, unitPrice: 50, cost: 20 },
+      { section: "Services", sortOrder: 1, name: `${n.copyLinePrefix} choice two`, choiceGroup: "Dev Choice", isOptional: true, optionalSelected: true, unitPrice: 90, cost: 40 },
+      { section: "Services", sortOrder: 2, name: `${n.copyLinePrefix} optional`, isOptional: true, optionalSelected: false, unitPrice: 200, cost: 120 },
+      { section: "Services", sortOrder: 3, name: `${n.copyLinePrefix} adjustable`, quantityAdjustable: true, quantity: 25, unitPrice: 12, cost: 8 },
+      { section: "Services", sortOrder: 4, name: `${n.copyLinePrefix} recurring`, isRecurring: true, recurringInterval: "QUARTERLY" as const, unitPrice: 300, cost: 100, discount: 5 },
+    ]
+    await prisma.quoteLineItem.deleteMany({ where: { quoteId: copyQuote.id, name: { notIn: copyLines.map((l) => l.name) } } })
+    for (const line of copyLines) {
+      const existing = await prisma.quoteLineItem.findFirst({ where: { quoteId: copyQuote.id, name: line.name }, select: { id: true } })
+      if (existing) await prisma.quoteLineItem.update({ where: { id: existing.id }, data: line })
+      else await prisma.quoteLineItem.create({ data: { quoteId: copyQuote.id, ...line } })
     }
 
     // The Clerk role is reset to exactly its permissions on every run

@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { CollapsibleField } from "@/components/ui/collapsible-field"
+import { EXPIRY_DAYS_MESSAGE, parseExpiryDaysInput } from "@/lib/quote-expiry"
 
 interface QuoteSettings {
   quotePrefix: string
@@ -35,12 +36,17 @@ export function QuoteSettingsPanel() {
   const [mailboxes, setMailboxes] = useState<MailboxOption[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  // The Default Expiry field as typed, so clearing it never becomes 0. The
+  // saved value in settings only changes when a valid number is saved.
+  const [expiryInput, setExpiryInput] = useState("30")
+  const [expiryError, setExpiryError] = useState("")
 
   useEffect(() => {
     fetch("/api/quote-settings")
       .then((res) => res.json())
       .then((json) => {
         setSettings(json)
+        setExpiryInput(String(json.quoteExpiryDays ?? 30))
         setLoading(false)
       })
     fetch("/api/microsoft-connections")
@@ -53,16 +59,25 @@ export function QuoteSettingsPanel() {
   }
 
   async function handleSave() {
+    // A blank, fractional, zero, or negative expiry is never sent; the
+    // stored value stays as it was
+    const expiryDays = parseExpiryDaysInput(expiryInput)
+    if (expiryDays === null) {
+      setExpiryError(EXPIRY_DAYS_MESSAGE)
+      return
+    }
+    setExpiryError("")
     setSaving(true)
 
     const res = await fetch("/api/quote-settings", {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(settings),
+      body: JSON.stringify({ ...settings, quoteExpiryDays: expiryDays }),
     })
 
     setSaving(false)
     if (res.ok) {
+      setSettings((prev) => ({ ...prev, quoteExpiryDays: expiryDays }))
       toast.success("Quote settings saved")
     } else {
       const data = await res.json().catch(() => ({}))
@@ -94,10 +109,17 @@ export function QuoteSettingsPanel() {
           <label className="block text-sm font-medium mb-1">Default Expiry (days)</label>
           <input
             type="number"
-            value={settings.quoteExpiryDays}
-            onChange={(e) => update("quoteExpiryDays", Number(e.target.value))}
+            min={1}
+            step={1}
+            value={expiryInput}
+            onChange={(e) => {
+              setExpiryInput(e.target.value)
+              setExpiryError("")
+            }}
+            aria-invalid={!!expiryError}
             className="w-32 rounded-md border px-3 py-2 text-sm"
           />
+          {expiryError && <p className="text-xs text-danger mt-1">{expiryError}</p>}
           <p className="text-xs text-zinc-500 mt-1">
             New quotes will automatically expire this many days after being sent, unless overridden.
           </p>

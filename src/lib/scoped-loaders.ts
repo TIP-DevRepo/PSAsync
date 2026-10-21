@@ -231,6 +231,18 @@ export function quoteVisibilityWhere(ctx: QuoteViewer): Prisma.QuoteWhereInput {
   return { OR: visible }
 }
 
+// Who a user may make a quote's owner (the Assigned Rep on the New Quote
+// form, and the assign route). A quote has no creator of its own, so the
+// view rule above only knows its owner: a user who can't see everyone's
+// quotes would lose sight of a quote they gave to someone else, and may
+// only assign quotes to themselves. view-all holders (and Global Admin)
+// may assign anyone.
+export const SELF_ASSIGN_ONLY_MESSAGE = "You can only assign quotes to yourself"
+
+export function mayAssignQuoteTo(ctx: Pick<AccessContext, "userId" | "can">, ownerId: string): boolean {
+  return ownerId === ctx.userId || ctx.can("quotes.viewAllUsersQuotes")
+}
+
 // The list filter for every quote the user may open
 export const quoteListWhere = (ctx: QuoteViewer) =>
   ({ companyId: ctx.companyId, AND: [quoteVisibilityWhere(ctx)] }) satisfies Prisma.QuoteWhereInput

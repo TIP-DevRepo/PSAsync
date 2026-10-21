@@ -122,6 +122,21 @@ export function testNames(letter: TestLetter) {
     approverRole: `Test Approver Role ${letter}`,
     approverName: `Test Approver ${letter}`,
     approverEmail: `test-approver-${lower}@example.test`,
+    // The quote copy checks (create-test-companies): a second client with
+    // its own contact, payment terms, and shipping location, so a copy can
+    // be made for a different client and a contact of the wrong client can
+    // be refused, and an admin quote with every kind of line (a bundle, a
+    // choice group with a selected option, a text block, an optional line,
+    // an adjustable quantity, a recurring line) over two sections and an
+    // empty one
+    copyClient: `Sample Copy Client ${letter}`,
+    copyClientLocation: `Sample Copy Location ${letter}`,
+    copyClientPaymentTerms: "Net45",
+    copyContactFirstName: "Copy",
+    copyContactLastName: `Contact ${letter}`,
+    copyQuote: `Sample Copy Quote ${letter}`,
+    // Each fixture line is named this prefix, a space, and what it is
+    copyLinePrefix: `Sample Copy Line ${letter}:`,
   }
 }
 
@@ -225,6 +240,9 @@ export interface PermissionFixtureIds {
   templaterRoleId: string
   costTemplateId: string
   costTemplateLineId: string
+  copyClientId: string
+  copyContactId: string
+  copyQuoteId: string
 }
 
 // The permission test records for one test company (check-permissions).
@@ -274,6 +292,14 @@ export async function loadPermissionFixtureIds(prisma: PrismaClient, letter: Tes
       prisma.role.findFirst({ where: { companyId, name: n.templaterRole }, select: { id: true } }),
       prisma.quoteTemplate.findFirst({ where: { companyId, name: n.costTemplate }, select: { id: true } }),
     ])
+  const [copyClient, copyQuote] = await Promise.all([
+    prisma.client.findFirst({ where: { companyId, name: n.copyClient }, select: { id: true } }),
+    prisma.quote.findFirst({ where: { companyId, title: n.copyQuote }, select: { id: true } }),
+  ])
+  const copyContact = await prisma.contact.findFirst({
+    where: { clientId: id(copyClient), firstName: n.copyContactFirstName, lastName: n.copyContactLastName, client: { companyId } },
+    select: { id: true },
+  })
   const [stock, repQuoteLine, ordersSoLine, ordersPoLine, costTemplateLine] = await Promise.all([
     prisma.inventoryStock.findFirst({
       where: { companyId, catalogItemId: id(stockItem), locationId: id(container) },
@@ -321,6 +347,9 @@ export async function loadPermissionFixtureIds(prisma: PrismaClient, letter: Tes
     templaterRoleId: id(templaterRole),
     costTemplateId: id(costTemplate),
     costTemplateLineId: id(costTemplateLine),
+    copyClientId: id(copyClient),
+    copyContactId: id(copyContact),
+    copyQuoteId: id(copyQuote),
   }
   const missing = Object.entries(ids)
     .filter(([, value]) => !value)

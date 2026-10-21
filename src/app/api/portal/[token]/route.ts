@@ -47,8 +47,11 @@ export async function GET(
     return NextResponse.json({ ...toPortalQuote(quote, true), superseded: false })
   }
 
-  if (quote.status === "SENT") {
-    // First time the client opens it — mark as viewed and notify the rep.
+  // A superseded version (a newer one was sent) still opens read only, but
+  // never records a view or notifies the rep: only the version the customer
+  // can act on does
+  if (quote.status === "SENT" && !superseded) {
+    // First time the client opens it: mark as viewed and notify the rep.
     // Only fires on this SENT -> VIEWED transition, not on every subsequent
     // reload of the portal page.
     await prisma.quote.update({

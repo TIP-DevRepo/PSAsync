@@ -19,8 +19,10 @@
 // No real email is ever sent: the test companies have no Microsoft
 // credentials and no distributor turned on (findExternalServices, checked
 // before anything runs). No scene attempt accepts, declines, or comments
-// successfully, and the one client visit to a quote that is SENT is never
-// made, so no notification fires. Nothing is uploaded anywhere.
+// successfully. The only client visit to a quote that is SENT is the
+// supersededSent scene's older version, which must not record a view or
+// notify anyone (any notification a broken rule made is removed at the
+// end, and could not be emailed). Nothing is uploaded anywhere.
 //
 // The terms scenes store terms holding a script tag, an img onerror, a
 // javascript: link, and an onclick next to harmless text on Test Company
@@ -45,8 +47,11 @@
 // The superseded scene adds a newer sent version to Test Company B's sample
 // quote (made the active one, already viewed so opening it notifies no one)
 // and checks the older version's link still opens and downloads but
-// refuses accept, decline, comments, and item changes. The extra version is
-// deleted right after the scene, and again at the end if a check broke.
+// refuses accept, decline, comments, and item changes. The supersededSent
+// scene does the same with the older version still SENT and never viewed,
+// and checks that opening its link leaves it SENT with no viewed date and
+// no view notification (quote correctness). The extra version is deleted
+// right after each scene, and again at the end if a check broke.
 // The awaiting scene also sends customer input that is too long or the
 // wrong type, which every portal route must refuse with a 400.
 //
@@ -89,6 +94,7 @@ type Scene =
   | "defaultFrozen" // B VIEWED after the send froze DEFAULT_ONE, company default changed to DEFAULT_TWO
   | "statusFreeze" // B DRAFT, never sent, box ticked over CUSTOM_OLD, company default DEFAULT_ONE
   | "superseded" // B VIEWED but not active, with a newer active sent version (deleted after the scene)
+  | "supersededSent" // B SENT and never viewed but not active, with a newer active sent version (deleted after the scene)
   | "regenerate" // B VIEWED, not expired, for the regenerate steps
 
 // ─── ATTEMPTS ───────────────────────────────────────────────────────────────
@@ -403,6 +409,20 @@ const ATTEMPTS: Attempt[] = [
     expect: 400, expectError: "A newer version of this quote has been sent", code: "SUPERSEDED" },
   { scene: "superseded", name: "newer version opens, not superseded", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.newerClient}`,
     expect: 200, contains: () => ['"superseded":false'], notContains: (ctx) => [...PRIVATE_KEYS, ctx.newerClient, ctx.adminEmailB] },
+  // Quote correctness: opening an older version that is still SENT records
+  // no view and notifies no one. The notification is looked for after a
+  // short wait, since the route sends it without waiting.
+  { scene: "supersededSent", name: "older SENT version opens without being marked viewed", kind: "allowed", method: "GET", path: p(bClient), expect: 200,
+    contains: () => ['"superseded":true', '"status":"SENT"'], notContains: privateValues,
+    check: async (_res, ctx, prisma) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const q = await prisma.quote.findUniqueOrThrow({ where: { id: ctx.b.quoteId }, select: { status: true, viewedAt: true } })
+      if (q.status !== "SENT" || q.viewedAt) return `the older version is now ${q.status}${q.viewedAt ? " with a viewed date" : ""}`
+      const notified = await prisma.notification.count({
+        where: { companyId: ctx.b.companyId, type: "QUOTE_VIEWED", link: `/dashboard/quotes/${ctx.b.quoteId}`, createdAt: { gte: new Date(Date.now() - 60_000) } },
+      })
+      return notified > 0 ? "the rep was notified of a view" : null
+    } },
 
   // ── Staff responses and regenerate ──
   { scene: "regenerate", as: "admin", name: "quote detail has no customer token", kind: "control", method: "GET", path: (ctx) => `/api/quotes/${ctx.b.quoteId}`,
@@ -444,6 +464,7 @@ const SCENE_ORDER: Scene[] = [
   "defaultFrozen",
   "statusFreeze",
   "superseded",
+  "supersededSent",
   "regenerate",
 ]
 
@@ -489,6 +510,7 @@ async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; re
     statusFreeze: { ...base, status: "DRAFT" as const, sentAt: null, viewedAt: null },
     // The newer version added for this scene is the active one
     superseded: { ...base, status: "VIEWED" as const, isActive: false },
+    supersededSent: { ...base, status: "SENT" as const, viewedAt: null, isActive: false },
     regenerate: { ...base, status: "VIEWED" as const, isActive: true },
   }[scene]
   // Written straight to the database, past the sanitizer, the way terms
@@ -758,7 +780,7 @@ async function main() {
 
     for (const scene of SCENE_ORDER) {
       await setScene(prisma, scene, { b: b.quoteId, rep: fx.repQuoteId, c: c.quoteId, companyB: b.companyId })
-      if (scene === "superseded") await addNewerVersion()
+      if (scene === "superseded" || scene === "supersededSent") await addNewerVersion()
       let before = await snapshot(prisma, familyIds, [b.companyId, c.companyId])
       for (const a of ATTEMPTS.filter((x) => x.scene === scene)) {
         const label = `[${scene}${ACTOR_LABEL[a.as ?? "anonymous"]}] ${a.name}`
@@ -784,7 +806,7 @@ async function main() {
         }
         before = await snapshot(prisma, familyIds, [b.companyId, c.companyId])
       }
-      if (scene === "superseded") await removeNewerVersion()
+      if (scene === "superseded" || scene === "supersededSent") await removeNewerVersion()
     }
 
     // Round two, N-19: concurrent responses through the customer link
