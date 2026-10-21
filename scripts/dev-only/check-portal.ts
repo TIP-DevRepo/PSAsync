@@ -1,14 +1,16 @@
 // DEV ONLY. Proves the customer portal rules against the locally running dev
 // server: calls every portal route WITHOUT signing in, using the real tokens
-// of the sample quotes create-test-companies.ts made, and checks every
+// of the sample quotes this run made (lib/run-data.ts), and checks every
 // attempt in the ATTEMPTS list below. Test Admin B signs in only for the
 // regenerate step and the staff response checks.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and only
 // talks to a server on this machine. Run from the repo root, with the dev
-// server running and the password set in the shell (never in a file):
-//   TEST_ADMIN_B_PASSWORD=... TEST_ADMIN_C_PASSWORD=... TEST_EVERYONE_B_PASSWORD=... npx tsx scripts/dev-only/check-portal.ts --yes
+// server running:
+//   npx tsx scripts/dev-only/check-portal.ts --yes
 // Optional: --base-url http://localhost:3000 (the default)
+// On its own it sets up and removes its own temporary data; run-checks.ts
+// runs it with the data it shares between all three checks.
 //
 // The quotes are put into each scene's state directly in the database
 // (sent, viewed, expired, accepted and expired, never sent, moved back to
@@ -66,11 +68,14 @@
 // deleted, and the quote and its notifications are put back with the rest.
 // The per link limits (20 PDFs, 30 comments an hour) count this script's
 // requests too: a run downloads Company B's customer PDF about four times.
+// Every run makes new quotes with new customer links, so running it again
+// within the hour starts from zero.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
-import { loadPermissionFixtureIds, loadSampleIds, testNames, type SampleIds } from "./lib/test-data"
-import { HarnessBroken, Session, errorText, isJsonError, printTable, readBaseUrl, type Method, type Row } from "./lib/harness"
+import type { SampleIds, TestNames } from "./lib/test-data"
+import { HarnessBroken, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
+import { isEntryScript, withRunData, type RunData } from "./lib/run-data"
 
 // Must stay first: nothing below may run before the guard has passed
 enforceDevGuard("check-portal")
@@ -149,15 +154,16 @@ interface Attempt {
   after?: (res: { status: number; text: string }, ctx: Ctx) => void
 }
 
-const B = testNames("B")
-const C = testNames("C")
+// This run's names for Test Company B and C, set when the check starts
+let B: TestNames
+let C: TestNames
 
 // What a public response must never carry. Keys are checked with their
 // quotes so words in the quote's own text can't match.
 const PRIVATE_KEYS = ['"cost"', '"internalNotes"', '"pendingEmailPayload"', '"accessToken"', '"internalAccessToken"', '"companyId"', '"userId"']
 const privateValues = (ctx: Ctx) => [...PRIVATE_KEYS, ctx.bClient, ctx.bInternal, ctx.adminEmailB]
-const companyC = [C.company, C.client, C.quoteLine]
-const companyB = [B.company, B.client, B.quoteLine]
+const companyC = () => [C.company, C.client, C.quoteLine]
+const companyB = () => [B.company, B.client, B.quoteLine]
 const p = (token: (ctx: Ctx) => string, rest = "") => (ctx: Ctx) => `/api/portal/${token(ctx)}${rest}`
 const bClient = (ctx: Ctx) => ctx.bClient
 const LINK_INVALID = "This link is no longer valid"
@@ -225,7 +231,7 @@ async function pdfHtmlTermsProblem(prisma: PrismaClient, quoteId: string): Promi
 const ATTEMPTS: Attempt[] = [
   // ── A valid link ──
   { scene: "awaiting", name: "client GET returns the public quote", kind: "control", method: "GET", path: p(bClient), expect: 200,
-    contains: () => [B.quote, B.company, B.quoteLine], notContains: (ctx) => [...privateValues(ctx), ...companyC] },
+    contains: () => [B.quote, B.company, B.quoteLine], notContains: (ctx) => [...privateValues(ctx), ...companyC()] },
   { scene: "awaiting", name: "client comments GET", kind: "allowed", method: "GET", path: p(bClient, "/comments"), expect: 200,
     notContains: () => ['"authorUserId"'] },
   { scene: "awaiting", name: "accept without a signature passes the status gate", kind: "refused", method: "POST", path: p(bClient, "/accept"),
@@ -233,7 +239,7 @@ const ATTEMPTS: Attempt[] = [
   { scene: "awaiting", name: "line item update with nothing passes the status gate", kind: "refused", method: "PATCH",
     path: (ctx) => `/api/portal/${ctx.bClient}/line-items/${ctx.b.quoteLineId}`, body: () => ({}), expect: 400, expectError: "Nothing to update" },
   { scene: "awaiting", name: "Company C link shows only Company C", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.cClient}`,
-    expect: 200, contains: () => [C.company], notContains: () => companyB },
+    expect: 200, contains: () => [C.company], notContains: companyB },
   { scene: "awaiting", name: "Company B token cannot change a Company C line item", kind: "refused", method: "PATCH",
     path: (ctx) => `/api/portal/${ctx.bClient}/line-items/${ctx.c.quoteLineId}`, body: () => ({ quantity: 5 }), expect: 404, expectError: "Line item not found" },
   { scene: "awaiting", name: "never sent quote is not valid", kind: "refused", method: "GET", path: (ctx) => `/api/portal/${ctx.repClient}`,
@@ -447,7 +453,7 @@ const ATTEMPTS: Attempt[] = [
   { scene: "regenerate", name: "old link cannot accept", kind: "refused", method: "POST", path: (ctx) => `/api/portal/${ctx.oldBClient}/accept`,
     body: () => SIGNED, expect: 404, expectError: LINK_INVALID },
   { scene: "regenerate", name: "new link works", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.newBClient}`,
-    expect: 200, contains: () => [B.quote], notContains: (ctx) => [...PRIVATE_KEYS, ctx.newBClient, ctx.adminEmailB, ...companyC] },
+    expect: 200, contains: () => [B.quote], notContains: (ctx) => [...PRIVATE_KEYS, ctx.newBClient, ctx.adminEmailB, ...companyC()] },
 ]
 
 const SCENE_ORDER: Scene[] = [
@@ -607,7 +613,7 @@ async function checkResponseRace(
   // The cleanup below deletes this quote's sales orders, so there must be
   // none of its own to begin with
   if ((await prisma.salesOrder.count({ where: { quoteId } })) > 0) {
-    throw new HarnessBroken("Company B's sample quote already has a sales order. Run create-test-companies again to reset it.")
+    throw new HarnessBroken("Company B's sample quote already has a sales order, so this run's data isn't as it was set up.")
   }
   // What an accept writes beyond the fields main puts back
   const signature = await prisma.quote.findUniqueOrThrow({
@@ -651,33 +657,26 @@ async function checkResponseRace(
 
 // ─── Run ────────────────────────────────────────────────────────────────────
 
-async function main() {
-  const baseUrl = readBaseUrl(process.argv.slice(2))
-  const adminPassword = process.env.TEST_ADMIN_B_PASSWORD
-  const adminCPassword = process.env.TEST_ADMIN_C_PASSWORD
-  const everyonePassword = process.env.TEST_EVERYONE_B_PASSWORD
-  if (!adminPassword || !adminCPassword || !everyonePassword) {
-    throw new HarnessBroken(
-      "Set TEST_ADMIN_B_PASSWORD, TEST_ADMIN_C_PASSWORD, and TEST_EVERYONE_B_PASSWORD in your shell (the passwords create-test-companies printed)."
-    )
-  }
-
+// Runs every scene against this run's data and returns the result (exit code 0
+// all passed, 1 a FAIL or UNEXPECTED). A broken harness throws HarnessBroken.
+export async function checkPortal(prisma: PrismaClient, run: RunData, baseUrl: string): Promise<CheckResult> {
   // Imported only after the guard passed
-  const { prisma } = await import("@/lib/prisma")
   const { newAccessToken } = await import("@/lib/portal-token")
   const rows: Row[] = []
   const startedAt = new Date()
 
-  const b = await loadSampleIds(prisma, "B")
-  const c = await loadSampleIds(prisma, "C")
-  const fx = await loadPermissionFixtureIds(prisma, "B")
+  B = run.companies.B.names
+  C = run.companies.C.names
+  const b = run.companies.B.ids
+  const c = run.companies.C.ids
+  const fx = run.companies.B.fixtures
 
   // Safety: with no Microsoft credentials and no distributor turned on, no
   // email can be sent and no distributor reached even if a check misbehaves
   const external = await findExternalServices(prisma, [b.companyId, c.companyId])
   if (external) throw new HarnessBroken(external)
   if (!b.quoteId || !c.quoteId || !fx.repQuoteId || !b.quoteLineId || !c.quoteLineId) {
-    throw new HarnessBroken("The sample quotes are missing. Run create-test-companies first.")
+    throw new HarnessBroken("The sample quotes are missing from this run's data.")
   }
 
   // Every version of the three quotes, so all of them are put back
@@ -697,7 +696,7 @@ async function main() {
   // Company B's default terms, changed by the default terms scenes
   const originalSettings = await prisma.companySettings.findUnique({ where: { companyId: b.companyId }, select: { quoteTerms: true } })
   if (familyRows.length !== 3) {
-    throw new HarnessBroken("The sample quotes have extra versions. Run create-test-companies again to reset them.")
+    throw new HarnessBroken("The sample quotes have extra versions, so this run's data isn't as it was set up.")
   }
 
   const bRow = await prisma.quote.findUniqueOrThrow({ where: { id: b.quoteId }, select: { accessToken: true, internalAccessToken: true } })
@@ -766,12 +765,13 @@ async function main() {
 
   try {
     const anonymous = new Session("Anonymous", baseUrl)
+    // Signed in once per user for the whole check
     const admin = new Session("Test Admin B", baseUrl)
-    await admin.signIn(B.adminEmail, adminPassword)
+    await run.credentials.signIn(admin, B.adminEmail)
     const adminC = new Session("Test Admin C", baseUrl)
-    await adminC.signIn(C.adminEmail, adminCPassword)
+    await run.credentials.signIn(adminC, C.adminEmail)
     const everyone = new Session("Test Everyone B", baseUrl)
-    await everyone.signIn(B.everyoneEmail, everyonePassword)
+    await run.credentials.signIn(everyone, B.everyoneEmail)
     const sessions: Record<Actor, Session> = { anonymous, admin, adminC, everyone }
     const ACTOR_LABEL: Record<Actor, string> = { anonymous: "", admin: ", Admin B", adminC: ", Admin C", everyone: ", Everyone B" }
     console.log(
@@ -815,7 +815,7 @@ async function main() {
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
     console.log(`\n${rows.length} checks: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("UNEXPECTED")} UNEXPECTED`)
-    return count("FAIL") + count("UNEXPECTED") > 0 ? 1 : 0
+    return checkResult(rows)
   } finally {
     // The superseded scene's extra version, if a broken check left it behind
     await removeNewerVersion()
@@ -842,13 +842,20 @@ async function main() {
       await prisma.companySettings.deleteMany({ where: { companyId: b.companyId } })
     }
     console.log("Sample quotes and Company B's default terms put back the way they were.")
-    await prisma.$disconnect()
   }
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    console.error(err instanceof Error ? err.message : err)
-    process.exit(err instanceof HarnessBroken ? 2 : 1)
-  })
+// On its own: this check's own temporary data, set up and removed around it
+async function main() {
+  const baseUrl = readBaseUrl(process.argv.slice(2))
+  return withRunData("check-portal", (prisma, run) => checkPortal(prisma, run, baseUrl))
+}
+
+if (isEntryScript("check-portal")) {
+  main()
+    .then((result) => process.exit(result.code))
+    .catch((err) => {
+      console.error(err instanceof Error ? err.message : err)
+      process.exit(err instanceof HarnessBroken ? 2 : 1)
+    })
+}
