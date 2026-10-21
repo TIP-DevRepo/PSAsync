@@ -337,6 +337,81 @@ export function loadPurchaseOrderAttachment(ctx: OrderViewer, purchaseOrderId: s
   })
 }
 
+// Opportunities
+
+type OpportunityViewer = Pick<AccessContext, "companyId" | "userId" | "can">
+
+// Matches no row, for callers who may not open any opportunity
+const NO_OPPORTUNITIES = { id: { in: [] as string[] } } satisfies Prisma.OpportunityWhereInput
+
+// Which of the company's opportunities a user may open (VOP): they need the
+// Opportunities page, and then an opportunity is theirs or unassigned
+// (no owner), unless they see everyone's (opportunities.viewAll). Global
+// Admin sees all.
+export function opportunityVisibilityWhere(ctx: OpportunityViewer): Prisma.OpportunityWhereInput {
+  if (!ctx.can("pages.opportunities")) return NO_OPPORTUNITIES
+  if (ctx.can("opportunities.viewAll")) return {}
+  return { OR: [{ ownerId: ctx.userId }, { ownerId: null }] }
+}
+
+// Who a user may make an opportunity's owner. Without opportunities.viewAll
+// only themselves or nobody (unassigned), the two owners they can still
+// see, the same reason as mayAssignQuoteTo. viewAll holders (and Global
+// Admin) may assign anyone.
+export const OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE = "You can only assign opportunities to yourself or leave them unassigned"
+
+export function mayAssignOpportunityTo(ctx: Pick<AccessContext, "userId" | "can">, ownerId: string | null): boolean {
+  return ownerId === null || ownerId === ctx.userId || ctx.can("opportunities.viewAll")
+}
+
+// The list filter for every opportunity the user may open
+export const opportunityListWhere = (ctx: OpportunityViewer) =>
+  ({ companyId: ctx.companyId, AND: [opportunityVisibilityWhere(ctx)] }) satisfies Prisma.OpportunityWhereInput
+
+// Company scoping only, for writes after loadViewableOpportunity has passed
+export const opportunityWhere = (ctx: Scope, opportunityId: string) =>
+  ({ id: opportunityId, companyId: ctx.companyId }) satisfies Prisma.OpportunityWhereUniqueInput
+
+// One opportunity the user may open, for reads that need their own select
+export const viewableOpportunityWhere = (ctx: OpportunityViewer, opportunityId: string) =>
+  ({
+    id: opportunityId,
+    companyId: ctx.companyId,
+    AND: [opportunityVisibilityWhere(ctx)],
+  }) satisfies Prisma.OpportunityWhereUniqueInput
+
+export const opportunityAttachmentWhere = (ctx: Scope, opportunityId: string, attachmentId: string) =>
+  ({
+    id: attachmentId,
+    opportunityId,
+    opportunity: { id: opportunityId, companyId: ctx.companyId },
+  }) satisfies Prisma.OpportunityAttachmentWhereUniqueInput
+
+// The opportunity view check (VOP) every opportunity route runs on its URL
+// id. One the user can't open is a miss, same as one that doesn't exist.
+export function loadViewableOpportunity(ctx: OpportunityViewer, opportunityId: string) {
+  if (!ctx.can("pages.opportunities")) return Promise.resolve(null)
+  return prisma.opportunity.findFirst({
+    where: viewableOpportunityWhere(ctx, opportunityId),
+    select: { id: true, ownerId: true },
+  })
+}
+
+// Runs the VOP check on the parent opportunity
+export function loadOpportunityAttachment(ctx: OpportunityViewer, opportunityId: string, attachmentId: string) {
+  if (!ctx.can("pages.opportunities")) return Promise.resolve(null)
+  return prisma.opportunityAttachment.findFirst({
+    where: { id: attachmentId, opportunityId, opportunity: viewableOpportunityWhere(ctx, opportunityId) },
+    select: { id: true },
+  })
+}
+
+export const opportunityStageWhere = (ctx: Scope, stageId: string) =>
+  ({ id: stageId, companyId: ctx.companyId }) satisfies Prisma.OpportunityStageWhereUniqueInput
+
+export const opportunityTypeWhere = (ctx: Scope, typeId: string) =>
+  ({ id: typeId, companyId: ctx.companyId }) satisfies Prisma.OpportunityTypeWhereUniqueInput
+
 // Company level records
 
 export const industryWhere = (ctx: Scope, industryId: string) =>
@@ -394,6 +469,8 @@ export interface BodyRefs {
   tagIds?: unknown
   // Containers
   inventoryLocationId?: unknown
+  opportunityStageId?: unknown
+  opportunityTypeId?: unknown
 }
 
 type RefKey = keyof BodyRefs
@@ -417,6 +494,8 @@ const REF_LABELS: Record<RefKey, string> = {
   viewableSalesOrderId: "sales order",
   tagIds: "tag",
   inventoryLocationId: "container",
+  opportunityStageId: "stage",
+  opportunityTypeId: "opportunity type",
 }
 
 // Turns a single id *Where builder's clause into one matching every id in
@@ -488,6 +567,10 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
       return prisma.contactTag.count({ where: whereIds(contactTagWhere(ctx, first), ids) })
     case "inventoryLocationId":
       return prisma.inventoryLocation.count({ where: whereIds(inventoryLocationWhere(ctx, first), ids) })
+    case "opportunityStageId":
+      return prisma.opportunityStage.count({ where: whereIds(opportunityStageWhere(ctx, first), ids) })
+    case "opportunityTypeId":
+      return prisma.opportunityType.count({ where: whereIds(opportunityTypeWhere(ctx, first), ids) })
   }
 }
 
