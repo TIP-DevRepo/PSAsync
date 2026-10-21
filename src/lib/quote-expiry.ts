@@ -58,6 +58,23 @@ export function isPastExpiry(expiresAt: Date | null, now: Date): boolean {
   return !!expiresAt && expiryInstant(expiresAt).getTime() <= now.getTime()
 }
 
+// Used when nothing else gives a quote's expiry days
+export const DEFAULT_QUOTE_EXPIRY_DAYS = 30
+
+// A new quote's expiry date `days` days from today, as a date only value
+// the way the New Quote form's date input stores it, so it is valid through
+// that calendar day. "Today" is the date in PORTAL_EXPIRY_TIME_ZONE.
+export function expiryDateFromToday(days: number, now: Date = new Date()): Date {
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: PORTAL_EXPIRY_TIME_ZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now)
+  const get = (type: string) => Number(parts.find((p) => p.type === type)?.value)
+  return new Date(Date.UTC(get("year"), get("month") - 1, get("day") + days))
+}
+
 // The "Valid until" date as the user chose it. A date only value is shown
 // as that calendar date, not shifted a day back in time zones west of UTC.
 export function formatValidUntil(expiresAt: Date | string | null | undefined, empty = ""): string {

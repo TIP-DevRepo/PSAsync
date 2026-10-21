@@ -8,6 +8,7 @@ import { ContactSearchInput, type ContactSearchResult } from "@/components/Conta
 import { formatPhoneInput } from "@/lib/phone"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
+import { clientQuoteDefaults } from "@/lib/quote-client-defaults"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface UserOption {
@@ -117,19 +118,10 @@ function NewQuoteForm() {
     setSelectedContact(contact)
     // Autofill shipping address from the client's main shipping location,
     // falling back to their main billing location if no shipping location
-    // is set. Stays independently editable from this point on — doesn't
+    // is set, and the client's payment terms (the same rule a quote copy
+    // uses). Stays independently editable from this point on, and doesn't
     // write back to the client's record.
-    const loc = contact.client.mainShippingLocation ?? contact.client.mainBillingLocation
-    setForm((prev) => ({
-      ...prev,
-      shipAddress: loc?.address ?? "",
-      shipAddress2: loc?.address2 ?? "",
-      shipCity: loc?.city ?? "",
-      shipState: loc?.state ?? "",
-      shipZip: loc?.zip ?? "",
-      shipCountry: loc?.country ?? "",
-      paymentTerms: contact.client.paymentTerms ?? "",
-    }))
+    setForm((prev) => ({ ...prev, ...clientQuoteDefaults(contact.client) }))
   }
 
   async function handleSave() {

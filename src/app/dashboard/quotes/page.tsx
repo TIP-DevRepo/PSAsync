@@ -7,6 +7,7 @@ import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy, Workflow, FileText, ExternalLink, Link2, History, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { Modal } from "@/components/Modal"
+import { CopyQuoteModal } from "@/components/quotes/CopyQuoteModal"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { copyText } from "@/lib/clipboard"
@@ -888,7 +889,7 @@ function QuoteActionsMenu({
   const [subPanel, setSubPanel] = useState<"assign" | "status" | null>(null)
   const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
   const [copied, setCopied] = useState(false)
-  const [copying, setCopying] = useState(false)
+  const [copyOpen, setCopyOpen] = useState(false)
   const buttonRef = useRef<HTMLButtonElement>(null)
   const [anchor, setAnchor] = useState<{ top: number; bottom: number; right: number } | null>(null)
   const { menuRef, style: menuStyle } = useFixedMenuPosition(open, anchor)
@@ -952,14 +953,11 @@ function QuoteActionsMenu({
     onUpdated()
   }
 
-  async function handleCopyQuote() {
-    setCopying(true)
-    const res = await fetch(`/api/quotes/${quote.id}/copy`, { method: "POST" })
-    const data = await res.json()
-    setCopying(false)
-    if (res.ok && data.id) {
-      router.push(`/dashboard/quotes/${data.id}`)
-    }
+  // The copy dialog asks for the client and contact before anything is made
+  function handleCopyQuote() {
+    setOpen(false)
+    setSubPanel(null)
+    setCopyOpen(true)
   }
 
   async function handleCopyPublicLink() {
@@ -1027,10 +1025,9 @@ function QuoteActionsMenu({
               {can("quotes.create") && (
                 <button
                   onClick={handleCopyQuote}
-                  disabled={copying}
                   className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
                 >
-                  {copying ? "Copying..." : "Copy"} <Copy size={14} className="text-muted-foreground" />
+                  Copy <Copy size={14} className="text-muted-foreground" />
                 </button>
               )}
               {can("quotes.changeStatus") && (
@@ -1135,6 +1132,14 @@ function QuoteActionsMenu({
             </>
           )}
         </div>
+      )}
+
+      {copyOpen && (
+        <CopyQuoteModal
+          quote={quote}
+          onClose={() => setCopyOpen(false)}
+          onCopied={(newId) => router.push(`/dashboard/quotes/${newId}`)}
+        />
       )}
     </div>
   )
