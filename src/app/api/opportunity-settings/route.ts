@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
 import { assertRefs, opportunityStageWhere } from "@/lib/scoped-loaders"
-import { ensureOpportunityDefaults, lockOpportunitySettings } from "@/lib/opportunity-defaults"
+import { ensureOpportunityDefaults, isRefusal, refuse, withOpportunitySettingsLock } from "@/lib/opportunity-defaults"
 import { numberPrefixProblem } from "@/lib/number-prefix"
 import { INVALID_BODY_MESSAGE, QUOTE_SENT_STAGE_OPEN_MESSAGE, readJsonObject, readOptionalId } from "@/lib/opportunity-rules"
 import type { Prisma } from "@/generated/prisma"
@@ -51,14 +51,12 @@ export async function PATCH(req: NextRequest) {
   }
 
   const companyId = ctx.companyId
-  const result = await prisma.$transaction(async (tx) => {
-    const current = await lockOpportunitySettings(tx, companyId)
-
+  const result = await withOpportunitySettingsLock(companyId, async (tx, current) => {
     // The prefix becomes part of every new number. Checked only when it
     // changes, the same as the quote prefix.
     if ("prefix" in body && body.prefix !== current.prefix) {
       const problem = numberPrefixProblem(body.prefix, "Opportunity number")
-      if (problem) return { error: problem }
+      if (problem) return refuse(400, problem)
       data.prefix = body.prefix as string
     }
 
@@ -68,13 +66,13 @@ export async function PATCH(req: NextRequest) {
         where: opportunityStageWhere(ctx, data.quoteSentStageId),
         select: { category: true },
       })
-      if (!stage) return { error: "Invalid stage" }
-      if (stage.category !== "OPEN") return { error: QUOTE_SENT_STAGE_OPEN_MESSAGE }
+      if (!stage) return refuse(400, "Invalid stage", "INVALID_REFERENCE")
+      if (stage.category !== "OPEN") return refuse(400, QUOTE_SENT_STAGE_OPEN_MESSAGE)
     }
 
-    return { settings: await tx.opportunitySettings.update({ where: { companyId }, data, select: settingsSelect }) }
+    return tx.opportunitySettings.update({ where: { companyId }, data, select: settingsSelect })
   })
 
-  if (result.error) return apiError(400, result.error)
-  return NextResponse.json(result.settings)
+  if (isRefusal(result)) return apiError(result.status, result.error, result.code)
+  return NextResponse.json(result)
 }

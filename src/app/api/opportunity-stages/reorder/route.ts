@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
-import { ensureOpportunityDefaults, lockOpportunitySettings } from "@/lib/opportunity-defaults"
+import { ensureOpportunityDefaults, isRefusal, refuse, withOpportunitySettingsLock } from "@/lib/opportunity-defaults"
 import { opportunityStageSelect, STAGE_ORDER } from "@/lib/opportunity-selects"
 import { readJsonObject, STAGE_ORDER_MESSAGE, STAGE_ORDER_STALE_MESSAGE } from "@/lib/opportunity-rules"
 
@@ -27,17 +26,18 @@ export async function POST(req: NextRequest) {
   const ids = stageIds as string[]
 
   const companyId = ctx.companyId
-  const stages = await prisma.$transaction(async (tx) => {
-    await lockOpportunitySettings(tx, companyId)
+  const stages = await withOpportunitySettingsLock(companyId, async (tx) => {
     const current = await tx.opportunityStage.findMany({ where: { companyId }, select: { id: true } })
     const currentIds = new Set(current.map((s) => s.id))
-    if (ids.length !== current.length || !ids.every((id) => currentIds.has(id))) return null
+    if (ids.length !== current.length || !ids.every((id) => currentIds.has(id))) {
+      return refuse(409, STAGE_ORDER_STALE_MESSAGE, "STAGE_LIST_CHANGED")
+    }
     for (const [index, id] of ids.entries()) {
       await tx.opportunityStage.update({ where: { id, companyId }, data: { sortOrder: index } })
     }
     return tx.opportunityStage.findMany({ where: { companyId }, select: opportunityStageSelect, orderBy: STAGE_ORDER })
   })
 
-  if (!stages) return apiError(409, STAGE_ORDER_STALE_MESSAGE, "STAGE_LIST_CHANGED")
+  if (isRefusal(stages)) return apiError(stages.status, stages.error, stages.code)
   return NextResponse.json(stages)
 }

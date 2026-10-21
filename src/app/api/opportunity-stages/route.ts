@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, isEnumValue, requireAccess } from "@/lib/api-access"
-import { ensureOpportunityDefaults, lockOpportunitySettings } from "@/lib/opportunity-defaults"
+import { ensureOpportunityDefaults, isRefusal, refuse, withOpportunitySettingsLock } from "@/lib/opportunity-defaults"
 import { opportunityStageSelect, STAGE_ORDER } from "@/lib/opportunity-selects"
 import {
   INVALID_BODY_MESSAGE,
@@ -57,21 +57,19 @@ export async function POST(req: NextRequest) {
   const winProbability = isWinProbability(body.winProbability) ? body.winProbability : category === "WON" ? 100 : 0
 
   const companyId = ctx.companyId
-  const result = await prisma.$transaction(async (tx) => {
-    await lockOpportunitySettings(tx, companyId)
+  const result = await withOpportunitySettingsLock(companyId, async (tx) => {
     const duplicate = await tx.opportunityStage.findFirst({
       where: { companyId, name: { equals: name.value as string, mode: "insensitive" } },
       select: { id: true },
     })
-    if (duplicate) return { error: "A stage with this name already exists" }
+    if (duplicate) return refuse(400, "A stage with this name already exists")
     const last = await tx.opportunityStage.aggregate({ where: { companyId }, _max: { sortOrder: true } })
-    const stage = await tx.opportunityStage.create({
+    return tx.opportunityStage.create({
       data: { companyId, name: name.value as string, category, winProbability, sortOrder: (last._max.sortOrder ?? -1) + 1 },
       select: opportunityStageSelect,
     })
-    return { stage }
   })
 
-  if (result.error) return apiError(400, result.error)
-  return NextResponse.json(result.stage)
+  if (isRefusal(result)) return apiError(result.status, result.error)
+  return NextResponse.json(result)
 }
