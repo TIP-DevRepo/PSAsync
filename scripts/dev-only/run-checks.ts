@@ -17,7 +17,7 @@
 
 import type { PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard } from "./lib/guard"
-import { readBaseUrl, type CheckResult } from "./lib/harness"
+import { ServerUnreachable, readBaseUrl, serverAnswers, type CheckResult } from "./lib/harness"
 import { withRunData, type RunData } from "./lib/run-data"
 
 // Must stay first: nothing below may run before the guard has passed
@@ -54,10 +54,11 @@ function printSummary(outcomes: Outcome[]) {
 }
 
 // Runs every check in order with the shared data, whatever the earlier ones
-// did
+// did, unless the dev server stops answering: then the rest are skipped
+// (the data is still removed by withRunData)
 async function runAll(prisma: PrismaClient, run: RunData, baseUrl: string): Promise<number> {
   const outcomes: Outcome[] = []
-  for (const check of CHECKS) {
+  for (const [index, check] of CHECKS.entries()) {
     console.log(`\n=== ${check.name} ===`)
     try {
       const fn = await check.load()
@@ -66,6 +67,18 @@ async function runAll(prisma: PrismaClient, run: RunData, baseUrl: string): Prom
       const message = err instanceof Error ? err.message.split("\n")[0] : "unknown error"
       console.error(message)
       outcomes.push({ name: check.name, broken: message })
+      // One request without an answer may be a hiccup; a server that no
+      // longer answers at all stops the run
+      if (err instanceof ServerUnreachable && !(await serverAnswers(baseUrl))) {
+        const skipped = CHECKS.slice(index + 1).map((c) => c.name)
+        console.error(
+          `\nThe dev server at ${baseUrl} stopped responding (${message}). ` +
+            (skipped.length > 0 ? `Skipping ${skipped.join(" and ")}. ` : "") +
+            "Restart it with npm run dev and run the checks again. This run's data is removed next."
+        )
+        for (const name of skipped) outcomes.push({ name, broken: "skipped, the dev server stopped responding" })
+        break
+      }
     }
   }
   printSummary(outcomes)

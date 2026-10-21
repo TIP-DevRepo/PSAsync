@@ -74,7 +74,7 @@
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import type { SampleIds, TestNames } from "./lib/test-data"
-import { HarnessBroken, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
+import { HarnessBroken, ServerUnreachable, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
 import { isEntryScript, withRunData, type RunData } from "./lib/run-data"
 
 // Must stay first: nothing below may run before the guard has passed
@@ -788,6 +788,8 @@ export async function checkPortal(prisma: PrismaClient, run: RunData, baseUrl: s
         try {
           res = await sessions[a.as ?? "anonymous"].request(a.method, a.path(ctx), { json: a.body?.(ctx) })
         } catch (err) {
+          // The server stopped answering: no later attempt can run either
+          if (err instanceof ServerUnreachable) throw err
           rows.push({ attempt: label, expected: expectedText(a), actual: "no response", result: "UNEXPECTED", note: err instanceof Error ? err.message : String(err) })
           continue
         }

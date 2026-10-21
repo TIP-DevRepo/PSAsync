@@ -40,6 +40,9 @@ import {
   BCRYPT_COST,
   CLERK_PERMISSIONS,
   DUMMY_FILE_URL,
+  OPP_REP_PERMISSIONS,
+  OPP_SETTINGS_PERMISSIONS,
+  OPP_VIEWER_PERMISSIONS,
   ORDERS_PERMISSIONS,
   PLACEHOLDER_TOKEN,
   REP_PERMISSIONS,
@@ -204,6 +207,8 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
   // Imported here so loading this file never constructs the shared client
   const { generateAssetTag } = await import("@/lib/inventory/generateAssetTag")
   const { logAssetEvent } = await import("@/lib/inventory/logAssetEvent")
+  const { ensureOpportunityDefaults } = await import("@/lib/opportunity-defaults")
+  const { takeOpportunityNumber } = await import("@/lib/opportunity-number")
   const year = new Date().getFullYear()
 
   async function setUpCompany(letter: TestLetter): Promise<RunCompany> {
@@ -436,7 +441,9 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
     const everyoneUserId = await addRunUser(prisma, run, { companyId, name: n.everyoneName, email: n.everyoneEmail, roleIds: [] })
 
     const repRoleId = await addRunRole(prisma, run, { companyId, name: n.repRole, rank: 5, permissions: REP_PERMISSIONS })
-    const repUserId = await addRunUser(prisma, run, { companyId, name: n.repName, email: n.repEmail, roleIds: [repRoleId] })
+    // A second role for opportunities, ranked below Rep so Test Rep's rank stays 5
+    const oppRepRoleId = await addRunRole(prisma, run, { companyId, name: n.oppRepRole, rank: 1, permissions: OPP_REP_PERMISSIONS })
+    const repUserId = await addRunUser(prisma, run, { companyId, name: n.repName, email: n.repEmail, roleIds: [repRoleId, oppRepRoleId] })
 
     // A quote the Rep owns, next to the admin's sample quote they don't
     const repQuote = rec(
@@ -584,6 +591,63 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
       })
     )
 
+    // ── Opportunities ──
+    // The default stages, types, and settings, made the way the app makes
+    // them on first use, and recorded for teardown
+    await ensureOpportunityDefaults(companyId)
+    const opportunityStages = await prisma.opportunityStage.findMany({
+      where: { companyId },
+      select: { id: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    })
+    for (const stage of opportunityStages) rec("opportunityStage", stage)
+    const opportunityTypes = await prisma.opportunityType.findMany({
+      where: { companyId },
+      select: { id: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    })
+    for (const type of opportunityTypes) rec("opportunityType", type)
+    rec("opportunitySettings", await prisma.opportunitySettings.findUniqueOrThrow({ where: { companyId }, select: { id: true } }))
+    const oppViewerRoleId = await addRunRole(prisma, run, { companyId, name: n.oppViewerRole, rank: 1, permissions: OPP_VIEWER_PERMISSIONS })
+    const oppViewerUserId = await addRunUser(prisma, run, { companyId, name: n.oppViewerName, email: n.oppViewerEmail, roleIds: [oppViewerRoleId] })
+    const oppSettingsRoleId = await addRunRole(prisma, run, { companyId, name: n.oppSettingsRole, rank: 1, permissions: OPP_SETTINGS_PERMISSIONS })
+    const oppSettingsUserId = await addRunUser(prisma, run, { companyId, name: n.oppSettingsName, email: n.oppSettingsEmail, roleIds: [oppSettingsRoleId] })
+    // Numbered by the app's own counter, so an opportunity a check creates
+    // takes the next number
+    const createOpportunity = async (title: string, ownerId: string | null, who: string) => {
+      const opportunity = rec(
+        "opportunity",
+        await prisma.$transaction(async (tx) =>
+          tx.opportunity.create({
+            data: {
+              companyId,
+              number: await takeOpportunityNumber(tx, companyId),
+              title,
+              clientId: client.id,
+              contactId: contact.id,
+              ownerId,
+              stageId: opportunityStages[0].id,
+              typeId: opportunityTypes[0].id,
+              createdById: adminId,
+            },
+            select: { id: true },
+          })
+        )
+      )
+      // Attachment rows only, with a dummy URL. Nothing is uploaded to S3.
+      const attachment = rec(
+        "opportunityAttachment",
+        await prisma.opportunityAttachment.create({
+          data: { opportunityId: opportunity.id, fileName: `${n.opportunityAttachmentPrefix}-${who}.txt`, fileUrl: DUMMY_FILE_URL, fileSize: 1, uploadedByUserId: adminId },
+          select: { id: true },
+        })
+      )
+      return { id: opportunity.id, attachmentId: attachment.id }
+    }
+    const adminOpportunity = await createOpportunity(n.adminOpportunity, adminId, "admin")
+    const repOpportunity = await createOpportunity(n.repOpportunity, repUserId, "rep")
+    const unassignedOpportunity = await createOpportunity(n.unassignedOpportunity, null, "unassigned")
+
     // The admin's mailbox row
     const adminMailboxId = await addRunMailbox(prisma, run, {
       companyId,
@@ -627,6 +691,10 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         assetId: asset.id,
         assetAttachmentId: assetAttachment.id,
         workflowId: workflow.id,
+        opportunityId: adminOpportunity.id,
+        opportunityAttachmentId: adminOpportunity.attachmentId,
+        opportunityStageId: opportunityStages[0].id,
+        opportunityTypeId: opportunityTypes[0].id,
       },
       fixtures: {
         everyoneUserId,
@@ -655,6 +723,14 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         copyClientId: copyClient.id,
         copyContactId: copyContact.id,
         copyQuoteId: copyQuote.id,
+        oppRepRoleId,
+        repOpportunityId: repOpportunity.id,
+        repOpportunityAttachmentId: repOpportunity.attachmentId,
+        unassignedOpportunityId: unassignedOpportunity.id,
+        unassignedOpportunityAttachmentId: unassignedOpportunity.attachmentId,
+        oppViewerUserId,
+        oppSettingsUserId,
+        opportunityStageIds: opportunityStages.map((stage) => stage.id),
       },
     }
   }
@@ -682,6 +758,7 @@ const CASCADED_TABLES: { table: string; count: (db: Db, ids: Ids) => Promise<num
   { table: "POShipment", count: (db, ids) => db.pOShipment.count({ where: { purchaseOrder: { companyId: ids } } }) },
   { table: "POComment", count: (db, ids) => db.pOComment.count({ where: { purchaseOrder: { companyId: ids } } }) },
   { table: "POAttachment", count: (db, ids) => db.pOAttachment.count({ where: { purchaseOrder: { companyId: ids } } }) },
+  { table: "OpportunityAttachment", count: (db, ids) => db.opportunityAttachment.count({ where: { opportunity: { companyId: ids } } }) },
   { table: "InventoryAssetAttachment", count: (db, ids) => db.inventoryAssetAttachment.count({ where: { asset: { companyId: ids } } }) },
   { table: "InventoryAssetEvent", count: (db, ids) => db.inventoryAssetEvent.count({ where: { asset: { companyId: ids } } }) },
   { table: "InventoryCustomFieldValue", count: (db, ids) => db.inventoryCustomFieldValue.count({ where: { asset: { companyId: ids } } }) },
@@ -711,6 +788,14 @@ const DELETE_STEPS: {
   { table: "PurchaseOrder", count: (db, ids) => db.purchaseOrder.count({ where: { companyId: ids } }), remove: (db, ids) => db.purchaseOrder.deleteMany({ where: { companyId: ids } }) },
   { table: "SalesOrder", count: (db, ids) => db.salesOrder.count({ where: { companyId: ids } }), remove: (db, ids) => db.salesOrder.deleteMany({ where: { companyId: ids } }) },
   { table: "Quote", count: (db, ids) => db.quote.count({ where: { companyId: ids } }), remove: (db, ids) => db.quote.deleteMany({ where: { companyId: ids } }) },
+  // After the quotes and orders that link to them (their attachments
+  // cascade), before the clients, contacts, users, stages, and types they
+  // point at. Settings go before the stages, for the stage a sent quote
+  // moves to.
+  { table: "Opportunity", count: (db, ids) => db.opportunity.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunity.deleteMany({ where: { companyId: ids } }) },
+  { table: "OpportunitySettings", count: (db, ids) => db.opportunitySettings.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunitySettings.deleteMany({ where: { companyId: ids } }) },
+  { table: "OpportunityStage", count: (db, ids) => db.opportunityStage.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunityStage.deleteMany({ where: { companyId: ids } }) },
+  { table: "OpportunityType", count: (db, ids) => db.opportunityType.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunityType.deleteMany({ where: { companyId: ids } }) },
   { table: "QuoteTemplate", count: (db, ids) => db.quoteTemplate.count({ where: { companyId: ids } }), remove: (db, ids) => db.quoteTemplate.deleteMany({ where: { companyId: ids } }) },
   { table: "InventoryStock", count: (db, ids) => db.inventoryStock.count({ where: { companyId: ids } }), remove: (db, ids) => db.inventoryStock.deleteMany({ where: { companyId: ids } }) },
   { table: "InventoryAsset", count: (db, ids) => db.inventoryAsset.count({ where: { companyId: ids } }), remove: (db, ids) => db.inventoryAsset.deleteMany({ where: { companyId: ids } }) },
@@ -752,13 +837,14 @@ export interface StoredFile {
 // stores that kind of file under (the same prefixes its delete routes use)
 export async function storedFiles(db: Db, companyIds: string[]): Promise<StoredFile[]> {
   const ids = { in: companyIds }
-  const [companies, vendors, vendorAttachments, soAttachments, poAttachments, assetAttachments] = await Promise.all([
+  const [companies, vendors, vendorAttachments, soAttachments, poAttachments, assetAttachments, opportunityAttachments] = await Promise.all([
     db.company.findMany({ where: { id: ids }, select: { id: true, logoUrl: true, secondaryLogoUrl: true } }),
     db.vendor.findMany({ where: { companyId: ids }, select: { id: true, logoUrl: true } }),
     db.vendorAttachment.findMany({ where: { vendor: { companyId: ids } }, select: { vendorId: true, fileUrl: true } }),
     db.sOAttachment.findMany({ where: { salesOrder: { companyId: ids } }, select: { salesOrderId: true, fileUrl: true } }),
     db.pOAttachment.findMany({ where: { purchaseOrder: { companyId: ids } }, select: { purchaseOrderId: true, fileUrl: true } }),
     db.inventoryAssetAttachment.findMany({ where: { asset: { companyId: ids } }, select: { assetId: true, fileUrl: true } }),
+    db.opportunityAttachment.findMany({ where: { opportunity: { companyId: ids } }, select: { opportunityId: true, fileUrl: true } }),
   ])
   const files: StoredFile[] = []
   for (const c of companies) {
@@ -769,6 +855,7 @@ export async function storedFiles(db: Db, companyIds: string[]): Promise<StoredF
   for (const a of soAttachments) files.push({ url: a.fileUrl, prefix: `sales-orders/${a.salesOrderId}/` })
   for (const a of poAttachments) files.push({ url: a.fileUrl, prefix: `purchase-orders/${a.purchaseOrderId}/` })
   for (const a of assetAttachments) files.push({ url: a.fileUrl, prefix: `inventory-assets/${a.assetId}/` })
+  for (const a of opportunityAttachments) files.push({ url: a.fileUrl, prefix: `opportunities/${a.opportunityId}/` })
   return files
 }
 
