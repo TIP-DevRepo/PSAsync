@@ -137,6 +137,22 @@ export function testNames(letter: TestLetter, marker: string) {
     copyQuote: `${marker} Sample Copy Quote ${letter}`,
     // Each fixture line is named this prefix, a space, and what it is
     copyLinePrefix: `${marker} Sample Copy Line ${letter}:`,
+    // Opportunities: one owned by the admin, one by Test Rep B/C, and one
+    // unassigned, each with an attachment row. Test Rep holds a second role
+    // for them (the Opportunities page and create, no see all), Test Opp
+    // Viewer only the Opportunities page, and Test Opp Settings only
+    // Opportunity Settings.
+    adminOpportunity: `${marker} Sample Admin Opportunity ${letter}`,
+    repOpportunity: `${marker} Sample Rep Opportunity ${letter}`,
+    unassignedOpportunity: `${marker} Sample Unassigned Opportunity ${letter}`,
+    opportunityAttachmentPrefix: `${marker}-sample-opportunity-${lower}`,
+    oppRepRole: `${marker} Opportunity Rep ${letter}`,
+    oppViewerName: `${marker} Test Opp Viewer ${letter}`,
+    oppViewerEmail: email("opp-viewer"),
+    oppViewerRole: `${marker} Opp Viewer ${letter}`,
+    oppSettingsName: `${marker} Test Opp Settings ${letter}`,
+    oppSettingsEmail: email("opp-settings"),
+    oppSettingsRole: `${marker} Opp Settings ${letter}`,
   }
 }
 
@@ -172,6 +188,16 @@ export const ORDERS_PERMISSIONS = {
 // Templater: Quote Settings only, which maintains quote templates. Holds
 // none of the cost permissions, so it can't see or set cost.
 export const TEMPLATER_PERMISSIONS = { settingsSections: { quotes: true } }
+
+// Opportunity Rep, Test Rep's second role: the Opportunities page and
+// creating opportunities, without seeing everyone's or editing
+export const OPP_REP_PERMISSIONS = { pages: { opportunities: true }, opportunities: { create: true } }
+
+// Opp Viewer: only the Opportunities page
+export const OPP_VIEWER_PERMISSIONS = { pages: { opportunities: true } }
+
+// Opp Settings: only Opportunity Settings (stages, types, and settings)
+export const OPP_SETTINGS_PERMISSIONS = { settingsSections: { opportunities: true } }
 
 const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
 
@@ -217,6 +243,12 @@ export interface SampleIds {
   assetId: string
   assetAttachmentId: string
   workflowId: string
+  // The admin's opportunity and its attachment, and the company's first
+  // stage and type
+  opportunityId: string
+  opportunityAttachmentId: string
+  opportunityStageId: string
+  opportunityTypeId: string
 }
 
 export interface PermissionFixtureIds {
@@ -246,4 +278,13 @@ export interface PermissionFixtureIds {
   copyClientId: string
   copyContactId: string
   copyQuoteId: string
+  oppRepRoleId: string
+  repOpportunityId: string
+  repOpportunityAttachmentId: string
+  unassignedOpportunityId: string
+  unassignedOpportunityAttachmentId: string
+  oppViewerUserId: string
+  oppSettingsUserId: string
+  // Every stage id in the company's order, for a reorder that changes nothing
+  opportunityStageIds: string[]
 }
