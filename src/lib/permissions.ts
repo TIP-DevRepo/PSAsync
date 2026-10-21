@@ -7,7 +7,7 @@ import { checkAccess } from "@/lib/access-check"
 // field required) since it's read with optional chaining throughout —
 // this is just enough structure for autocomplete and safe nested access.
 export interface RolePermissions {
-  pages?: Partial<Record<"clients" | "catalog" | "vendors" | "inventory" | "quotes" | "settings" | "salesOrders" | "purchaseOrders", boolean>>
+  pages?: Partial<Record<"clients" | "catalog" | "vendors" | "inventory" | "quotes" | "settings" | "salesOrders" | "purchaseOrders" | "opportunities", boolean>>
   quotes?: Partial<Record<
     "create" | "edit" | "delete" | "changeStatus" | "approve" | "sendEmail" | "viewAllUsersQuotes" | "sendAsOthers",
     boolean
@@ -15,10 +15,11 @@ export interface RolePermissions {
   clients?: Partial<Record<"create" | "edit" | "delete", boolean>>
   salesOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "generatePO" | "viewAll", boolean>>
   purchaseOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "send" | "viewAll", boolean>>
+  opportunities?: Partial<Record<"create" | "edit" | "delete" | "viewAll", boolean>>
   catalog?: Partial<Record<"delete", boolean>>
   inventory?: Partial<Record<"delete", boolean>>
   settingsSections?: Partial<Record<
-    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders",
+    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders" | "opportunities",
     boolean
   >>
   dashboards?: Partial<Record<"manage", boolean>>
@@ -180,6 +181,7 @@ export function resolvePagePermissions(
       settings: true,
       salesOrders: true,
       purchaseOrders: true,
+      opportunities: true,
     }
   }
   const pages = (access?.permissions as RolePermissions | undefined)?.pages
@@ -192,5 +194,6 @@ export function resolvePagePermissions(
     settings: !!pages?.settings,
     salesOrders: !!pages?.salesOrders,
     purchaseOrders: !!pages?.purchaseOrders,
+    opportunities: !!pages?.opportunities,
   }
 }
