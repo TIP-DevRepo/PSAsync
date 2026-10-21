@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
-import { assertRefs, quoteListWhere } from "@/lib/scoped-loaders"
+import { assertRefs, mayAssignQuoteTo, quoteListWhere, SELF_ASSIGN_ONLY_MESSAGE } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
 import { termsForStorage } from "@/lib/sanitize-terms"
 import { copiedLineData, COPY_SOURCE_LINE_ORDER } from "@/lib/quote-line-copy"
@@ -98,8 +98,15 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A client is required" }, { status: 400 })
   }
 
-  // The contact must belong to the quote's client. userId is the Assigned
-  // Rep picked on the New Quote form, and has to be an active user here.
+  // userId is the Assigned Rep picked on the New Quote form. Without
+  // quotes.viewAllUsersQuotes it can only be the creator, who would
+  // otherwise lose sight of the quote.
+  if (body.userId && !mayAssignQuoteTo(ctx, body.userId)) {
+    return apiError(403, SELF_ASSIGN_ONLY_MESSAGE, "FORBIDDEN")
+  }
+
+  // The contact must belong to the quote's client, and the Assigned Rep has
+  // to be an active user here.
   const invalid = await assertRefs(ctx, { clientId: body.clientId, contactId: body.contactId, userId: body.userId })
   if (invalid) return invalid
 

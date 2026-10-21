@@ -884,7 +884,7 @@ function QuoteActionsMenu({
   onShowRevisions: () => void
 }) {
   const router = useRouter()
-  const { can } = useAccess()
+  const { access, can } = useAccess()
   const [open, setOpen] = useState(false)
   const [subPanel, setSubPanel] = useState<"assign" | "status" | null>(null)
   const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
@@ -920,18 +920,29 @@ function QuoteActionsMenu({
   function openAssign() {
     setSubPanel("assign")
     if (users.length === 0) {
+      // Without seeing everyone's quotes, only yourself (the API refuses
+      // anyone else)
+      const canAssignOthers = can("quotes.viewAllUsersQuotes")
       fetch("/api/users")
         .then((res) => res.json())
-        .then((data) => setUsers(data.filter((u: { active: boolean }) => u.active)))
+        .then((data) =>
+          setUsers(
+            data.filter((u: { id: string; active: boolean }) => u.active && (canAssignOthers || u.id === access?.userId))
+          )
+        )
     }
   }
 
   async function handleAssign(userId: string) {
-    await fetch(`/api/quotes/${quote.id}/assign`, {
+    const res = await fetch(`/api/quotes/${quote.id}/assign`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ userId }),
     })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't assign this quote", data.error)
+    }
     setOpen(false)
     setSubPanel(null)
     onUpdated()

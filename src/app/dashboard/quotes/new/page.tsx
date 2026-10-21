@@ -63,6 +63,10 @@ function NewQuoteForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const templateId = searchParams.get("template")
+  const { access, can } = useAccess()
+  // Without seeing everyone's quotes, a quote can only be assigned to its
+  // creator (the API refuses anyone else)
+  const canAssignOthers = can("quotes.viewAllUsersQuotes")
 
   const [users, setUsers] = useState<UserOption[]>([])
   const [template, setTemplate] = useState<Template | null>(null)
@@ -99,7 +103,9 @@ function NewQuoteForm() {
 
     fetch("/api/users")
       .then((res) => res.json())
-      .then((all: UserOption[]) => setUsers(all.filter((u) => u.active)))
+      .then((all: UserOption[]) =>
+        setUsers(all.filter((u) => u.active && (canAssignOthers || u.id === access?.userId)))
+      )
 
     fetch(`/api/quote-templates/${templateId}`)
       .then((res) => res.json())
