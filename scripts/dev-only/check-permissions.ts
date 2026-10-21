@@ -47,6 +47,19 @@
 // purchase order to Test Orders B's sales order and checks Orders B can't
 // see it there. Each step puts the quote, the workflow, the line price,
 // the purchase order link, and any notification it made back.
+//
+// Quote correctness: checkQuoteCopy has Test Admin B copy the copy fixture
+// quote (create-test-companies: a bundle, a choice group with a selected
+// option, a text block, an optional line, an adjustable quantity, and a
+// recurring line over two sections and an empty one) for the copy client,
+// then copy that copy, and Test Rep B copy its own quote. Each copy must
+// have the same lines and sections, the chosen client and contact, and the
+// copier as its owner, and none of the original's PO number, internal
+// notes, or progress. Every copy is deleted afterwards. The refusals cover
+// a copy without a client or contact, another company's client or contact,
+// a contact of a different client, assigning a quote to someone else
+// without quotes.viewAllUsersQuotes, and blank, 0, negative, and
+// fractional Default Expiry values.
 
 import bcrypt from "bcryptjs"
 import { Prisma, type PrismaClient } from "@/generated/prisma"
@@ -711,13 +724,21 @@ const ATTEMPTS: Attempt[] = [
   { name: "Download admin's PDF", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/quotes/${c.b.quoteId}/pdf`, expect: 404, expectError: "Not found" },
   { name: "Admin's quote approvals", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/quotes/${c.b.quoteId}/approvals`, expect: 404, expectError: "Not found" },
   { name: "Admin's quote versions", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/quotes/${c.b.quoteId}/versions`, expect: 404, expectError: "Not found" },
-  { name: "Copy admin's quote", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/copy`, expect: 404, expectError: "Not found" },
+  { name: "Copy admin's quote", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/copy`, body: (c) => ({ clientId: c.b.clientId, contactId: c.b.contactId }), expect: 404, expectError: "Not found" },
+  { name: "Copy own quote without a client or contact", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.repQuoteId}/copy`, expect: 400, expectError: "A client is required" },
   { name: "New version of admin's quote", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/versions`, expect: 404, expectError: "Not found" },
   { name: "Flag admin's quote", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/flag`, expect: 404, expectError: "Not found" },
   { name: "Reactivate admin's quote", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/reactivate`, expect: 404, expectError: "Not found" },
   { name: "Add a section to admin's quote", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/sections`, body: () => ({ name: "Should Not Exist" }), expect: 404, expectError: "Not found" },
   { name: "Assign admin's quote to self", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.b.quoteId}/assign`, body: (c) => ({ userId: c.repUserId }), expect: 404, expectError: "Not found" },
-  { name: "Assign own quote to another company's user", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.repQuoteId}/assign`, body: (c) => ({ userId: c.c.adminId }), expect: 400, expectError: "Invalid user" },
+  // Without quotes.viewAllUsersQuotes a quote can only be assigned to
+  // yourself, so another company's user gets the same refusal as a
+  // colleague (the admin's attempt below still checks "Invalid user")
+  { name: "Assign own quote to another company's user", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.repQuoteId}/assign`, body: (c) => ({ userId: c.c.adminId }), expect: 403, expectError: "You can only assign quotes to yourself" },
+  { name: "Assign own quote to another rep", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.repQuoteId}/assign`, body: (c) => ({ userId: c.b.adminId }), expect: 403, expectError: "You can only assign quotes to yourself" },
+  { name: "Create a quote assigned to another rep", actor: "rep", kind: "refused", method: "POST", path: () => "/api/quotes", body: (c) => ({ clientId: c.b.clientId, contactId: c.b.contactId, userId: c.b.adminId }), expect: 403, expectError: "You can only assign quotes to yourself" },
+  { name: "Assign own quote to self", actor: "rep", kind: "allowed", method: "POST", path: (c) => `/api/quotes/${c.fx.repQuoteId}/assign`, body: (c) => ({ userId: c.repUserId }), expect: 200, notContains: () => ['"accessToken"'] },
+  { name: "Assign the rep's quote to another company's user", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.repQuoteId}/assign`, body: (c) => ({ userId: c.c.adminId }), expect: 400, expectError: "Invalid user" },
   { name: "Approve", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.repQuoteId}/approvals/${c.fakeId}/approve`, expect: 403, expectError: "approve quotes" },
   { name: "Reject", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.repQuoteId}/approvals/${c.fakeId}/reject`, body: () => ({ reason: "x" }), expect: 403, expectError: "reject quotes" },
   { name: "Mark own quote as sent", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.repQuoteId}/send`, expect: 403, expectError: "status" },
@@ -928,6 +949,23 @@ const ATTEMPTS: Attempt[] = [
   { name: "Quote number prefix with a quote and a space", actor: "admin", kind: "refused", method: "PATCH", path: () => "/api/quote-settings", body: () => ({ quotePrefix: 'Q "bad"' }), expect: 400, expectError: "Quote number prefix can only use" },
   { name: "Sales order number prefix with a space", actor: "admin", kind: "refused", method: "PATCH", path: () => "/api/so-po-settings", body: () => ({ soPrefix: "S O" }), expect: 400, expectError: "Sales order number prefix can only use" },
   { name: "Purchase order number prefix over 10 characters", actor: "admin", kind: "refused", method: "PATCH", path: () => "/api/so-po-settings", body: () => ({ poPrefix: "PURCHASEORD" }), expect: 400, expectError: "Purchase order number prefix can only use" },
+  // ── Quote copy (quote correctness): a client and contact of this company are required ──
+  { name: "Copy without a client or contact", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.copyQuoteId}/copy`, expect: 400, expectError: "A client is required" },
+  { name: "Copy with a client but no contact", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.copyQuoteId}/copy`, body: (c) => ({ clientId: c.fx.copyClientId }), expect: 400, expectError: "A contact is required" },
+  { name: "Copy for another company's client", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.copyQuoteId}/copy`, body: (c) => ({ clientId: c.c.clientId, contactId: c.c.contactId }), expect: 400, expectError: "Invalid client" },
+  { name: "Copy with another company's contact", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.copyQuoteId}/copy`, body: (c) => ({ clientId: c.b.clientId, contactId: c.c.contactId }), expect: 400, expectError: "Invalid contact" },
+  { name: "Copy with a contact of a different client", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/quotes/${c.fx.copyQuoteId}/copy`, body: (c) => ({ clientId: c.b.clientId, contactId: c.fx.copyContactId }), expect: 400, expectError: "Invalid contact" },
+  // ── Default Expiry (quote correctness): blank, 0, negative, and fractional are refused ──
+  ...(["", null, 0, "0", -5, 2.5] as const).map((value): Attempt => ({
+    name: `Default Expiry of ${JSON.stringify(value)}`,
+    actor: "admin",
+    kind: "refused",
+    method: "PATCH",
+    path: () => "/api/quote-settings",
+    body: () => ({ quoteExpiryDays: value }),
+    expect: 400,
+    expectError: "Default expiry must be a whole number of days, 1 or more",
+  })),
   // ── Template lines (round two, #80): a bad recurring interval is a 400 ──
   { name: "Template line with a made up recurring interval", actor: "templater", kind: "refused", method: "PATCH", path: (c) => `/api/quote-templates/${c.fx.costTemplateId}/line-items/${c.fx.costTemplateLineId}`, body: () => ({ recurringInterval: "WEEKLY" }), expect: 400, expectError: "Invalid recurring interval" },
 
@@ -1472,6 +1510,100 @@ async function checkSalesOrderLinkedPurchaseOrders(prisma: PrismaClient, admin: 
   }
 }
 
+// Every line field a copy carries over (all but id, quoteId, createdAt)
+const COPIED_LINE_FIELDS = [
+  "catalogItemId", "section", "sortOrder", "name", "description", "sku", "quantity", "unitPrice", "cost", "discount", "taxable",
+  "isRecurring", "recurringInterval", "isOptional", "optionalSelected", "quantityAdjustable", "choiceGroup", "isTextBlock",
+  "bundleName", "bundleDisplayMode", "isBundleHeader",
+] as const
+
+// Quote correctness: a copy is a faithful duplicate of the quote's lines
+// and sections, made for the client and contact picked for it, owned by
+// whoever copied it, and leaves the original's PO number, internal notes,
+// and progress behind. Test Admin B copies the copy fixture quote (every
+// kind of line) for the copy client, then copies that copy for the sample
+// client, and Test Rep B copies its own quote. Every copy made here is
+// deleted at the end, its lines with it.
+async function checkQuoteCopy(prisma: PrismaClient, admin: Session, rep: Session, ctx: AttemptContext, rows: Row[]) {
+  const row = (who: string, name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[${who}] Quote copy: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const made: string[] = []
+  async function copy(session: Session, quoteId: string, body: { clientId: string; contactId: string }) {
+    const res = await session.request("POST", `/api/quotes/${quoteId}/copy`, { json: body })
+    const id = res.status === 200 ? (JSON.parse(res.text) as { id?: string }).id : undefined
+    if (id) made.push(id)
+    return { res, id }
+  }
+  // The lines in the order the quote shows them, as the fields a copy keeps
+  async function linesOf(quoteId: string) {
+    const lines = await prisma.quoteLineItem.findMany({
+      where: { quoteId },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+    })
+    return lines.map((l) => JSON.stringify(COPIED_LINE_FIELDS.map((f) => l[f])))
+  }
+  async function compare(who: string, name: string, sourceId: string, copyId: string) {
+    const [a, b] = await Promise.all([linesOf(sourceId), linesOf(copyId)])
+    const differs = a.length !== b.length ? `${b.length} lines instead of ${a.length}` : a.findIndex((l, i) => l !== b[i]) >= 0 ? `line ${a.findIndex((l, i) => l !== b[i]) + 1} differs` : null
+    row(who, `${name} has the same lines`, `${a.length} identical lines`, `${b.length} lines`, differs)
+    const lines = await prisma.quoteLineItem.findMany({ where: { quoteId: copyId } })
+    const children = lines.filter((l) => l.bundleName && !l.isBundleHeader)
+    const bundled = children.length > 0 && children.every((c) => lines.some((h) => h.isBundleHeader && h.bundleName === c.bundleName && h.section === c.section))
+    const group = lines.filter((l) => l.choiceGroup)
+    const selected = group.filter((l) => l.optionalSelected).length
+    const structure = !bundled ? "bundle children without their header" : group.length < 2 || selected !== 1 ? "choice group lost its selected option" : null
+    row(who, `${name} keeps the bundle and choice group`, "children under the new header, one option selected", `${children.length} children, ${group.length} options, ${selected} selected`, structure)
+  }
+
+  try {
+    const source = await prisma.quote.findUniqueOrThrow({
+      where: { id: ctx.fx.copyQuoteId },
+      select: { sections: true, quoteNumber: true, accessToken: true, internalAccessToken: true },
+    })
+
+    // Admin B copies the fixture quote for the copy client
+    const first = await copy(admin, ctx.fx.copyQuoteId, { clientId: ctx.fx.copyClientId, contactId: ctx.fx.copyContactId })
+    row("Admin B", "copy for another client", "200", String(first.res.status), first.id ? null : errorText(first.res.text))
+    if (first.id) {
+      const q = await prisma.quote.findUniqueOrThrow({ where: { id: first.id } })
+      const problems = [
+        q.clientId !== ctx.fx.copyClientId && "client is not the chosen one",
+        q.contactId !== ctx.fx.copyContactId && "contact is not the chosen one",
+        q.userId !== ctx.b.adminId && "not owned by the copier",
+        q.status !== "DRAFT" && `status ${q.status}`,
+        (q.sentAt || q.viewedAt || q.acceptedAt) && "carries the original's progress",
+        q.clientPoNumber !== null && "kept the PO number",
+        q.internalNotes !== null && "kept the internal notes",
+        q.paymentTerms !== ctx.names.copyClientPaymentTerms && `payment terms ${q.paymentTerms} instead of the new client's`,
+        q.shipAddress !== "2 Copy Street" && "ship to is not the new client's",
+        JSON.stringify(q.sections) !== JSON.stringify(source.sections) && "section list differs",
+        q.quoteNumber === source.quoteNumber && "same quote number",
+        (q.accessToken === source.accessToken || q.internalAccessToken === source.internalAccessToken) && "same links",
+        !q.expiresAt || q.expiresAt.getTime() <= Date.now() ? "no future expiry" : false,
+      ].filter(Boolean)
+      row("Admin B", "copy takes only the details and items", "new client, contact, owner, draft", problems.length ? "differs" : "as expected", problems.length ? problems.join(", ") : null)
+      await compare("Admin B", "copy", ctx.fx.copyQuoteId, first.id)
+
+      // A copy of the copy, for the sample client
+      const second = await copy(admin, first.id, { clientId: ctx.b.clientId, contactId: ctx.b.contactId })
+      row("Admin B", "copy of a copy", "200", String(second.res.status), second.id ? null : errorText(second.res.text))
+      if (second.id) await compare("Admin B", "copy of a copy", ctx.fx.copyQuoteId, second.id)
+    }
+
+    // Test Rep B copies its own quote, and owns the copy
+    const repCopy = await copy(rep, ctx.fx.repQuoteId, { clientId: ctx.fx.copyClientId, contactId: ctx.fx.copyContactId })
+    row("Rep B", "copy own quote", "200", String(repCopy.res.status), repCopy.id ? null : errorText(repCopy.res.text))
+    if (repCopy.id) {
+      const q = await prisma.quote.findUniqueOrThrow({ where: { id: repCopy.id }, select: { userId: true } })
+      row("Rep B", "the copy is the rep's", "owned by Test Rep B", q.userId === ctx.repUserId ? "Test Rep B" : "someone else", q.userId === ctx.repUserId ? null : "not owned by the copier")
+      const opened = await rep.request("GET", `/api/quotes/${repCopy.id}`)
+      row("Rep B", "the rep can open the copy", "200", String(opened.status), opened.status === 200 ? null : errorText(opened.text))
+    }
+  } finally {
+    await prisma.quote.deleteMany({ where: { id: { in: made } } })
+  }
+}
+
 function expectedText(a: Attempt) {
   if (a.location) return `${a.expect} to ${a.location}`
   return `${a.expect}${a.expectError ? ` "${a.expectError}"` : ""}`
@@ -1698,6 +1830,9 @@ async function main() {
     await approver.signIn(approverFixture.email, approverFixture.password)
     await checkStaleApproval(prisma, sessions.admin, approver, approverFixture.roleId, ctx, rows)
     await checkSalesOrderLinkedPurchaseOrders(prisma, sessions.admin, sessions.orders, ctx, rows)
+
+    // Quote correctness: copies reproduce every line and get the chosen client
+    await checkQuoteCopy(prisma, sessions.admin, sessions.rep, ctx, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
