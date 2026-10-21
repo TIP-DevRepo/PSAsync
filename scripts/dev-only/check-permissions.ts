@@ -62,6 +62,16 @@
 // a contact of a different client, assigning a quote to someone else
 // without quotes.viewAllUsersQuotes, and blank, 0, negative, and
 // fractional Default Expiry values.
+//
+// Opportunities: Test Everyone B is refused every opportunity, stage,
+// type, and settings route. Test Rep B (a second role with the
+// Opportunities page and create, no see all) sees only its own and the
+// unassigned sample opportunity, gets a 404 on the admin's, a 403 naming
+// the admin as owner, and may create for itself or unassigned (each
+// created row is removed right after). Test Opp Viewer B (only the page)
+// reads but can't create, edit, or delete, and Test Opp Settings B (only
+// Opportunity Settings) is the only one besides Global Admin whose stage,
+// type, and settings writes go through.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -84,8 +94,12 @@ enforceDevGuard("check-permissions")
 //                quotes.viewAllUsersQuotes, made by this script, with a
 //                mailbox of its own), viewer (Test Viewer B: both order
 //                pages and both viewAll keys, no edit, made by this script),
-//                or manager (Test Manager B: settingsSections.users only,
-//                not a Global Admin, made by this script)
+//                manager (Test Manager B: settingsSections.users only,
+//                not a Global Admin, made by this script), oppViewer
+//                (Test Opp Viewer B: only the Opportunities page), or
+//                oppSettings (Test Opp Settings B: only Opportunity
+//                Settings). Test Rep B also holds the Opportunities page
+//                and opportunities.create, without see all.
 //   kind         control: must succeed, and if it doesn't the harness is
 //                broken and nothing else runs. allowed: must succeed.
 //                refused: must be refused with exactly expect, and must not
@@ -102,7 +116,7 @@ enforceDevGuard("check-permissions")
 //   sharedMode   runs with Quote Settings set to send every quote from Test
 //                Admin B's mailbox ("admin") or Test Sender B's ("sender")
 
-type Actor = "admin" | "rep" | "clerk" | "everyone" | "sender" | "orders" | "templater" | "viewer" | "manager"
+type Actor = "admin" | "rep" | "clerk" | "everyone" | "sender" | "orders" | "templater" | "viewer" | "manager" | "oppViewer" | "oppSettings"
 
 interface AttemptContext {
   b: SampleIds
@@ -360,6 +374,51 @@ const SETTINGS_GUARDED: Guarded[] = [
   { name: "Delete a role", method: "DELETE", path: (c) => `/api/roles/${c.fx.repRoleId}`, expectError: "delete roles" },
   { name: "Reorder roles", method: "PUT", path: () => "/api/roles/order", body: (c) => ({ roleIds: [c.fx.repRoleId, c.fx.clerkRoleId] }), expectError: "reorder roles" },
 ]
+
+// Every opportunity, attachment, stage, type, and settings route. Test
+// Everyone B holds none of the opportunity keys, so each one is refused
+// with a 403 before any record is looked up. The "manage opportunity
+// settings" ones (stage, type, and settings writes) are also refused for
+// Test Rep B and Test Opp Viewer B, who don't hold settingsSections.opportunities.
+// The ids are the unassigned sample opportunity's and the company's first
+// stage and type.
+const OPP_SETTINGS_WRITE = "manage opportunity settings"
+const OPP_GUARDED: Guarded[] = [
+  { name: "List opportunities", method: "GET", path: () => "/api/opportunities", expectError: "view opportunities" },
+  { name: "Create an opportunity", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expectError: "create opportunities" },
+  { name: "Open an opportunity", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expectError: "view opportunities" },
+  { name: "Edit an opportunity", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: () => ({ title: "Changed" }), expectError: "edit opportunities" },
+  { name: "Delete an opportunity", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expectError: "delete opportunities" },
+  { name: "Opportunity attachments", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expectError: "view opportunities" },
+  { name: "Upload an opportunity attachment", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expectError: "edit opportunities" },
+  { name: "Delete an opportunity attachment", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments/${c.fx.unassignedOpportunityAttachmentId}`, expectError: "edit opportunities" },
+  { name: "Opportunity stages", method: "GET", path: () => "/api/opportunity-stages", expectError: "view opportunity stages" },
+  { name: "Add an opportunity stage", method: "POST", path: () => "/api/opportunity-stages", body: () => ({ name: "Should Not Exist", category: "OPEN" }), expectError: OPP_SETTINGS_WRITE },
+  { name: "Edit an opportunity stage", method: "PATCH", path: (c) => `/api/opportunity-stages/${c.b.opportunityStageId}`, body: () => ({ name: "Changed" }), expectError: OPP_SETTINGS_WRITE },
+  { name: "Delete an opportunity stage", method: "DELETE", path: (c) => `/api/opportunity-stages/${c.b.opportunityStageId}`, expectError: OPP_SETTINGS_WRITE },
+  { name: "Reorder opportunity stages", method: "POST", path: () => "/api/opportunity-stages/reorder", body: (c) => ({ stageIds: [...c.fx.opportunityStageIds].reverse() }), expectError: OPP_SETTINGS_WRITE },
+  { name: "Opportunity types", method: "GET", path: () => "/api/opportunity-types", expectError: "view opportunity types" },
+  { name: "Add an opportunity type", method: "POST", path: () => "/api/opportunity-types", body: () => ({ name: "Should Not Exist" }), expectError: OPP_SETTINGS_WRITE },
+  { name: "Edit an opportunity type", method: "PATCH", path: (c) => `/api/opportunity-types/${c.b.opportunityTypeId}`, body: () => ({ name: "Changed" }), expectError: OPP_SETTINGS_WRITE },
+  { name: "Delete an opportunity type", method: "DELETE", path: (c) => `/api/opportunity-types/${c.b.opportunityTypeId}`, expectError: OPP_SETTINGS_WRITE },
+  { name: "Opportunity settings", method: "GET", path: () => "/api/opportunity-settings", expectError: "view opportunity settings" },
+  { name: "Edit opportunity settings", method: "PATCH", path: () => "/api/opportunity-settings", body: () => ({ prefix: "NOPE" }), expectError: OPP_SETTINGS_WRITE },
+]
+
+// A created opportunity must belong to the expected owner (null for
+// unassigned). It is removed again once checked.
+function createdOpportunityOwnedBy(ownerId: (c: AttemptContext) => string | null) {
+  return async (json: unknown, c: AttemptContext, prisma: PrismaClient): Promise<string | null> => {
+    const created = json as { id?: string; owner?: { id?: string } | null }
+    if (!created.id) return "no opportunity id in the response"
+    try {
+      const expected = ownerId(c)
+      return (created.owner?.id ?? null) === expected ? null : `the owner is ${created.owner?.id ?? "nobody"}, expected ${expected ?? "nobody"}`
+    } finally {
+      await prisma.opportunity.deleteMany({ where: { id: created.id } })
+    }
+  }
+}
 
 // Reads any active user may make, and what they must leave out
 const activeReadsFor = (actor: Actor): Attempt[] => [
@@ -651,6 +710,29 @@ const ATTEMPTS: Attempt[] = [
   { name: "Own company containers", actor: "clerk", kind: "control", method: "GET", path: () => "/api/inventory-locations/own-company", expect: 200, contains: () => ["["] },
   { name: "List inventory stock", actor: "clerk", kind: "control", method: "GET", path: () => "/api/inventory-stock", expect: 200, contains: (c) => [c.fx.stockId] },
   { name: "Adjust inventory stock by zero (past the permission check)", actor: "clerk", kind: "control", method: "PATCH", path: (c) => `/api/inventory-stock/${c.fx.stockId}/adjust`, body: () => ({ delta: 0 }), expect: 400, contains: () => ["non-zero"] },
+
+  // ── Positive controls: opportunities ──
+  // Global Admin B sees all three sample opportunities; Test Rep B (no see
+  // all) its own and the unassigned one; Test Opp Viewer B (no see all,
+  // owns none) only the unassigned one; Test Opp Settings B manages
+  // stages, types, and settings. Its writes save the values already stored.
+  { name: "List opportunities shows everyone's", actor: "admin", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.b.opportunityId, c.fx.repOpportunityId, c.fx.unassignedOpportunityId] },
+  { name: "Open the Rep's opportunity", actor: "admin", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, expect: 200, contains: (c) => [c.fx.repOpportunityId] },
+  { name: "List opportunities: own and unassigned only", actor: "rep", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.fx.repOpportunityId, c.fx.unassignedOpportunityId], notContains: (c) => [c.b.opportunityId] },
+  { name: "Open own opportunity", actor: "rep", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, expect: 200, contains: (c) => [c.fx.repOpportunityId] },
+  { name: "Own opportunity attachments", actor: "rep", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}/attachments`, expect: 200, contains: (c) => [c.fx.repOpportunityAttachmentId] },
+  { name: "List opportunities: unassigned only", actor: "oppViewer", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.fx.unassignedOpportunityId], notContains: (c) => [c.b.opportunityId, c.fx.repOpportunityId] },
+  { name: "Open the unassigned opportunity", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 200, contains: (c) => [c.fx.unassignedOpportunityId] },
+  { name: "Unassigned opportunity attachments", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expect: 200, contains: (c) => [c.fx.unassignedOpportunityAttachmentId] },
+  { name: "Opportunity stages", actor: "oppViewer", kind: "control", method: "GET", path: () => "/api/opportunity-stages", expect: 200, contains: (c) => [c.b.opportunityStageId] },
+  { name: "Opportunity types", actor: "oppViewer", kind: "control", method: "GET", path: () => "/api/opportunity-types", expect: 200, contains: (c) => [c.b.opportunityTypeId] },
+  { name: "Opportunity settings", actor: "oppViewer", kind: "control", method: "GET", path: () => "/api/opportunity-settings", expect: 200, contains: () => ['"prefix"'] },
+  { name: "Opportunity stages", actor: "oppSettings", kind: "control", method: "GET", path: () => "/api/opportunity-stages", expect: 200, contains: (c) => [c.b.opportunityStageId] },
+  { name: "Opportunity settings", actor: "oppSettings", kind: "control", method: "GET", path: () => "/api/opportunity-settings", expect: 200, contains: () => ['"prefix"'] },
+  { name: "Save opportunity settings unchanged", actor: "oppSettings", kind: "control", method: "PATCH", path: () => "/api/opportunity-settings", body: () => ({ prefix: "OPP" }), expect: 200, contains: () => ['"prefix":"OPP"'] },
+  { name: "Rename a stage to its own name", actor: "oppSettings", kind: "control", method: "PATCH", path: (c) => `/api/opportunity-stages/${c.b.opportunityStageId}`, body: () => ({ name: "New" }), expect: 200, contains: (c) => [c.b.opportunityStageId] },
+  { name: "Rename a type to its own name", actor: "oppSettings", kind: "control", method: "PATCH", path: (c) => `/api/opportunity-types/${c.b.opportunityTypeId}`, body: () => ({ name: "New Business" }), expect: 200, contains: (c) => [c.b.opportunityTypeId] },
+  { name: "Reorder stages in their current order", actor: "oppSettings", kind: "control", method: "POST", path: () => "/api/opportunity-stages/reorder", body: (c) => ({ stageIds: c.fx.opportunityStageIds }), expect: 200, contains: (c) => [c.b.opportunityStageId] },
 
   // ── Test Everyone B: no permissions, refused everywhere ──
   { name: "List quotes", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/quotes", expect: 403, expectError: "permission" },
@@ -961,6 +1043,50 @@ const ATTEMPTS: Attempt[] = [
   // ── Template lines (round two, #80): a bad recurring interval is a 400 ──
   { name: "Template line with a made up recurring interval", actor: "templater", kind: "refused", method: "PATCH", path: (c) => `/api/quote-templates/${c.fx.costTemplateId}/line-items/${c.fx.costTemplateLineId}`, body: () => ({ recurringInterval: "WEEKLY" }), expect: 400, expectError: "Invalid recurring interval" },
 
+  // ── Opportunities ──
+  // Test Everyone B: refused every opportunity, stage, type, and settings route
+  ...OPP_GUARDED.map(refusedFor("everyone")),
+  // Test Rep B (Opportunities page and create, no see all, no edit or
+  // delete): only its own and unassigned opportunities, only itself or
+  // nobody as owner, and no settings writes
+  { name: "Open the admin's opportunity", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}`, expect: 404, expectError: "Not found" },
+  { name: "The admin's opportunity attachments", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/attachments`, expect: 404, expectError: "Not found" },
+  { name: "Create an opportunity owned by the admin", actor: "rep", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.b.adminId }), expect: 403, expectError: "You can only assign opportunities to yourself or leave them unassigned" },
+  { name: "Edit own opportunity", actor: "rep", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, body: () => ({ title: "Changed" }), expect: 403, expectError: "edit opportunities" },
+  { name: "Delete own opportunity", actor: "rep", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, expect: 403, expectError: "delete opportunities" },
+  ...OPP_GUARDED.filter((g) => g.expectError === OPP_SETTINGS_WRITE).map(refusedFor("rep")),
+  {
+    name: "Create an opportunity for self (then removed)",
+    actor: "rep",
+    kind: "allowed",
+    method: "POST",
+    path: () => "/api/opportunities",
+    body: (c) => ({ title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId }),
+    expect: 200,
+    check: createdOpportunityOwnedBy((c) => c.repUserId),
+  },
+  {
+    name: "Create an unassigned opportunity (then removed)",
+    actor: "rep",
+    kind: "allowed",
+    method: "POST",
+    path: () => "/api/opportunities",
+    body: (c) => ({ title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: null }),
+    expect: 200,
+    check: createdOpportunityOwnedBy(() => null),
+  },
+  // Test Opp Viewer B (only the Opportunities page): reads, never writes
+  { name: "Open the admin's opportunity", actor: "oppViewer", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}`, expect: 404, expectError: "Not found" },
+  { name: "Create an opportunity", actor: "oppViewer", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
+  { name: "Edit an opportunity", actor: "oppViewer", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: () => ({ title: "Changed" }), expect: 403, expectError: "edit opportunities" },
+  { name: "Delete an opportunity", actor: "oppViewer", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 403, expectError: "delete opportunities" },
+  { name: "Upload an opportunity attachment", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expect: 403, expectError: "edit opportunities" },
+  { name: "Delete an opportunity attachment", actor: "oppViewer", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments/${c.fx.unassignedOpportunityAttachmentId}`, expect: 403, expectError: "edit opportunities" },
+  ...OPP_GUARDED.filter((g) => g.expectError === OPP_SETTINGS_WRITE).map(refusedFor("oppViewer")),
+  // Test Opp Settings B (only Opportunity Settings): no opportunities themselves
+  { name: "List opportunities", actor: "oppSettings", kind: "refused", method: "GET", path: () => "/api/opportunities", expect: 403, expectError: "view opportunities" },
+  { name: "Create an opportunity", actor: "oppSettings", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
+
   { name: "Disconnect someone else's shared mailbox", actor: "sender", kind: "refused", sharedMode: "admin", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
   // Even one's own mailbox needs Integrations access while it is the shared sender
   { name: "Disconnect own mailbox while it is the shared sender", actor: "sender", kind: "refused", sharedMode: "sender", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.senderMailboxId}`, expect: 403, expectError: "shared quote sender" },
@@ -1039,6 +1165,10 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
       select: { id: true, name: true, active: true, roleId: true, loginLockedUntil: true },
     }),
     notifications: prisma.notification.count({ where: { companyId: b } }),
+    opportunities: prisma.opportunity.findMany({ where: { companyId: b }, ...byId, include: { attachments: byId } }),
+    opportunityStages: prisma.opportunityStage.findMany({ where: { companyId: b }, ...byId }),
+    opportunityTypes: prisma.opportunityType.findMany({ where: { companyId: b }, ...byId }),
+    opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId: b } }),
   }
   const keys = Object.keys(sections) as (keyof typeof sections)[]
   const values = await Promise.all(keys.map((k) => sections[k]))
@@ -1644,6 +1774,8 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
       templater: new Session("Test Templater B", baseUrl),
       viewer: new Session("Test Viewer B", baseUrl),
       manager: new Session("Test Manager B", baseUrl),
+      oppViewer: new Session("Test Opp Viewer B", baseUrl),
+      oppSettings: new Session("Test Opp Settings B", baseUrl),
     }
     await run.credentials.signIn(sessions.admin, names.adminEmail)
     await run.credentials.signIn(sessions.rep, names.repEmail)
@@ -1654,8 +1786,10 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await run.credentials.signIn(sessions.templater, names.templaterEmail)
     await run.credentials.signIn(sessions.viewer, viewer.email)
     await run.credentials.signIn(sessions.manager, manager.email)
+    await run.credentials.signIn(sessions.oppViewer, names.oppViewerEmail)
+    await run.credentials.signIn(sessions.oppSettings, names.oppSettingsEmail)
     console.log(
-      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, and Test Manager B.`
+      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, Test Manager B, Test Opp Viewer B, and Test Opp Settings B.`
     )
 
     const ACTOR_LABEL: Record<Actor, string> = {
@@ -1668,6 +1802,8 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
       templater: "Templater B",
       viewer: "Viewer B",
       manager: "Manager B",
+      oppViewer: "Opp Viewer B",
+      oppSettings: "Opp Settings B",
     }
     const label = (a: Attempt) => `[${a.kind === "control" ? "control " : ""}${ACTOR_LABEL[a.actor]}] ${a.name}`
 
