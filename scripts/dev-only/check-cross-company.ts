@@ -70,6 +70,10 @@ interface Attempt {
 
 const FAR_FUTURE = "2030-01-01"
 
+// Creating an opportunity needs an initial note, so each create attempt
+// sends one and is still refused only for the id under test
+const OPP_NOTE = "<p>Dev check initial note</p>"
+
 const ATTEMPTS: Attempt[] = [
   // ── Nested records, other company's ids in the URL ──
   { name: "GET other company's client", directions: "both", method: "GET", path: (c) => `/api/clients/${c.other.clientId}`, expect: 404 },
@@ -225,12 +229,12 @@ const ATTEMPTS: Attempt[] = [
   // company's stage makes it the stale list answer
   { name: "Reorder with other company's stage", directions: "both", method: "POST", path: () => "/api/opportunity-stages/reorder", body: (c) => ({ stageIds: [c.other.opportunityStageId] }), expect: 409, expectError: "The stage list changed" },
   { name: "Reorder with other company's type", directions: "both", method: "POST", path: () => "/api/opportunity-types/reorder", body: (c) => ({ typeIds: [c.other.opportunityTypeId] }), expect: 409, expectError: "The type list changed" },
-  { name: "Opportunity POST clientId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.other.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid client" },
-  { name: "Opportunity POST contactId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.own.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },
-  { name: "Opportunity POST ownerId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, ownerId: c.other.adminId }), expect: 400, expectError: "Invalid user" },
-  { name: "Opportunity POST stageId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, stageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
-  { name: "Opportunity POST typeId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, typeId: c.other.opportunityTypeId }), expect: 400, expectError: "Invalid opportunity type" },
-  { name: "Opportunity POST clientLocationId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, clientLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Opportunity POST clientId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.other.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid client" },
+  { name: "Opportunity POST contactId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },
+  { name: "Opportunity POST ownerId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, ownerId: c.other.adminId }), expect: 400, expectError: "Invalid user" },
+  { name: "Opportunity POST stageId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, stageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Opportunity POST typeId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, typeId: c.other.opportunityTypeId }), expect: 400, expectError: "Invalid opportunity type" },
+  { name: "Opportunity POST clientLocationId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, clientLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
   { name: "Opportunity PATCH clientLocationId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ clientLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
   { name: "Opportunity PATCH clientId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ clientId: c.other.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid client" },
   { name: "Opportunity PATCH contactId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },

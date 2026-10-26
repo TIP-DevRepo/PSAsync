@@ -10,10 +10,8 @@ import {
   OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE,
 } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
-import { takeOpportunityNumber } from "@/lib/opportunity-number"
-import { opportunityDetailSelect, opportunityListSelect, STAGE_ORDER } from "@/lib/opportunity-selects"
+import { opportunityListSelect, STAGE_ORDER } from "@/lib/opportunity-selects"
 import {
-  closedAtFor,
   INVALID_BODY_MESSAGE,
   OPPORTUNITY_SEARCH_MAX,
   OPPORTUNITY_TITLE_MAX,
@@ -24,8 +22,7 @@ import {
   readText,
 } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
-import { isBlankHtml, readNoteBody, recordTimelineActions } from "@/lib/timeline"
-import { opportunityCreatedAction } from "@/lib/opportunity-timeline"
+import { createOpportunity, initialNoteHtml, INITIAL_NOTE_REQUIRED_MESSAGE } from "@/lib/opportunity-create"
 import type { Prisma } from "@/generated/prisma"
 
 const DAY = 24 * 60 * 60 * 1000
@@ -115,13 +112,16 @@ export async function POST(req: NextRequest) {
   if (expectedValue.error !== undefined) return apiError(400, expectedValue.error)
   const expectedCloseDate = readDate(body.expectedCloseDate)
   if (expectedCloseDate.error !== undefined) return apiError(400, expectedCloseDate.error)
-  // Optional: the first note on the timeline. Left out, null, or blank adds none.
-  const hasNote = typeof body.initialNote === "string" && !isBlankHtml(body.initialNote)
-  if (body.initialNote !== undefined && body.initialNote !== null && typeof body.initialNote !== "string") {
-    return apiError(400, "The initial note must be text")
+  // Required: the person's own first note, checked after sanitizing (one
+  // that sanitizes to nothing is empty)
+  if (typeof body.initialNote !== "string") return apiError(400, INITIAL_NOTE_REQUIRED_MESSAGE)
+  const initialNote = { by: "person" as const, userId: ctx.userId, html: body.initialNote }
+  try {
+    initialNoteHtml(initialNote)
+  } catch (err) {
+    const { message, status } = userFacingError(err, "Checking an initial note")
+    return apiError(status, message)
   }
-  const initialNote = hasNote ? readNoteBody(body.initialNote) : null
-  if (initialNote?.error !== undefined) return apiError(400, initialNote.error)
 
   if (body.clientId === undefined || body.clientId === null || body.clientId === "") {
     return apiError(400, "A client is required")
@@ -130,10 +130,10 @@ export async function POST(req: NextRequest) {
     return apiError(400, "A contact is required")
   }
 
-  // The owner is the creator unless the body names someone, and null or
-  // blank leaves it unassigned. Without opportunities.viewAll only the
-  // creator or unassigned, the two owners they can still see.
-  const owner = "ownerId" in body ? readOptionalId(body.ownerId) : { value: ctx.userId }
+  // New records start unassigned: left out, null, or blank is unassigned. A
+  // named owner follows the owner rule: without opportunities.viewAll only
+  // the creator, the one owner besides unassigned they can still see.
+  const owner = readOptionalId(body.ownerId)
   if (owner.error !== undefined) return apiError(400, "Invalid user", "INVALID_REFERENCE")
   const ownerId = owner.value
   if (!mayAssignOpportunityTo(ctx, ownerId)) {
@@ -173,42 +173,21 @@ export async function POST(req: NextRequest) {
   })
   if (!chosenStage) return apiError(400, "Add an open stage in Opportunity Settings first")
 
-  const now = new Date()
   try {
-    const opportunity = await prisma.$transaction(async (tx) => {
-      const number = await takeOpportunityNumber(tx, ctx.companyId, now)
-      const created = await tx.opportunity.create({
-        data: {
-          companyId: ctx.companyId,
-          number,
-          title: title.value as string,
-          clientId,
-          contactId,
-          clientLocationId,
-          ownerId,
-          stageId: chosenStage.id,
-          typeId: type.value,
-          source: "MANUAL",
-          expectedValue: expectedValue.value,
-          expectedCloseDate: expectedCloseDate.value,
-          stageChangedAt: now,
-          closedAt: closedAtFor(chosenStage.category, now),
-          createdById: ctx.userId,
-        },
-        select: opportunityDetailSelect,
-      })
-
-      // The created entry, then the initial note a moment after it, so the
-      // note reads first on a newest first timeline
-      const subject = { opportunityId: created.id }
-      await recordTimelineActions(tx, { companyId: ctx.companyId, authorId: ctx.userId, subject, actions: [opportunityCreatedAction(created)], at: now })
-      if (initialNote?.value) {
-        await tx.timelineEntry.create({
-          data: { companyId: ctx.companyId, ...subject, kind: "NOTE", authorId: ctx.userId, body: initialNote.value, createdAt: new Date(now.getTime() + 1) },
-          select: { id: true },
-        })
-      }
-      return created
+    const opportunity = await createOpportunity(prisma, {
+      companyId: ctx.companyId,
+      createdById: ctx.userId,
+      title: title.value as string,
+      clientId,
+      contactId,
+      clientLocationId,
+      ownerId,
+      stage: chosenStage,
+      typeId: type.value,
+      source: "MANUAL",
+      expectedValue: expectedValue.value,
+      expectedCloseDate: expectedCloseDate.value,
+      initialNote,
     })
     return NextResponse.json(opportunity)
   } catch (err) {

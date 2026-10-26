@@ -106,6 +106,10 @@
 // the location to the new client's main one. A location of another client
 // of the same company is refused (400). The contact's mobile comes only with
 // an opportunity the user may open.
+//
+// Creating an opportunity needs an initial note (OPP_NOTE on every create
+// attempt); one left out, empty, or script only (empty after sanitizing) is
+// refused with 400, and a create without an owner is unassigned.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -417,9 +421,13 @@ const SETTINGS_GUARDED: Guarded[] = [
 // The ids are the unassigned sample opportunity's and the company's first
 // stage and type.
 const OPP_SETTINGS_WRITE = "manage opportunity settings"
+
+// Creating an opportunity needs an initial note, so each create attempt
+// sends one and is still refused (or allowed) for the reason under test
+const OPP_NOTE = "<p>Dev check initial note</p>"
 const OPP_GUARDED: Guarded[] = [
   { name: "List opportunities", method: "GET", path: () => "/api/opportunities", expectError: "view opportunities" },
-  { name: "Create an opportunity", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expectError: "create opportunities" },
+  { name: "Create an opportunity", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expectError: "create opportunities" },
   { name: "Open an opportunity", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expectError: "view opportunities" },
   { name: "Edit an opportunity", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: () => ({ title: "Changed" }), expectError: "edit opportunities" },
   { name: "Delete an opportunity", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expectError: "delete opportunities" },
@@ -1103,7 +1111,7 @@ const ATTEMPTS: Attempt[] = [
   { name: "The admin's opportunity timeline", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/timeline`, expect: 404, expectError: "Not found" },
   { name: "Add a note to own opportunity (no edit)", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expect: 403, expectError: "edit opportunities" },
   { name: "The admin's opportunity related records", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/related`, expect: 404, expectError: "Not found" },
-  { name: "Create an opportunity owned by the admin", actor: "rep", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.b.adminId }), expect: 403, expectError: "You can only assign opportunities to yourself or leave them unassigned" },
+  { name: "Create an opportunity owned by the admin", actor: "rep", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.b.adminId }), expect: 403, expectError: "You can only assign opportunities to yourself or leave them unassigned" },
   { name: "Edit own opportunity", actor: "rep", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, body: () => ({ title: "Changed" }), expect: 403, expectError: "edit opportunities" },
   { name: "Delete own opportunity", actor: "rep", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, expect: 403, expectError: "delete opportunities" },
   ...OPP_GUARDED.filter((g) => g.expectError === OPP_SETTINGS_WRITE).map(refusedFor("rep")),
@@ -1113,7 +1121,7 @@ const ATTEMPTS: Attempt[] = [
     kind: "allowed",
     method: "POST",
     path: () => "/api/opportunities",
-    body: (c) => ({ title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId }),
+    body: (c) => ({ initialNote: OPP_NOTE, title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.repUserId }),
     expect: 200,
     check: createdOpportunityOwnedBy((c) => c.repUserId),
   },
@@ -1123,13 +1131,29 @@ const ATTEMPTS: Attempt[] = [
     kind: "allowed",
     method: "POST",
     path: () => "/api/opportunities",
-    body: (c) => ({ title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: null }),
+    body: (c) => ({ initialNote: OPP_NOTE, title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: null }),
     expect: 200,
     check: createdOpportunityOwnedBy(() => null),
   },
+  {
+    // New records start unassigned when no owner is named
+    name: "Create an opportunity without an owner (then removed)",
+    actor: "rep",
+    kind: "allowed",
+    method: "POST",
+    path: () => "/api/opportunities",
+    body: (c) => ({ initialNote: OPP_NOTE, title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId }),
+    expect: 200,
+    check: createdOpportunityOwnedBy(() => null),
+  },
+  // A person creating an opportunity must write an initial note, judged
+  // after sanitizing
+  { name: "Create an opportunity without an initial note", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 400, expectError: "An initial note is required" },
+  { name: "Create an opportunity with an empty initial note", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: "<p>   </p>", title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 400, expectError: "An initial note is required" },
+  { name: "Create an opportunity with a script only initial note", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: "<script>alert(1)</script>", title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 400, expectError: "An initial note is required" },
   // Test Opp Viewer B (only the Opportunities page): reads, never writes
   { name: "Open the admin's opportunity", actor: "oppViewer", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}`, expect: 404, expectError: "Not found" },
-  { name: "Create an opportunity", actor: "oppViewer", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
+  { name: "Create an opportunity", actor: "oppViewer", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
   { name: "Edit an opportunity", actor: "oppViewer", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: () => ({ title: "Changed" }), expect: 403, expectError: "edit opportunities" },
   { name: "Delete an opportunity", actor: "oppViewer", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 403, expectError: "delete opportunities" },
   { name: "Upload an opportunity attachment", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expect: 403, expectError: "edit opportunities" },
@@ -1146,7 +1170,7 @@ const ATTEMPTS: Attempt[] = [
   { name: "Client details without the Opportunities page", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 403, expectError: "view opportunities" },
   // An opportunity's location must belong to its own client
   { name: "Opportunity location of another client", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: (c) => ({ clientLocationId: c.fx.copyClientLocationId }), expect: 400, expectError: "Invalid location" },
-  { name: "Create with a location of another client", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, clientLocationId: c.fx.copyClientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Create with a location of another client", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, clientLocationId: c.fx.copyClientLocationId }), expect: 400, expectError: "Invalid location" },
   { name: "Change the client with the old client's location", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: (c) => ({ clientId: c.fx.copyClientId, contactId: c.fx.copyContactId, clientLocationId: c.b.clientLocationId }), expect: 400, expectError: "Invalid location" },
   // A note's stageId is checked like any body id
   { name: "Note with another company's stage", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", stageId: c.c.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
@@ -1162,7 +1186,7 @@ const ATTEMPTS: Attempt[] = [
   { name: "Note under another opportunity", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.b.opportunityId}/timeline/${c.fx.unassignedAdminNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 404, expectError: "Not found" },
   { name: "Timeline page with another opportunity's cursor", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/timeline?cursor=${c.fx.unassignedAdminNoteId}`, expect: 400, expectError: "Invalid cursor" },
   { name: "Opportunity related records", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 403, expectError: "view opportunities" },
-  { name: "Create an opportunity", actor: "oppSettings", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
+  { name: "Create an opportunity", actor: "oppSettings", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
 
   { name: "Disconnect someone else's shared mailbox", actor: "sender", kind: "refused", sharedMode: "admin", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
   // Even one's own mailbox needs Integrations access while it is the shared sender
@@ -1920,7 +1944,7 @@ async function checkOpportunityLocation(prisma: PrismaClient, admin: Session, ct
   const count = (action?: string) => prisma.timelineEntry.count({ where: { opportunityId, ...(action ? { action } : {}) } })
   let createdId: string | null = null
   try {
-    const create = await admin.request("POST", "/api/opportunities", { json: { title: "Dev check location", clientId: ctx.b.clientId, contactId: ctx.b.contactId } })
+    const create = await admin.request("POST", "/api/opportunities", { json: { initialNote: OPP_NOTE, title: "Dev check location", clientId: ctx.b.clientId, contactId: ctx.b.contactId } })
     try {
       createdId = (JSON.parse(create.text) as { id?: string }).id ?? null
     } catch {

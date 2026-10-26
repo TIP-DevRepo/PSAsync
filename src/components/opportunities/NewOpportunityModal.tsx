@@ -37,14 +37,14 @@ export function NewOpportunityModal({
   const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
   const [form, setForm] = useState({
     title: "",
-    // The current user by default; "" is unassigned
-    ownerId: myUserId ?? "",
+    // New records start unassigned (""); the user picks an owner if needed
+    ownerId: "",
     stageId: stages.find((s) => s.category === "OPEN")?.id ?? "",
     typeId: "",
     expectedValue: "",
     expectedCloseDate: "",
   })
-  const [errors, setErrors] = useState<Partial<Record<keyof typeof form | "clientId" | "contactId", string>>>({})
+  const [errors, setErrors] = useState<Partial<Record<keyof typeof form | "clientId" | "contactId" | "initialNote", string>>>({})
   const [saving, setSaving] = useState(false)
   const [initialNote, setInitialNote] = useState("")
   // Picking a contact also sets its client (ClientContactPicker)
@@ -75,6 +75,8 @@ export function NewOpportunityModal({
     if (!form.title.trim()) next.title = "Title is required"
     if (!party.client) next.clientId = "Choose a client"
     if (!party.contact) next.contactId = "Choose a contact"
+    // Required, judged on its text, not its markup (the editor sends <p></p> when empty)
+    if (isBlankHtml(initialNote)) next.initialNote = "Write an initial note"
     const value = readExpectedValue(form.expectedValue.trim())
     if (value.error !== undefined) next.expectedValue = value.error
     setErrors(next)
@@ -98,7 +100,7 @@ export function NewOpportunityModal({
         expectedValue: form.expectedValue.trim() || null,
         expectedCloseDate: form.expectedCloseDate || null,
         // The first note on the timeline, saved with the opportunity
-        initialNote: isBlankHtml(initialNote) ? null : initialNote,
+        initialNote,
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -266,10 +268,23 @@ export function NewOpportunityModal({
 
         <div>
           <p id="new-opportunity-note-label" className={LABEL}>
-            Initial note
+            Initial note <span className="text-danger">*</span>
           </p>
-          <p className="mb-2 text-xs text-muted-foreground">Becomes the first entry on the timeline. Optional.</p>
-          <RichTextEditor value={initialNote} onChange={setInitialNote} tall ariaLabel="Initial note" />
+          <p className="mb-2 text-xs text-muted-foreground">Becomes the first entry on the timeline.</p>
+          <RichTextEditor
+            value={initialNote}
+            onChange={(html) => {
+              setInitialNote(html)
+              setErrors((prev) => ({ ...prev, initialNote: undefined }))
+            }}
+            tall
+            ariaLabel="Initial note (required)"
+          />
+          {errors.initialNote && (
+            <p role="alert" className="mt-1 text-xs text-danger">
+              {errors.initialNote}
+            </p>
+          )}
         </div>
 
         <div className="flex justify-end gap-2">
