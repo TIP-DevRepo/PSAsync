@@ -99,8 +99,9 @@ export function OpportunityDetail({ id }: { id: string }) {
     if (!canEdit) return
     fetch("/api/opportunity-types").then(json).then((data) => Array.isArray(data) && setTypes(data))
     fetch("/api/clients").then(json).then((data) => Array.isArray(data) && setClients(data))
-    if (canViewAll) fetch("/api/users").then(json).then((data) => Array.isArray(data) && setUsers(data))
-  }, [load, canEdit, canViewAll])
+    // Every user's name, for the owner choices (ownerFieldChoices decides who)
+    fetch("/api/users").then(json).then((data) => Array.isArray(data) && setUsers(data))
+  }, [load, canEdit])
 
   // Saves only the fields given. The page takes the saved opportunity back,
   // or keeps what it had and says why.

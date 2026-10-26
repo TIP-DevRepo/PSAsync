@@ -9,6 +9,7 @@ import { formatPhoneInput } from "@/lib/phone"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
 import { clientQuoteDefaults } from "@/lib/quote-client-defaults"
+import { sortUsersByName } from "@/lib/user-picker"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface UserOption {
@@ -76,7 +77,8 @@ function NewQuoteForm() {
   const [error, setError] = useState("")
 
   const [form, setForm] = useState({
-    userId: "",
+    // The creator unless another rep is picked
+    userId: access?.userId ?? "",
     title: "",
     introText: "",
     internalNotes: "",
@@ -104,7 +106,7 @@ function NewQuoteForm() {
     fetch("/api/users")
       .then((res) => res.json())
       .then((all: UserOption[]) =>
-        setUsers(all.filter((u) => u.active && (canAssignOthers || u.id === access?.userId)))
+        setUsers(sortUsersByName(all.filter((u) => u.active && (canAssignOthers || u.id === access?.userId))))
       )
 
     fetch(`/api/quote-templates/${templateId}`)
@@ -247,7 +249,8 @@ function NewQuoteForm() {
                   onChange={(e) => update("userId", e.target.value)}
                   className="w-full rounded-md border px-3 py-2 text-sm"
                 >
-                  <option value="">Me (default)</option>
+                  {/* Until the list loads, the creator (the default) has no name to show */}
+                  {!users.some((u) => u.id === form.userId) && <option value={form.userId}>Loading...</option>}
                   {users.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name}

@@ -3,6 +3,8 @@
 // No React and no database imports, so client components can use them and
 // each rule can be checked on its own.
 
+import { userChoices } from "@/lib/user-picker"
+
 export type StageCategory = "OPEN" | "WON" | "LOST"
 
 export interface StageOption {
@@ -142,33 +144,40 @@ interface UserOption {
   active: boolean
 }
 
-// The owner filter: anyone, the user, unassigned, and, with
-// opportunities.viewAll, every other active user
+// Who the lists may show: every active user with opportunities.viewAll,
+// otherwise only the current user. Labels and order follow the shared user
+// picker rule (src/lib/user-picker.ts): names, never "Me", alphabetical,
+// Unassigned first. The current user needs the user list (GET /api/users)
+// for their name, so they are left out until it loads.
+function ownerCandidates(canViewAll: boolean, users: UserOption[], myUserId: string | null): UserOption[] {
+  return users.filter((u) => u.active && (canViewAll || u.id === myUserId))
+}
+
+// The owner filter: any owner, unassigned, then the users. The current user
+// keeps the value "me", so a shared link means whoever opens it.
 export function ownerFilterChoices(canViewAll: boolean, users: UserOption[], myUserId: string | null): OwnerChoice[] {
-  const others = canViewAll ? users.filter((u) => u.active && u.id !== myUserId).map((u) => ({ value: u.id, label: u.name })) : []
-  return [{ value: "", label: "Any owner" }, { value: "me", label: "Me" }, { value: "unassigned", label: "Unassigned" }, ...others]
+  return [
+    { value: "", label: "Any owner" },
+    ...userChoices(ownerCandidates(canViewAll, users, myUserId), {
+      unassignedValue: "unassigned",
+      valueFor: (u) => (u.id === myUserId ? "me" : u.id),
+    }),
+  ]
 }
 
 // Who may be made the owner, following mayAssignOpportunityTo: without
-// opportunities.viewAll only the user ("Me") or unassigned (""). With it,
-// every other active user too. The current owner stays listed even when
-// they can no longer be chosen (deactivated), so the field shows them.
+// opportunities.viewAll only the current user or unassigned (""). With it,
+// every active user. The current owner stays listed even when they can no
+// longer be chosen (deactivated), so the field shows them.
 export function ownerFieldChoices(
   canViewAll: boolean,
   users: UserOption[],
   myUserId: string | null,
   currentOwner?: { id: string; name: string } | null
 ): OwnerChoice[] {
-  const choices: OwnerChoice[] = []
-  if (myUserId) choices.push({ value: myUserId, label: "Me" })
-  choices.push({ value: "", label: "Unassigned" })
-  if (canViewAll) {
-    for (const u of users) if (u.active && u.id !== myUserId) choices.push({ value: u.id, label: u.name })
-  }
-  if (currentOwner && !choices.some((c) => c.value === currentOwner.id)) {
-    choices.push({ value: currentOwner.id, label: currentOwner.name })
-  }
-  return choices
+  const candidates: { id: string; name: string }[] = ownerCandidates(canViewAll, users, myUserId)
+  if (currentOwner && !candidates.some((u) => u.id === currentOwner.id)) candidates.push(currentOwner)
+  return userChoices(candidates, { unassignedValue: "" })
 }
 
 // ─── Money ──────────────────────────────────────────────────────────────────

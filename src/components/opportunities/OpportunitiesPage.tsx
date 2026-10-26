@@ -77,9 +77,10 @@ export function OpportunitiesPage() {
     fetch("/api/opportunity-stages").then(json).then((data) => Array.isArray(data) && setStages(data))
     fetch("/api/opportunity-types").then(json).then((data) => Array.isArray(data) && setTypes(data))
     fetch("/api/clients").then(json).then((data) => Array.isArray(data) && setClients(data))
-    // Only someone who sees everyone's opportunities can filter by any user
-    if (canViewAll) fetch("/api/users").then(json).then((data) => Array.isArray(data) && setUsers(data))
-  }, [canViewAll])
+    // Every user's name, for the owner filter; who is offered is decided by
+    // ownerFilterChoices (anyone only with opportunities.viewAll)
+    fetch("/api/users").then(json).then((data) => Array.isArray(data) && setUsers(data))
+  }, [])
 
   useEffect(() => {
     const controller = new AbortController()

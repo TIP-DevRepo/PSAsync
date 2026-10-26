@@ -49,13 +49,13 @@ export function NewOpportunityModal({
   const [initialNote, setInitialNote] = useState("")
   const { contacts, loading: contactsLoading } = useClientContacts(form.clientId)
 
-  // Only someone who sees everyone's opportunities may give one to another user
+  // Every user's name (the current user shows by name too); who may be
+  // chosen is decided by ownerFieldChoices
   useEffect(() => {
-    if (!canViewAll) return
     fetch("/api/users")
       .then((res) => (res.ok ? res.json() : []))
       .then((data) => Array.isArray(data) && setUsers(data))
-  }, [canViewAll])
+  }, [])
 
   const update = (field: keyof typeof form, value: string) => {
     setForm((prev) => ({
@@ -197,6 +197,8 @@ export function NewOpportunityModal({
               Owner
             </label>
             <select id="new-opportunity-owner" value={form.ownerId} onChange={(e) => update("ownerId", e.target.value)} className={FIELD}>
+              {/* The current user (the default) shows by name once the user list loads */}
+              {!owners.some((o) => o.value === form.ownerId) && <option value={form.ownerId}>Loading...</option>}
               {owners.map((o) => (
                 <option key={o.value || "unassigned"} value={o.value}>
                   {o.label}

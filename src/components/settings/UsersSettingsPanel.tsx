@@ -15,6 +15,7 @@ import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/l
 import { Requirement } from "@/components/account/ChangePasswordCard"
 import { RoleAssignControl, RoleChecklist, type AssignableRole } from "@/components/roles/RoleAssignControl"
 import type { MenuAnchor } from "@/lib/useFixedMenu"
+import { sortUsersByName } from "@/lib/user-picker"
 
 interface RoleOption extends AssignableRole {
   isEveryone?: boolean
@@ -67,7 +68,7 @@ export function UsersSettingsPanel() {
     fetch("/api/users")
       .then((res) => res.json())
       .then((json) => {
-        setUsers(json)
+        setUsers(Array.isArray(json) ? sortUsersByName(json as User[]) : json)
         setLoading(false)
       })
   }
