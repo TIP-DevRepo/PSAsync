@@ -18,6 +18,8 @@ export const CLOSE_DATE_MESSAGE = "Expected close date must be a valid date"
 export const QUOTE_SENT_STAGE_OPEN_MESSAGE = "The stage a sent quote moves to must be an open stage"
 export const STAGE_ORDER_MESSAGE = "Invalid stage order"
 export const STAGE_ORDER_STALE_MESSAGE = "The stage list changed since you loaded it. Refresh and try again."
+export const TYPE_ORDER_MESSAGE = "Invalid type order"
+export const TYPE_ORDER_STALE_MESSAGE = "The type list changed since you loaded it. Refresh and try again."
 
 // ─── Stage changes ──────────────────────────────────────────────────────────
 
