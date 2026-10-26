@@ -7,6 +7,8 @@ import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
 import { OPPORTUNITY_TITLE_MAX, readExpectedValue } from "@/lib/opportunity-rules"
 import { ownerFieldChoices, type StageOption, type TypeOption } from "@/lib/opportunity-view"
+import { RichTextEditor } from "@/components/ui/rich-text-editor"
+import { isBlankHtml } from "@/lib/timeline-actions"
 import { useClientContacts } from "./useClientContacts"
 
 const FIELD =
@@ -44,6 +46,7 @@ export function NewOpportunityModal({
   })
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({})
   const [saving, setSaving] = useState(false)
+  const [initialNote, setInitialNote] = useState("")
   const { contacts, loading: contactsLoading } = useClientContacts(form.clientId)
 
   // Only someone who sees everyone's opportunities may give one to another user
@@ -90,6 +93,8 @@ export function NewOpportunityModal({
         typeId: form.typeId || null,
         expectedValue: form.expectedValue.trim() || null,
         expectedCloseDate: form.expectedCloseDate || null,
+        // The first note on the timeline, saved with the opportunity
+        initialNote: isBlankHtml(initialNote) ? null : initialNote,
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -112,7 +117,7 @@ export function NewOpportunityModal({
   const describedBy = (field: keyof typeof form) => (errors[field] ? `new-opportunity-${field}-error` : undefined)
 
   return (
-    <Modal maxWidth="lg" scrollable onClose={saving ? undefined : onClose}>
+    <Modal maxWidth="xl" scrollable onClose={saving ? undefined : onClose}>
       <h2 className="text-lg font-bold text-foreground">New opportunity</h2>
 
       <form
@@ -257,6 +262,14 @@ export function NewOpportunityModal({
               className={FIELD}
             />
           </div>
+        </div>
+
+        <div>
+          <p id="new-opportunity-note-label" className={LABEL}>
+            Initial note
+          </p>
+          <p className="mb-2 text-xs text-muted-foreground">Becomes the first entry on the timeline. Optional.</p>
+          <RichTextEditor value={initialNote} onChange={setInitialNote} tall ariaLabel="Initial note" />
         </div>
 
         <div className="flex justify-end gap-2">
