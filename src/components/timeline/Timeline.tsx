@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useImperativeHandle, useRef, useState, type Ref } from "react"
 import { Activity, Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
@@ -43,6 +43,11 @@ async function errorMessage(res: Response, fallback: string) {
 }
 
 // A stage a note can move its record to, in the company's order
+// What a page that shows the action bar itself can do with the timeline
+export interface TimelineHandle {
+  openComposer: (button: ActionButtonDefinition) => void
+}
+
 export interface TimelineStageOption {
   id: string
   name: string
@@ -67,6 +72,9 @@ export function Timeline({
   buttons,
   stages,
   onPosted,
+  showButtons = true,
+  onComposerChange,
+  ref,
 }: {
   timelineUrl: string
   // opportunities.edit (or the subject's own edit permission); also needed
@@ -79,6 +87,12 @@ export function Timeline({
   buttons: readonly ActionButtonDefinition[]
   stages?: readonly TimelineStageOption[]
   onPosted?: (entry: TimelineEntryData) => void
+  // False when the page shows the bar elsewhere (the opportunity header) and
+  // opens the composer through ref.openComposer
+  showButtons?: boolean
+  // The button whose composer is open, or null, for a bar shown elsewhere
+  onComposerChange?: (buttonId: string | null) => void
+  ref?: Ref<TimelineHandle>
 }) {
   const [entries, setEntries] = useState<TimelineEntryData[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -132,6 +146,18 @@ export function Timeline({
 
   // A button opens the composer with its presets. Switching buttons while it
   // is open keeps the text and only changes the preset stage.
+  useImperativeHandle(ref, () => ({ openComposer }))
+
+  const composerRef = useRef<HTMLDivElement>(null)
+  const openButtonId = composer?.buttonId ?? null
+  // A bar outside the timeline (the header) shows which button is open, and
+  // the composer is brought into view, which matters when the timeline sits
+  // below the details panel at phone width
+  useEffect(() => {
+    onComposerChange?.(openButtonId)
+    if (openButtonId) composerRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" })
+  }, [openButtonId, onComposerChange])
+
   function openComposer(button: ActionButtonDefinition) {
     const stageId = presetStageId(button, stages ?? [])
     setComposer((prev) => ({ buttonId: button.id, html: prev?.html ?? "", stageId }))
@@ -216,10 +242,10 @@ export function Timeline({
         Timeline
       </h2>
 
-      {canAddNotes && <ActionButtonBar buttons={buttons} onSelect={openComposer} activeId={composer?.buttonId} disabled={posting} label="Timeline actions" />}
+      {canAddNotes && showButtons && <ActionButtonBar buttons={buttons} onSelect={openComposer} activeId={composer?.buttonId} disabled={posting} label="Timeline actions" />}
 
       {canAddNotes && composer && (
-        <div className="space-y-3 rounded-lg border border-border bg-card p-3 shadow-card">
+        <div ref={composerRef} className="scroll-mt-4 space-y-3 rounded-lg border border-border bg-card p-3 shadow-card">
           <RichTextEditor value={composer.html} onChange={(html) => setComposer((prev) => (prev ? { ...prev, html } : prev))} ariaLabel="New note" />
           <div className="flex flex-wrap items-end justify-between gap-3">
             {stages && stages.length > 0 ? (
