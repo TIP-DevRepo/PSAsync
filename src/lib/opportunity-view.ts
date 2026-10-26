@@ -4,6 +4,7 @@
 // each rule can be checked on its own.
 
 import { userChoices } from "@/lib/user-picker"
+import { writeColumnFilters } from "@/lib/column-filters"
 
 export type StageCategory = "OPEN" | "WON" | "LOST"
 
@@ -42,93 +43,56 @@ export interface OpportunityRow {
   type: { id: string; name: string } | null
 }
 
-// ─── URL view and filters ───────────────────────────────────────────────────
+// ─── URL view and search ────────────────────────────────────────────────────
 
 export type OpportunityView = "board" | "list"
 
-// Every filter as it sits in the URL. owner is "me", "unassigned", a user
-// id, or blank for anyone. stage is only used by the list (the board's
-// columns are the stages), for example from a Won column's "view in list".
+// The page's own parameters: the search box (both views). The list's column
+// filters (f_<column>, src/lib/column-filters.ts) are kept by the list
+// itself and only mean something on the list.
 export interface OpportunityFilters {
   q: string
-  owner: string
-  client: string
-  type: string
-  closeFrom: string
-  closeTo: string
-  stage: string
 }
 
-export const EMPTY_FILTERS: OpportunityFilters = { q: "", owner: "", client: "", type: "", closeFrom: "", closeTo: "", stage: "" }
-
-// The URL parameter for each filter, in the order they are written
-export const FILTER_PARAMS: readonly (keyof OpportunityFilters)[] = ["q", "owner", "client", "type", "closeFrom", "closeTo", "stage"]
+export const EMPTY_FILTERS: OpportunityFilters = { q: "" }
 
 // The same limit the list route has on its search text
 export const FILTER_SEARCH_MAX = 200
 
-const DATE_ONLY = /^\d{4}-\d{2}-\d{2}$/
-
-// Reads the view and filters from the URL. Anything unusable (an unknown
-// view, a malformed date, overlong search text) falls back to the default
-// instead of reaching the API.
+// Reads the view and search from the URL. An unknown view falls back to the
+// board, and overlong search text is cut to the API's limit.
 export function readOpportunityUrl(params: { get(name: string): string | null }): { view: OpportunityView; filters: OpportunityFilters } {
   const view: OpportunityView = params.get("view") === "list" ? "list" : "board"
-  const text = (name: string) => (params.get(name) ?? "").trim()
-  const date = (name: string) => {
-    const value = text(name)
-    return DATE_ONLY.test(value) ? value : ""
-  }
-  const q = text("q")
-  return {
-    view,
-    filters: {
-      q: q.length > FILTER_SEARCH_MAX ? q.slice(0, FILTER_SEARCH_MAX) : q,
-      owner: text("owner"),
-      client: text("client"),
-      type: text("type"),
-      closeFrom: date("closeFrom"),
-      closeTo: date("closeTo"),
-      // The board has no stage filter
-      stage: view === "list" ? text("stage") : "",
-    },
-  }
+  const q = (params.get("q") ?? "").trim()
+  return { view, filters: { q: q.length > FILTER_SEARCH_MAX ? q.slice(0, FILTER_SEARCH_MAX) : q } }
 }
 
-// The page's query string for a view and its filters ("" for the board
-// with no filters), the inverse of readOpportunityUrl
+// The page's query string for a view and its search ("" for the board with
+// no search), the inverse of readOpportunityUrl. Column filters are left
+// out, so changing view starts the list without them.
 export function opportunityUrlQuery(view: OpportunityView, filters: OpportunityFilters): string {
   const params = new URLSearchParams()
   if (view === "list") params.set("view", "list")
-  for (const key of FILTER_PARAMS) {
-    if (key === "stage" && view !== "list") continue
-    const value = filters[key].trim()
-    if (value) params.set(key, value)
-  }
+  if (filters.q.trim()) params.set("q", filters.q.trim())
   const query = params.toString()
   return query ? `?${query}` : ""
 }
 
-// The query string for GET /api/opportunities. "me" becomes the user's own id.
-export function opportunityApiQuery(view: OpportunityView, filters: OpportunityFilters, myUserId: string | null): string {
-  const params = new URLSearchParams()
-  if (filters.q) params.set("q", filters.q)
-  if (filters.owner === "me") {
-    if (myUserId) params.set("ownerId", myUserId)
-  } else if (filters.owner) {
-    params.set("ownerId", filters.owner)
-  }
-  if (filters.client) params.set("clientId", filters.client)
-  if (filters.type) params.set("typeId", filters.type)
-  if (filters.closeFrom) params.set("closeFrom", filters.closeFrom)
-  if (filters.closeTo) params.set("closeTo", filters.closeTo)
-  if (view === "list" && filters.stage) params.set("stageId", filters.stage)
-  const query = params.toString()
-  return query ? `?${query}` : ""
+// The query string for GET /api/opportunities: the search only. The API's
+// other filter parameters stay available to other callers.
+export function opportunityApiQuery(filters: OpportunityFilters): string {
+  return filters.q ? `?${new URLSearchParams({ q: filters.q })}` : ""
 }
 
 export function hasActiveFilters(filters: OpportunityFilters): boolean {
-  return FILTER_PARAMS.some((key) => filters[key].trim() !== "")
+  return filters.q.trim() !== ""
+}
+
+// A board column's "N older, view in list": the list with that stage in
+// its Stage column filter, keeping the search
+export function listForStageHref(pathname: string, filters: OpportunityFilters, stageName: string): string {
+  const query = writeColumnFilters(opportunityUrlQuery("list", filters).slice(1), { stage: stageName }, ["stage"])
+  return `${pathname}?${query}`
 }
 
 // ─── Owners ─────────────────────────────────────────────────────────────────
@@ -151,18 +115,6 @@ interface UserOption {
 // for their name, so they are left out until it loads.
 function ownerCandidates(canViewAll: boolean, users: UserOption[], myUserId: string | null): UserOption[] {
   return users.filter((u) => u.active && (canViewAll || u.id === myUserId))
-}
-
-// The owner filter: any owner, unassigned, then the users. The current user
-// keeps the value "me", so a shared link means whoever opens it.
-export function ownerFilterChoices(canViewAll: boolean, users: UserOption[], myUserId: string | null): OwnerChoice[] {
-  return [
-    { value: "", label: "Any owner" },
-    ...userChoices(ownerCandidates(canViewAll, users, myUserId), {
-      unassignedValue: "unassigned",
-      valueFor: (u) => (u.id === myUserId ? "me" : u.id),
-    }),
-  ]
 }
 
 // Who may be made the owner, following mayAssignOpportunityTo: without

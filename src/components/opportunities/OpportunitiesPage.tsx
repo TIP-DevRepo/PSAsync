@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Columns3, List, Plus, Target, X } from "lucide-react"
+import { Columns3, List, Plus, Target } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
@@ -10,10 +10,10 @@ import { cn } from "@/lib/utils"
 import {
   EMPTY_FILTERS,
   hasActiveFilters,
+  listForStageHref,
   moveOpportunityStage,
   opportunityApiQuery,
   opportunityUrlQuery,
-  ownerFilterChoices,
   readOpportunityUrl,
   type OpportunityFilters,
   type OpportunityRow,
@@ -27,12 +27,6 @@ import { OpportunityBoard } from "./OpportunityBoard"
 import { OpportunityList } from "./OpportunityList"
 import { NewOpportunityModal } from "./NewOpportunityModal"
 
-interface UserOption {
-  id: string
-  name: string
-  active: boolean
-}
-
 const VIEWS: { key: OpportunityView; label: string; icon: typeof List }[] = [
   { key: "board", label: "Board", icon: Columns3 },
   { key: "list", label: "List", icon: List },
@@ -42,21 +36,18 @@ export function OpportunitiesPage() {
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const { access, can } = useAccess()
-  const myUserId = access?.userId ?? null
+  const { can } = useAccess()
   const canCreate = can("opportunities.create")
   const canEdit = can("opportunities.edit")
-  const canViewAll = can("opportunities.viewAll")
 
   // The view and filters are read from the URL on every render, so a
   // refresh or a shared link opens exactly the same page
   const { view, filters } = useMemo(() => readOpportunityUrl(searchParams), [searchParams])
-  const apiQuery = opportunityApiQuery(view, filters, myUserId)
+  const apiQuery = opportunityApiQuery(filters)
 
   const [stages, setStages] = useState<StageOption[]>([])
   const [types, setTypes] = useState<TypeOption[]>([])
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
-  const [users, setUsers] = useState<UserOption[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityRow[]>([])
   // The API query the list on screen came from; loading until it matches
   const [loadedQuery, setLoadedQuery] = useState<string | null>(null)
@@ -70,16 +61,24 @@ export function OpportunitiesPage() {
     },
     [router, pathname]
   )
-  const setFilters = useCallback((next: OpportunityFilters) => setUrl(view, next), [setUrl, view])
+  // The search keeps the list's column filters (f_<column>) in the URL
+  const setFilters = useCallback(
+    (next: OpportunityFilters) => {
+      const params = new URLSearchParams(searchParams.toString())
+      if (next.q.trim()) params.set("q", next.q.trim())
+      else params.delete("q")
+      const query = params.toString()
+      router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+    },
+    [router, pathname, searchParams]
+  )
+  const setSearch = useCallback((q: string) => setFilters({ q }), [setFilters])
 
   useEffect(() => {
     const json = (res: Response) => (res.ok ? res.json() : [])
     fetch("/api/opportunity-stages").then(json).then((data) => Array.isArray(data) && setStages(data))
     fetch("/api/opportunity-types").then(json).then((data) => Array.isArray(data) && setTypes(data))
     fetch("/api/clients").then(json).then((data) => Array.isArray(data) && setClients(data))
-    // Every user's name, for the owner filter; who is offered is decided by
-    // ownerFilterChoices (anyone only with opportunities.viewAll)
-    fetch("/api/users").then(json).then((data) => Array.isArray(data) && setUsers(data))
   }, [])
 
   useEffect(() => {
@@ -119,8 +118,6 @@ export function OpportunitiesPage() {
     if (!result.ok) toast.error(`Couldn't move ${card.number} to ${stage.name}`, result.error)
   }
 
-  const ownerChoices = ownerFilterChoices(canViewAll, users, myUserId)
-  const stageFilter = view === "list" && filters.stage ? stages.find((s) => s.id === filters.stage) : undefined
   const filtered = hasActiveFilters(filters)
 
   return (
@@ -134,8 +131,9 @@ export function OpportunitiesPage() {
                 key={key}
                 type="button"
                 aria-pressed={view === key}
-                // The board has no stage filter, so it is dropped going there
-                onClick={() => setUrl(key, key === "board" ? { ...filters, stage: "" } : filters)}
+                // Changing view keeps the search; the list's column filters
+                // only belong to the list
+                onClick={() => setUrl(key, filters)}
                 className={cn(
                   "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
                   view === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-surface-hover hover:text-foreground"
@@ -155,23 +153,7 @@ export function OpportunitiesPage() {
         </div>
       </div>
 
-      <OpportunityFilterBar filters={filters} onChange={setFilters} ownerChoices={ownerChoices} clients={clients} types={types} />
-
-      {stageFilter && (
-        <div className="flex items-center gap-2 text-sm">
-          <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 py-0.5 pl-3 pr-1 text-primary">
-            Stage: {stageFilter.name}
-            <button
-              type="button"
-              onClick={() => setFilters({ ...filters, stage: "" })}
-              aria-label={`Remove the ${stageFilter.name} stage filter`}
-              className="rounded-full p-0.5 hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            >
-              <X size={12} aria-hidden="true" />
-            </button>
-          </span>
-        </div>
-      )}
+      <OpportunityFilterBar q={filters.q} onChange={setSearch} />
 
       {loadError ? (
         <div role="alert" className="rounded-lg border border-border bg-card p-6 text-center shadow-card">
@@ -192,7 +174,8 @@ export function OpportunitiesPage() {
           opportunities={opportunities}
           canEdit={canEdit}
           onMove={handleMove}
-          listHref={(stageId) => `${pathname}${opportunityUrlQuery("list", { ...filters, stage: stageId })}`}
+          // "N older, view in list": the list with that stage in its Stage column filter
+          listHref={(stageId) => listForStageHref(pathname, filters, stages.find((st) => st.id === stageId)?.name ?? "")}
         />
       ) : (
         <OpportunityList opportunities={opportunities} stages={stages} />
@@ -229,8 +212,8 @@ function EmptyState({
       </span>
       {filtered ? (
         <>
-          <p className="text-base font-semibold text-foreground">No opportunities match these filters</p>
-          <p className="max-w-md text-sm text-muted-foreground">Try a wider date range or another owner, or clear the filters to see everything you can open.</p>
+          <p className="text-base font-semibold text-foreground">No opportunities match this search</p>
+          <p className="max-w-md text-sm text-muted-foreground">Try other search words, or clear the search to see everything you can open.</p>
           <Button variant="outline" onClick={onClear}>
             Clear filters
           </Button>
