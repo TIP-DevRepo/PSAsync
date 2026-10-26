@@ -406,6 +406,21 @@ export function loadOpportunityAttachment(ctx: OpportunityViewer, opportunityId:
   })
 }
 
+// A timeline entry of one opportunity, company scoped, for writes after
+// loadOpportunityTimelineEntry has passed
+export const opportunityTimelineEntryWhere = (ctx: Scope, opportunityId: string, entryId: string) =>
+  ({ id: entryId, companyId: ctx.companyId, opportunityId }) satisfies Prisma.TimelineEntryWhereUniqueInput
+
+// A timeline entry by its URL id (or a paging cursor), only under the
+// opportunity it belongs to, with the VOP check on that opportunity
+export function loadOpportunityTimelineEntry(ctx: OpportunityViewer, opportunityId: string, entryId: string) {
+  if (!ctx.can("pages.opportunities")) return Promise.resolve(null)
+  return prisma.timelineEntry.findFirst({
+    where: { id: entryId, companyId: ctx.companyId, opportunityId, opportunity: viewableOpportunityWhere(ctx, opportunityId) },
+    select: { id: true, kind: true, authorId: true },
+  })
+}
+
 export const opportunityStageWhere = (ctx: Scope, stageId: string) =>
   ({ id: stageId, companyId: ctx.companyId }) satisfies Prisma.OpportunityStageWhereUniqueInput
 
