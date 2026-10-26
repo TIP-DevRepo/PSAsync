@@ -13,6 +13,7 @@ import {
   QUOTE_SENT_STAGE_DELETE_MESSAGE,
   readJsonObject,
   readText,
+  stageCategoryClosedAtUpdate,
   stageInUseMessage,
   WIN_PROBABILITY_MESSAGE,
 } from "@/lib/opportunity-rules"
@@ -25,7 +26,9 @@ function refusalResponse(refusal: Refusal) {
 
 // Changes the name, category, or win probability. A category change is
 // refused when the stage is the last of its old category, or when it is the
-// stage a sent quote moves to and would stop being OPEN.
+// stage a sent quote moves to and would stop being OPEN. An accepted one
+// sets or clears closedAt on the stage's opportunities in the same
+// transaction (stageCategoryClosedAtUpdate).
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -82,7 +85,20 @@ export async function PATCH(
       }
     }
 
-    return tx.opportunityStage.update({ where: opportunityStageWhere(ctx, stage.id), data, select: opportunityStageSelect })
+    const saved = await tx.opportunityStage.update({ where: opportunityStageWhere(ctx, stage.id), data, select: opportunityStageSelect })
+
+    // The opportunities in the stage follow its category: closed now when
+    // it becomes WON or LOST (keeping an earlier close date), open again
+    // when it becomes OPEN
+    const closedAt = category === undefined ? null : stageCategoryClosedAtUpdate(stage.category, category, new Date())
+    if (closedAt) {
+      await tx.opportunity.updateMany({
+        where: { companyId, stageId: stage.id, ...(closedAt.onlyWithoutClosedAt ? { closedAt: null } : {}) },
+        data: { closedAt: closedAt.closedAt },
+      })
+    }
+
+    return saved
   })
 
   if (isRefusal(result)) return refusalResponse(result)
