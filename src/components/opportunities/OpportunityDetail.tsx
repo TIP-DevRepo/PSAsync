@@ -25,9 +25,9 @@ import { OpportunityInfoPanel, type OpportunityDetailData } from "./OpportunityI
 
 const breadcrumbItems = [{ label: "Opportunities", href: "/dashboard/opportunities" }]
 
-// Laid out like HaloPSA: the client and number large on the first line, the
-// title under it, then the stage pill, created and closed text, and the
-// action buttons on one row. The main column is tabs (src/lib/opportunity-
+// Laid out like HaloPSA: the client and number large on the first line
+// (Delete at the top right), the title under it, the action buttons on their
+// own row aligned left, then the stage pill with created and closed text. The main column is tabs (src/lib/opportunity-
 // tabs.ts, kept in ?tab=): Details (the timeline), Attachments, and Related.
 // The details panel (edited in place) is on the right. At phone width the
 // panel comes first, then the tabs.
@@ -220,25 +220,19 @@ export function OpportunityDetail({ id }: { id: string }) {
           )}
         </div>
 
-        {/* The stage pill, created and closed text, and the action buttons on
-            one row; the buttons sit on the right and wrap onto their own line
-            on narrow screens */}
+        {/* Line 3: the action buttons on their own row, aligned left; they
+            wrap onto more lines at narrow widths */}
+        {canEdit && (
+          <ActionButtonBar buttons={OPPORTUNITY_ACTION_BUTTONS} onSelect={openFromHeader} activeId={openButtonId} label="Timeline actions" />
+        )}
+
+        {/* Line 4: the stage pill, created and closed text */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <StagePill name={o.stage.name} category={o.stage.category} />
           <p className="text-xs text-muted-foreground">
             Created{o.createdBy ? ` by ${o.createdBy.name}` : ""} on {formatDate(o.createdAt)}
             {o.closedAt ? ` · Closed ${formatDate(o.closedAt)}` : ""}
           </p>
-          {canEdit && (
-            <div className="w-full md:ml-auto md:w-auto">
-              <ActionButtonBar
-                buttons={OPPORTUNITY_ACTION_BUTTONS}
-                onSelect={openFromHeader}
-                activeId={openButtonId}
-                label="Timeline actions"
-              />
-            </div>
-          )}
         </div>
       </header>
 
