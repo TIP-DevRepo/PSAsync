@@ -14,7 +14,6 @@ import { opportunityDetailSelect, opportunityListSelect, STAGE_ORDER } from "@/l
 import {
   closedAtFor,
   INVALID_BODY_MESSAGE,
-  OPPORTUNITY_NOTES_MAX,
   OPPORTUNITY_SEARCH_MAX,
   OPPORTUNITY_TITLE_MAX,
   readDate,
@@ -109,8 +108,6 @@ export async function POST(req: NextRequest) {
 
   const title = readText(body.title, { label: "Title", max: OPPORTUNITY_TITLE_MAX, required: true })
   if (title.error !== undefined) return apiError(400, title.error)
-  const notes = readText(body.notes, { label: "Notes", max: OPPORTUNITY_NOTES_MAX })
-  if (notes.error !== undefined) return apiError(400, notes.error)
   const expectedValue = readExpectedValue(body.expectedValue)
   if (expectedValue.error !== undefined) return apiError(400, expectedValue.error)
   const expectedCloseDate = readDate(body.expectedCloseDate)
@@ -176,7 +173,6 @@ export async function POST(req: NextRequest) {
           source: "MANUAL",
           expectedValue: expectedValue.value,
           expectedCloseDate: expectedCloseDate.value,
-          notes: notes.value,
           stageChangedAt: now,
           closedAt: closedAtFor(chosenStage.category, now),
           createdById: ctx.userId,

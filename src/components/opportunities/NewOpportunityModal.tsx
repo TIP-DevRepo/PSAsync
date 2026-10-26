@@ -5,7 +5,7 @@ import { Modal } from "@/components/Modal"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
-import { OPPORTUNITY_NOTES_MAX, OPPORTUNITY_TITLE_MAX, readExpectedValue } from "@/lib/opportunity-rules"
+import { OPPORTUNITY_TITLE_MAX, readExpectedValue } from "@/lib/opportunity-rules"
 import { ownerFieldChoices, type StageOption, type TypeOption } from "@/lib/opportunity-view"
 import { useClientContacts } from "./useClientContacts"
 
@@ -41,7 +41,6 @@ export function NewOpportunityModal({
     typeId: "",
     expectedValue: "",
     expectedCloseDate: "",
-    notes: "",
   })
   const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({})
   const [saving, setSaving] = useState(false)
@@ -91,7 +90,6 @@ export function NewOpportunityModal({
         typeId: form.typeId || null,
         expectedValue: form.expectedValue.trim() || null,
         expectedCloseDate: form.expectedCloseDate || null,
-        notes: form.notes.trim() || null,
       }),
     })
     const data = await res.json().catch(() => ({}))
@@ -259,20 +257,6 @@ export function NewOpportunityModal({
               className={FIELD}
             />
           </div>
-        </div>
-
-        <div>
-          <label htmlFor="new-opportunity-notes" className={LABEL}>
-            Notes
-          </label>
-          <textarea
-            id="new-opportunity-notes"
-            value={form.notes}
-            maxLength={OPPORTUNITY_NOTES_MAX}
-            onChange={(e) => update("notes", e.target.value)}
-            rows={3}
-            className={FIELD}
-          />
         </div>
 
         <div className="flex justify-end gap-2">

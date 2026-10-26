@@ -16,7 +16,6 @@ import {
   INVALID_BODY_MESSAGE,
   isPrismaError,
   linkedRecordsMessage,
-  OPPORTUNITY_NOTES_MAX,
   OPPORTUNITY_TITLE_MAX,
   readDate,
   readExpectedValue,
@@ -83,11 +82,6 @@ export async function PATCH(
     const title = readText(body.title, { label: "Title", max: OPPORTUNITY_TITLE_MAX, required: true })
     if (title.error !== undefined) return apiError(400, title.error)
     data.title = title.value as string
-  }
-  if ("notes" in body) {
-    const notes = readText(body.notes, { label: "Notes", max: OPPORTUNITY_NOTES_MAX })
-    if (notes.error !== undefined) return apiError(400, notes.error)
-    data.notes = notes.value
   }
   if ("expectedValue" in body) {
     const expectedValue = readExpectedValue(body.expectedValue)

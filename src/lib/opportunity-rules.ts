@@ -4,7 +4,6 @@ import type { OpportunityStageCategory } from "@/generated/prisma"
 // database imports, so every rule here can be checked on its own.
 
 export const OPPORTUNITY_TITLE_MAX = 200
-export const OPPORTUNITY_NOTES_MAX = 10000
 // Stage and type names
 export const OPPORTUNITY_NAME_MAX = 100
 // The list's text search

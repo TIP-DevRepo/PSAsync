@@ -7,7 +7,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
-import { OPPORTUNITY_NOTES_MAX, OPPORTUNITY_TITLE_MAX, readExpectedValue } from "@/lib/opportunity-rules"
+import { OPPORTUNITY_TITLE_MAX, readExpectedValue } from "@/lib/opportunity-rules"
 import {
   contactName,
   formatCents,
@@ -27,7 +27,6 @@ import { useClientContacts } from "./useClientContacts"
 
 // GET /api/opportunities/[id] (opportunityDetailSelect)
 interface OpportunityDetailData extends OpportunityRow {
-  notes: string | null
   createdBy: { id: string; name: string } | null
   _count: { attachments: number; quotes: number; salesOrders: number; purchaseOrders: number }
 }
@@ -380,30 +379,6 @@ export function OpportunityDetail({ id }: { id: string }) {
                 <ReadOnly label="Expected value" value={o.expectedValue === null ? "-" : formatCents(valueCents(o.expectedValue))} />
                 <ReadOnly label="Expected close date" value={formatDateOnly(o.expectedCloseDate)} />
               </dl>
-            )}
-          </section>
-
-          <section aria-labelledby="opportunity-notes-heading" className="space-y-2 rounded-lg border border-border bg-card p-4 shadow-card">
-            <h2 id="opportunity-notes-heading" className="text-sm font-semibold text-foreground">
-              Notes
-            </h2>
-            {canEdit ? (
-              <textarea
-                key={`notes-${o.notes}`}
-                aria-labelledby="opportunity-notes-heading"
-                defaultValue={o.notes ?? ""}
-                maxLength={OPPORTUNITY_NOTES_MAX}
-                rows={5}
-                placeholder="Anything the team should know about this deal"
-                onBlur={(e) => {
-                  const notes = e.target.value.trim()
-                  if (notes === (o.notes ?? "")) return
-                  save({ notes: notes || null }, "notes")
-                }}
-                className={FIELD}
-              />
-            ) : (
-              <p className="whitespace-pre-wrap text-sm text-foreground">{o.notes || <span className="text-muted-foreground">No notes yet.</span>}</p>
             )}
           </section>
 

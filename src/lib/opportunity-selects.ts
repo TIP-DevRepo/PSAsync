@@ -28,7 +28,6 @@ export const opportunityListSelect = {
 // them, as the delete block counts them)
 export const opportunityDetailSelect = {
   ...opportunityListSelect,
-  notes: true,
   sourceTicketId: true,
   createdBy: userName,
   _count: { select: { attachments: true, quotes: true, salesOrders: true, purchaseOrders: true } },
