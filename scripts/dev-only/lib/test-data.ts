@@ -141,7 +141,7 @@ export function testNames(letter: TestLetter, marker: string) {
     // unassigned, each with an attachment row. Test Rep holds a second role
     // for them (the Opportunities page and create, no see all), Test Opp
     // Viewer only the Opportunities page, and Test Opp Settings only
-    // Opportunity Settings.
+    // Opportunity Settings (and the Settings page it sits on).
     adminOpportunity: `${marker} Sample Admin Opportunity ${letter}`,
     repOpportunity: `${marker} Sample Rep Opportunity ${letter}`,
     unassignedOpportunity: `${marker} Sample Unassigned Opportunity ${letter}`,
@@ -196,8 +196,9 @@ export const OPP_REP_PERMISSIONS = { pages: { opportunities: true }, opportuniti
 // Opp Viewer: only the Opportunities page
 export const OPP_VIEWER_PERMISSIONS = { pages: { opportunities: true } }
 
-// Opp Settings: only Opportunity Settings (stages, types, and settings)
-export const OPP_SETTINGS_PERMISSIONS = { settingsSections: { opportunities: true } }
+// Opp Settings: only Opportunity Settings (stages, types, and settings),
+// and the Settings page that section sits on (no API route reads it)
+export const OPP_SETTINGS_PERMISSIONS = { pages: { settings: true }, settingsSections: { opportunities: true } }
 
 const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
 
@@ -287,4 +288,6 @@ export interface PermissionFixtureIds {
   oppSettingsUserId: string
   // Every stage id in the company's order, for a reorder that changes nothing
   opportunityStageIds: string[]
+  // The same for the types
+  opportunityTypeIds: string[]
 }

@@ -731,6 +731,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         oppViewerUserId,
         oppSettingsUserId,
         opportunityStageIds: opportunityStages.map((stage) => stage.id),
+        opportunityTypeIds: opportunityTypes.map((type) => type.id),
       },
     }
   }

@@ -72,6 +72,18 @@
 // reads but can't create, edit, or delete, and Test Opp Settings B (only
 // Opportunity Settings) is the only one besides Global Admin whose stage,
 // type, and settings writes go through.
+//
+// Opportunities screens: checkOpportunityPages reads the Opportunities
+// page, an opportunity's page, and Settings > Opportunity Settings as HTML
+// with each user's session (Test Everyone B, Test Clerk B, and Test Opp
+// Settings B get no access to the opportunity pages; Test Everyone B, Test
+// Opp Viewer B, and Test Manager B, who opens Settings, to the section).
+// checkRelatedVisibility links the admin's sample quote and Test Rep B's
+// quote to the unassigned sample opportunity and checks the Related panel
+// lists only the ones each user may open, then unlinks them.
+// checkStageCategoryClosedAt has Test Opp Settings B move the first stage
+// to WON and back, checking closedAt is set and then cleared on the sample
+// opportunities in it, and puts the stage and dates back.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -390,6 +402,7 @@ const OPP_GUARDED: Guarded[] = [
   { name: "Edit an opportunity", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: () => ({ title: "Changed" }), expectError: "edit opportunities" },
   { name: "Delete an opportunity", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expectError: "delete opportunities" },
   { name: "Opportunity attachments", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expectError: "view opportunities" },
+  { name: "Opportunity related records", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expectError: "view opportunities" },
   { name: "Upload an opportunity attachment", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expectError: "edit opportunities" },
   { name: "Delete an opportunity attachment", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments/${c.fx.unassignedOpportunityAttachmentId}`, expectError: "edit opportunities" },
   { name: "Opportunity stages", method: "GET", path: () => "/api/opportunity-stages", expectError: "view opportunity stages" },
@@ -401,6 +414,7 @@ const OPP_GUARDED: Guarded[] = [
   { name: "Add an opportunity type", method: "POST", path: () => "/api/opportunity-types", body: () => ({ name: "Should Not Exist" }), expectError: OPP_SETTINGS_WRITE },
   { name: "Edit an opportunity type", method: "PATCH", path: (c) => `/api/opportunity-types/${c.b.opportunityTypeId}`, body: () => ({ name: "Changed" }), expectError: OPP_SETTINGS_WRITE },
   { name: "Delete an opportunity type", method: "DELETE", path: (c) => `/api/opportunity-types/${c.b.opportunityTypeId}`, expectError: OPP_SETTINGS_WRITE },
+  { name: "Reorder opportunity types", method: "POST", path: () => "/api/opportunity-types/reorder", body: (c) => ({ typeIds: [...c.fx.opportunityTypeIds].reverse() }), expectError: OPP_SETTINGS_WRITE },
   { name: "Opportunity settings", method: "GET", path: () => "/api/opportunity-settings", expectError: "view opportunity settings" },
   { name: "Edit opportunity settings", method: "PATCH", path: () => "/api/opportunity-settings", body: () => ({ prefix: "NOPE" }), expectError: OPP_SETTINGS_WRITE },
 ]
@@ -733,6 +747,9 @@ const ATTEMPTS: Attempt[] = [
   { name: "Rename a stage to its own name", actor: "oppSettings", kind: "control", method: "PATCH", path: (c) => `/api/opportunity-stages/${c.b.opportunityStageId}`, body: () => ({ name: "New" }), expect: 200, contains: (c) => [c.b.opportunityStageId] },
   { name: "Rename a type to its own name", actor: "oppSettings", kind: "control", method: "PATCH", path: (c) => `/api/opportunity-types/${c.b.opportunityTypeId}`, body: () => ({ name: "New Business" }), expect: 200, contains: (c) => [c.b.opportunityTypeId] },
   { name: "Reorder stages in their current order", actor: "oppSettings", kind: "control", method: "POST", path: () => "/api/opportunity-stages/reorder", body: (c) => ({ stageIds: c.fx.opportunityStageIds }), expect: 200, contains: (c) => [c.b.opportunityStageId] },
+  { name: "Reorder types in their current order", actor: "oppSettings", kind: "control", method: "POST", path: () => "/api/opportunity-types/reorder", body: (c) => ({ typeIds: c.fx.opportunityTypeIds }), expect: 200, contains: (c) => [c.b.opportunityTypeId] },
+  { name: "Own opportunity related records", actor: "rep", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}/related`, expect: 200, contains: () => ['"quotes"', '"salesOrders"', '"purchaseOrders"'] },
+  { name: "Unassigned opportunity related records", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 200, contains: () => ['"quotes"'] },
 
   // ── Test Everyone B: no permissions, refused everywhere ──
   { name: "List quotes", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/quotes", expect: 403, expectError: "permission" },
@@ -1051,6 +1068,7 @@ const ATTEMPTS: Attempt[] = [
   // nobody as owner, and no settings writes
   { name: "Open the admin's opportunity", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}`, expect: 404, expectError: "Not found" },
   { name: "The admin's opportunity attachments", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/attachments`, expect: 404, expectError: "Not found" },
+  { name: "The admin's opportunity related records", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/related`, expect: 404, expectError: "Not found" },
   { name: "Create an opportunity owned by the admin", actor: "rep", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.b.adminId }), expect: 403, expectError: "You can only assign opportunities to yourself or leave them unassigned" },
   { name: "Edit own opportunity", actor: "rep", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, body: () => ({ title: "Changed" }), expect: 403, expectError: "edit opportunities" },
   { name: "Delete own opportunity", actor: "rep", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, expect: 403, expectError: "delete opportunities" },
@@ -1085,6 +1103,7 @@ const ATTEMPTS: Attempt[] = [
   ...OPP_GUARDED.filter((g) => g.expectError === OPP_SETTINGS_WRITE).map(refusedFor("oppViewer")),
   // Test Opp Settings B (only Opportunity Settings): no opportunities themselves
   { name: "List opportunities", actor: "oppSettings", kind: "refused", method: "GET", path: () => "/api/opportunities", expect: 403, expectError: "view opportunities" },
+  { name: "Opportunity related records", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 403, expectError: "view opportunities" },
   { name: "Create an opportunity", actor: "oppSettings", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
 
   { name: "Disconnect someone else's shared mailbox", actor: "sender", kind: "refused", sharedMode: "admin", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
@@ -1213,12 +1232,14 @@ async function ensureViewerFixture(prisma: PrismaClient, run: RunData) {
 }
 
 // Test Manager B inside Test Company B: manages users (Manage Users) but
-// is not a Global Admin, for the invite rank rule. Made for this run,
+// is not a Global Admin, for the invite rank rule. It also opens the
+// Settings page (no API route reads pages.settings), so the page checks
+// see a Settings user without Opportunity Settings. Made for this run,
 // password in memory only.
 async function ensureManagerFixture(prisma: PrismaClient, run: RunData) {
   const n = run.companies.B.names
   const companyId = run.companies.B.ids.companyId
-  const managerPermissions = { settingsSections: { users: true } }
+  const managerPermissions = { pages: { settings: true }, settingsSections: { users: true } }
 
   const roleId = await addRunRole(prisma, run, { companyId, name: n.managerRole, rank: 5, permissions: managerPermissions })
   await addRunUser(prisma, run, { companyId, name: n.managerName, email: n.managerEmail, roleIds: [roleId] })
@@ -1563,6 +1584,137 @@ async function checkSalesOrderLinkedPurchaseOrders(prisma: PrismaClient, admin: 
   }
 }
 
+// Page guards for the Opportunities screens. Pages answer 200 either way,
+// so each one is read as HTML with the user's session: a refused page holds
+// the NoAccess text (rendered on the server), an allowed one doesn't. The
+// Settings page lists only the sections a user may use, so Opportunity
+// Settings is allowed when its entry is listed. (Its ?panel= link is applied
+// in the browser, so the server's HTML shows the first listed section.)
+const NO_ACCESS_PAGE = "You do not have access to this page"
+const OPP_SETTINGS_ENTRY = "Opportunity Settings"
+
+async function checkOpportunityPages(sessions: Record<Actor, Session>, labels: Record<Actor, string>, ctx: AttemptContext, rows: Row[]) {
+  const pages: { name: string; path: string; allowed: Actor[]; refused: Actor[]; settings?: true }[] = [
+    { name: "Opportunities page", path: "/dashboard/opportunities?view=list", allowed: ["admin", "rep", "oppViewer"], refused: ["everyone", "oppSettings", "clerk"] },
+    {
+      name: "Opportunity page",
+      path: `/dashboard/opportunities/${ctx.fx.unassignedOpportunityId}`,
+      allowed: ["admin", "rep", "oppViewer"],
+      refused: ["everyone", "oppSettings", "clerk"],
+    },
+    // Test Manager B opens Settings without Opportunity Settings
+    { name: "Settings > Opportunity Settings", path: "/dashboard/settings?panel=opportunities", allowed: ["admin", "oppSettings"], refused: ["everyone", "manager", "oppViewer"], settings: true },
+  ]
+  for (const page of pages) {
+    for (const [actor, allowed] of [...page.allowed.map((a) => [a, true] as const), ...page.refused.map((a) => [a, false] as const)]) {
+      const res = await sessions[actor].request("GET", page.path)
+      const pageRefused = res.text.includes(NO_ACCESS_PAGE)
+      const opens = !pageRefused && (!page.settings || res.text.includes(OPP_SETTINGS_ENTRY))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}${res.location ? ` to ${res.location}` : ""}`
+          : allowed && !opens
+            ? pageRefused
+              ? "the page shows no access"
+              : "the Opportunity Settings section is not listed"
+            : !allowed && opens
+              ? "the page opened"
+              : null
+      rows.push({
+        attempt: `[${labels[actor]}] ${page.name}`,
+        expected: allowed ? "200, opens" : "200, no access",
+        actual: res.status === 200 ? (opens ? "200, opens" : "200, no access") : String(res.status),
+        result: problem ? "FAIL" : "PASS",
+        note: problem ?? undefined,
+      })
+    }
+  }
+}
+
+// The Related panel lists only what the user may open. The admin's sample
+// quote and Test Rep B's quote are linked to the unassigned sample
+// opportunity for the step and unlinked afterwards. Test Admin B (Global
+// Admin) sees both, Test Rep B (own quotes only) only its own, and Test
+// Opp Viewer B (no Quotes page) neither.
+async function checkRelatedVisibility(prisma: PrismaClient, sessions: Record<Actor, Session>, labels: Record<Actor, string>, ctx: AttemptContext, rows: Row[]) {
+  const opportunityId = ctx.fx.unassignedOpportunityId
+  const adminQuoteId = ctx.b.quoteId
+  const repQuoteId = ctx.fx.repQuoteId
+  const original = await prisma.quote.findMany({ where: { id: { in: [adminQuoteId, repQuoteId] } }, select: { id: true, opportunityId: true } })
+  try {
+    await prisma.quote.updateMany({ where: { id: { in: [adminQuoteId, repQuoteId] } }, data: { opportunityId } })
+
+    const cases: { actor: Actor; sees: string[]; hidden: string[] }[] = [
+      { actor: "admin", sees: [adminQuoteId, repQuoteId], hidden: [] },
+      { actor: "rep", sees: [repQuoteId], hidden: [adminQuoteId] },
+      { actor: "oppViewer", sees: [], hidden: [adminQuoteId, repQuoteId] },
+    ]
+    for (const c of cases) {
+      const res = await sessions[c.actor].request("GET", `/api/opportunities/${opportunityId}/related`)
+      let quoteIds: string[] | null = null
+      try {
+        quoteIds = ((JSON.parse(res.text) as { quotes?: { id: string }[] }).quotes ?? []).map((q) => q.id)
+      } catch {
+        // reported below
+      }
+      const missing = c.sees.filter((id) => !quoteIds?.includes(id))
+      const leaked = c.hidden.filter((id) => res.text.includes(id))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : quoteIds === null
+            ? "no quotes list in the response"
+            : leaked.length > 0
+              ? `shows a quote the user may not open (${leaked.join(", ")})`
+              : missing.length > 0
+                ? `missing a linked quote the user may open (${missing.join(", ")})`
+                : null
+      rows.push({
+        attempt: `[${labels[c.actor]}] Related panel lists only quotes it may open`,
+        expected: `200 with ${c.sees.length} linked quote${c.sees.length === 1 ? "" : "s"}`,
+        actual: String(res.status),
+        result: problem ? "FAIL" : "PASS",
+        note: problem ?? undefined,
+      })
+    }
+  } finally {
+    for (const q of original) await prisma.quote.update({ where: { id: q.id }, data: { opportunityId: q.opportunityId } })
+  }
+}
+
+// A stage's category change sets or clears closedAt on its opportunities.
+// Test Opp Settings B moves the company's first stage (New, OPEN, where
+// all three sample opportunities sit, and not the quote sent stage) to WON
+// and back. The stage and every closedAt are put back afterwards.
+async function checkStageCategoryClosedAt(prisma: PrismaClient, oppSettings: Session, ctx: AttemptContext, rows: Row[]) {
+  const stageId = ctx.fx.opportunityStageIds[0]
+  const label = (name: string) => `[Opp Settings B] Stage category change: ${name}`
+  const stage = await prisma.opportunityStage.findUniqueOrThrow({ where: { id: stageId }, select: { category: true } })
+  const settings = await prisma.opportunitySettings.findUniqueOrThrow({ where: { companyId: ctx.b.companyId }, select: { quoteSentStageId: true } })
+  const original = await prisma.opportunity.findMany({ where: { companyId: ctx.b.companyId, stageId }, select: { id: true, closedAt: true } })
+  if (stage.category !== "OPEN" || settings.quoteSentStageId === stageId || original.length === 0) {
+    rows.push({ attempt: label("fixture"), expected: "an OPEN stage with opportunities", actual: stage.category, result: "UNEXPECTED", note: "the first stage isn't as the run data set it up" })
+    return
+  }
+  const ids = original.map((o) => o.id)
+  try {
+    const toWon = await oppSettings.request("PATCH", `/api/opportunity-stages/${stageId}`, { json: { category: "WON" } })
+    const closed = await prisma.opportunity.findMany({ where: { id: { in: ids } }, select: { closedAt: true } })
+    const wonProblem =
+      toWon.status !== 200 ? `got ${toWon.status}: ${errorText(toWon.text)}` : closed.some((o) => o.closedAt === null) ? "an opportunity in the stage has no closedAt" : null
+    rows.push({ attempt: label("OPEN to WON sets closedAt"), expected: `200, ${ids.length} closed`, actual: String(toWon.status), result: wonProblem ? "FAIL" : "PASS", note: wonProblem ?? undefined })
+
+    const toOpen = await oppSettings.request("PATCH", `/api/opportunity-stages/${stageId}`, { json: { category: "OPEN" } })
+    const reopened = await prisma.opportunity.findMany({ where: { id: { in: ids } }, select: { closedAt: true } })
+    const openProblem =
+      toOpen.status !== 200 ? `got ${toOpen.status}: ${errorText(toOpen.text)}` : reopened.some((o) => o.closedAt !== null) ? "an opportunity in the stage still has a closedAt" : null
+    rows.push({ attempt: label("WON back to OPEN clears closedAt"), expected: `200, ${ids.length} open`, actual: String(toOpen.status), result: openProblem ? "FAIL" : "PASS", note: openProblem ?? undefined })
+  } finally {
+    await prisma.opportunityStage.update({ where: { id: stageId }, data: { category: "OPEN" } })
+    for (const o of original) await prisma.opportunity.update({ where: { id: o.id }, data: { closedAt: o.closedAt } })
+  }
+}
+
 // Every line field a copy carries over (all but id, quoteId, createdAt)
 const COPIED_LINE_FIELDS = [
   "catalogItemId", "section", "sortOrder", "name", "description", "sku", "quantity", "unitPrice", "cost", "discount", "taxable",
@@ -1873,6 +2025,12 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
 
     // Quote correctness: copies reproduce every line and get the chosen client
     await checkQuoteCopy(prisma, sessions.admin, sessions.rep, ctx, rows)
+
+    // Opportunities screens: page guards, the Related panel's visibility,
+    // and closedAt following a stage's category
+    await checkOpportunityPages(sessions, ACTOR_LABEL, ctx, rows)
+    await checkRelatedVisibility(prisma, sessions, ACTOR_LABEL, ctx, rows)
+    await checkStageCategoryClosedAt(prisma, sessions.oppSettings, ctx, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
