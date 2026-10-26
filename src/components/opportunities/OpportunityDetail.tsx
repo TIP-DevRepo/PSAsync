@@ -17,7 +17,6 @@ import {
   formatDate,
   formatDateOnly,
   addressLines,
-  mainClientLocation,
   ownerFieldChoices,
   type ClientLocationSummary,
   valueCents,
@@ -25,6 +24,7 @@ import {
   type StageOption,
   type TypeOption,
 } from "@/lib/opportunity-view"
+import { mainClientLocation } from "@/lib/client-main-location"
 import { StagePill } from "./StagePill"
 import { OpportunityRelatedPanel } from "./OpportunityRelatedPanel"
 import { OpportunityAttachments } from "./OpportunityAttachments"

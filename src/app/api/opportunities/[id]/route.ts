@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import {
   assertRefs,
+  loadClientMainLocationId,
   mayAssignOpportunityTo,
   opportunityStageWhere,
   opportunityWhere,
@@ -124,6 +125,16 @@ export async function PATCH(
     if (isBlank(body.stageId)) return apiError(400, "A stage is required")
     refs.opportunityStageId = body.stageId
   }
+  // A location of the opportunity's client (new or kept). Null or blank
+  // clears it.
+  if ("clientLocationId" in body) {
+    const location = readOptionalId(body.clientLocationId)
+    if (location.error !== undefined) return apiError(400, "Invalid location", "INVALID_REFERENCE")
+    data.clientLocationId = location.value
+    refs.clientLocationId = location.value
+    refs.clientId = "clientId" in body ? body.clientId : existing.clientId
+  }
+
   if ("typeId" in body) {
     const type = readOptionalId(body.typeId)
     if (type.error !== undefined) return apiError(400, "Invalid opportunity type", "INVALID_REFERENCE")
@@ -133,6 +144,11 @@ export async function PATCH(
 
   const invalid = await assertRefs(ctx, refs)
   if (invalid) return invalid
+
+  // A new client without a location takes the new client's main location
+  if ("clientId" in body && body.clientId !== existing.clientId && !("clientLocationId" in body)) {
+    data.clientLocationId = await loadClientMainLocationId(ctx, body.clientId as string)
+  }
 
   // Moving to another stage stamps stageChangedAt and sets or clears closedAt
   if ("stageId" in body) {

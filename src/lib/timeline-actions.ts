@@ -13,6 +13,7 @@ export const TIMELINE_ACTIONS = [
   "type_changed",
   "client_changed",
   "contact_changed",
+  "location_changed",
   "title_changed",
   "expected_value_changed",
   "expected_close_date_changed",
@@ -37,6 +38,7 @@ export interface TimelineActionData {
   type_changed: { from: TimelineRef | null; to: TimelineRef | null }
   client_changed: { from: TimelineRef | null; to: TimelineRef | null }
   contact_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  location_changed: { from: TimelineRef | null; to: TimelineRef | null }
   title_changed: { from: string | null; to: string | null }
   // Decimal text, for example "1250.5"
   expected_value_changed: { from: string | null; to: string | null }
@@ -119,6 +121,8 @@ export function describeTimelineAction(action: string | null, data: unknown): st
       return `Client changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
     case "contact_changed":
       return `Contact changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
+    case "location_changed":
+      return `Location changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
     case "title_changed":
       return `Title changed from "${text(d.from, "")}" to "${text(d.to, "")}"`
     case "expected_value_changed":

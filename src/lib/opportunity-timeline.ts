@@ -14,6 +14,7 @@ export const opportunityTimelineSnapshotSelect = {
   expectedCloseDate: true,
   client: { select: { id: true, name: true } },
   contact: { select: { id: true, firstName: true, lastName: true } },
+  clientLocation: { select: { id: true, name: true } },
   owner: { select: { id: true, name: true } },
   stage: { select: { id: true, name: true } },
   type: { select: { id: true, name: true } },
@@ -29,6 +30,7 @@ export interface OpportunitySnapshot {
   expectedCloseDate: Date | null
   client: { id: string; name: string }
   contact: { id: string; firstName: string; lastName: string }
+  clientLocation: { id: string; name: string } | null
   owner: { id: string; name: string } | null
   stage: { id: string; name: string }
   type: { id: string; name: string } | null
@@ -55,6 +57,9 @@ export function opportunityChangeActions(before: OpportunitySnapshot, after: Opp
   if (before.client.id !== after.client.id) actions.push({ action: "client_changed", data: { from: ref(before.client), to: ref(after.client) } })
   if (before.contact.id !== after.contact.id) {
     actions.push({ action: "contact_changed", data: { from: contactRef(before.contact), to: contactRef(after.contact) } })
+  }
+  if ((before.clientLocation?.id ?? null) !== (after.clientLocation?.id ?? null)) {
+    actions.push({ action: "location_changed", data: { from: ref(before.clientLocation), to: ref(after.clientLocation) } })
   }
   if (before.title !== after.title) actions.push({ action: "title_changed", data: { from: before.title, to: after.title } })
   if (valueText(before.expectedValue) !== valueText(after.expectedValue)) {

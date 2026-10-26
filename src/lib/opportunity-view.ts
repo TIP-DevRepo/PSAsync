@@ -308,22 +308,15 @@ export function contactName(contact: { firstName: string; lastName: string }): s
 // ─── Client details ─────────────────────────────────────────────────────────
 
 export interface ClientLocationSummary {
+  id: string
   name: string
+  isPrimary?: boolean
   address: string | null
   address2: string | null
   city: string | null
   state: string | null
   zip: string | null
   country: string | null
-}
-
-// The client's main location for the Client details section: its primary
-// location, else its main billing location, else none
-export function mainClientLocation(client: {
-  locations?: ClientLocationSummary[]
-  mainBillingLocation?: ClientLocationSummary | null
-}): ClientLocationSummary | null {
-  return client.locations?.[0] ?? client.mainBillingLocation ?? null
 }
 
 // A location's address as lines (street, second line, "City, ST 12345",

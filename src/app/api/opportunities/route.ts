@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
 import {
   assertRefs,
+  loadClientMainLocationId,
   mayAssignOpportunityTo,
   opportunityListWhere,
   opportunityStageWhere,
@@ -143,6 +144,10 @@ export async function POST(req: NextRequest) {
   if (stage.error !== undefined) return apiError(400, "Invalid stage", "INVALID_REFERENCE")
   const type = readOptionalId(body.typeId)
   if (type.error !== undefined) return apiError(400, "Invalid opportunity type", "INVALID_REFERENCE")
+  // Left out, the client's main location; null or blank, no location
+  const hasLocation = "clientLocationId" in body
+  const location = readOptionalId(body.clientLocationId)
+  if (location.error !== undefined) return apiError(400, "Invalid location", "INVALID_REFERENCE")
 
   // The contact must belong to the client, the owner must be an active user
   // here, and the stage and type this company's
@@ -150,12 +155,15 @@ export async function POST(req: NextRequest) {
     clientId: body.clientId,
     contactId: body.contactId,
     userId: ownerId,
+    // A location of this client
+    clientLocationId: location.value,
     opportunityStageId: stage.value,
     opportunityTypeId: type.value,
   })
   if (invalid) return invalid
   const clientId = body.clientId as string
   const contactId = body.contactId as string
+  const clientLocationId = hasLocation ? location.value : await loadClientMainLocationId(ctx, clientId)
 
   // The named stage, else the first OPEN stage in the company's order
   const chosenStage = await prisma.opportunityStage.findFirst({
@@ -176,6 +184,7 @@ export async function POST(req: NextRequest) {
           title: title.value as string,
           clientId,
           contactId,
+          clientLocationId,
           ownerId,
           stageId: chosenStage.id,
           typeId: type.value,
