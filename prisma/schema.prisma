@@ -250,6 +250,9 @@ model ClientLocation {
   // Back-relation for Contact.location — contacts who work at this site
   contactsBasedHere Contact[]
 
+  // Opportunities at this location
+  opportunities Opportunity[]
+
   // Every Container built under this site — the reverse side of
   // InventoryLocation.clientLocationId below.
   containers InventoryLocation[] @relation("InventoryLocationSite")
@@ -1585,6 +1588,11 @@ model Opportunity {
   // Always a contact of clientId, checked by the API
   contactId         String
   contact           Contact           @relation(fields: [contactId], references: [id])
+  // A location of clientId, by default the client's main location (its
+  // primary location, else its main billing location; see
+  // src/lib/client-main-location.ts). Null when the client has none.
+  clientLocationId  String?
+  clientLocation    ClientLocation?   @relation(fields: [clientLocationId], references: [id], onDelete: SetNull)
   // Null means unassigned
   ownerId           String?
   owner             User?             @relation("OpportunityOwner", fields: [ownerId], references: [id])
@@ -1618,6 +1626,7 @@ model Opportunity {
   @@index([stageId])
   @@index([ownerId])
   @@index([clientId])
+  @@index([clientLocationId])
 }
 
 // ─── OPPORTUNITY ATTACHMENTS ──────────────────────────────────────────────
