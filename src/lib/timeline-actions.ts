@@ -48,6 +48,18 @@ export interface TimelineActionData {
 
 export type TimelineAction = { [K in TimelineActionKey]: { action: K; data: TimelineActionData[K] } }[TimelineActionKey]
 
+// True when HTML holds no text at all once its tags are removed (the editor
+// sends "<p></p>" for an empty note). The server checks the sanitized body;
+// the composer uses it to keep Add note disabled.
+export function isBlankHtml(html: string): boolean {
+  return (
+    html
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;|&#160;|&#xa0;/gi, " ")
+      .trim() === ""
+  )
+}
+
 // ─── Sentences ──────────────────────────────────────────────────────────────
 
 const obj = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {})

@@ -9,6 +9,10 @@ interface RichTextEditorProps {
   value: string
   onChange: (html: string) => void
   onBlur?: () => void
+  // About 9 lines tall instead of 6, for long notes
+  tall?: boolean
+  // The editor has no visible label of its own
+  ariaLabel?: string
 }
 
 function ToolbarButton({
@@ -40,7 +44,7 @@ function ToolbarButton({
 // Tiptap-based rich text editor. Value/onChange carry HTML strings, since
 // that's what every consumer of terms text (PDF generation, the client
 // portal) needs to render formatting at all.
-export function RichTextEditor({ value, onChange, onBlur }: RichTextEditorProps) {
+export function RichTextEditor({ value, onChange, onBlur, tall = false, ariaLabel }: RichTextEditorProps) {
   const editor = useEditor({
     extensions: [StarterKit],
     content: value || "",
@@ -49,8 +53,10 @@ export function RichTextEditor({ value, onChange, onBlur }: RichTextEditorProps)
     onBlur: () => onBlur?.(),
     editorProps: {
       attributes: {
+        ...(ariaLabel ? { "aria-label": ariaLabel } : {}),
         class:
-          "min-h-[8rem] text-sm text-foreground focus:outline-none " +
+          (tall ? "min-h-[13rem] " : "min-h-[8rem] ") +
+          "text-sm text-foreground focus:outline-none " +
           "[&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0",
       },
     },

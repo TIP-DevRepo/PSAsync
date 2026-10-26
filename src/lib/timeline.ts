@@ -1,6 +1,6 @@
 import type { Prisma } from "@/generated/prisma"
 import { termsForStorage, termsToDisplayHtml } from "@/lib/sanitize-terms"
-import type { TimelineAction } from "@/lib/timeline-actions"
+import { isBlankHtml, type TimelineAction } from "@/lib/timeline-actions"
 
 // Server side helpers every timeline uses (opportunities now, tickets
 // later): recording ACTION entries inside the caller's transaction, reading
@@ -46,16 +46,8 @@ export async function recordTimelineActions(
   })
 }
 
-// True when HTML holds no text at all once its tags are removed (the editor
-// sends "<p></p>" for an empty note)
-export function isBlankHtml(html: string): boolean {
-  return (
-    html
-      .replace(/<[^>]*>/g, "")
-      .replace(/&nbsp;|&#160;|&#xa0;/gi, " ")
-      .trim() === ""
-  )
-}
+// Lives with the action sentences so the note composer can use it too
+export { isBlankHtml }
 
 // A note body from a request, sanitized for storage with the same sanitizer
 // as quote terms (src/lib/sanitize-terms.ts), or why it can't be saved
