@@ -84,6 +84,16 @@
 // checkStageCategoryClosedAt has Test Opp Settings B move the first stage
 // to WON and back, checking closedAt is set and then cleared on the sample
 // opportunities in it, and puts the stage and dates back.
+//
+// Timeline: every timeline route is refused for Test Everyone B, reading
+// needs the Opportunities page and the opportunity view check, and adding a
+// note needs opportunities.edit (Test Rep B and Test Opp Viewer B are
+// refused). Test Admin B, a Global Admin, still can't edit or delete Test
+// Rep B's sample note, and nobody can edit or delete an action entry.
+// checkTimeline has Test Admin B add a note holding a script tag (stored
+// and returned without it), edit and delete it, and checks that a stage
+// change through PATCH adds exactly one stage_changed entry and a PATCH
+// that changes nothing adds none, then puts everything back.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -403,6 +413,10 @@ const OPP_GUARDED: Guarded[] = [
   { name: "Delete an opportunity", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expectError: "delete opportunities" },
   { name: "Opportunity attachments", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expectError: "view opportunities" },
   { name: "Opportunity related records", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expectError: "view opportunities" },
+  { name: "Opportunity timeline", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, expectError: "view opportunities" },
+  { name: "Add an opportunity note", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expectError: "edit opportunities" },
+  { name: "Edit an opportunity note", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedAdminNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expectError: "edit opportunities" },
+  { name: "Delete an opportunity note", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedAdminNoteId}`, expectError: "edit opportunities" },
   { name: "Upload an opportunity attachment", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expectError: "edit opportunities" },
   { name: "Delete an opportunity attachment", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments/${c.fx.unassignedOpportunityAttachmentId}`, expectError: "edit opportunities" },
   { name: "Opportunity stages", method: "GET", path: () => "/api/opportunity-stages", expectError: "view opportunity stages" },
@@ -749,6 +763,7 @@ const ATTEMPTS: Attempt[] = [
   { name: "Reorder stages in their current order", actor: "oppSettings", kind: "control", method: "POST", path: () => "/api/opportunity-stages/reorder", body: (c) => ({ stageIds: c.fx.opportunityStageIds }), expect: 200, contains: (c) => [c.b.opportunityStageId] },
   { name: "Reorder types in their current order", actor: "oppSettings", kind: "control", method: "POST", path: () => "/api/opportunity-types/reorder", body: (c) => ({ typeIds: c.fx.opportunityTypeIds }), expect: 200, contains: (c) => [c.b.opportunityTypeId] },
   { name: "Own opportunity related records", actor: "rep", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}/related`, expect: 200, contains: () => ['"quotes"', '"salesOrders"', '"purchaseOrders"'] },
+  { name: "Unassigned opportunity timeline", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, expect: 200, contains: (c) => [c.fx.unassignedRepNoteId, c.fx.unassignedAdminNoteId, c.fx.unassignedActionId] },
   { name: "Unassigned opportunity related records", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 200, contains: () => ['"quotes"'] },
 
   // ── Test Everyone B: no permissions, refused everywhere ──
@@ -1068,6 +1083,8 @@ const ATTEMPTS: Attempt[] = [
   // nobody as owner, and no settings writes
   { name: "Open the admin's opportunity", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}`, expect: 404, expectError: "Not found" },
   { name: "The admin's opportunity attachments", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/attachments`, expect: 404, expectError: "Not found" },
+  { name: "The admin's opportunity timeline", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/timeline`, expect: 404, expectError: "Not found" },
+  { name: "Add a note to own opportunity (no edit)", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expect: 403, expectError: "edit opportunities" },
   { name: "The admin's opportunity related records", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/related`, expect: 404, expectError: "Not found" },
   { name: "Create an opportunity owned by the admin", actor: "rep", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.b.adminId }), expect: 403, expectError: "You can only assign opportunities to yourself or leave them unassigned" },
   { name: "Edit own opportunity", actor: "rep", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, body: () => ({ title: "Changed" }), expect: 403, expectError: "edit opportunities" },
@@ -1103,6 +1120,17 @@ const ATTEMPTS: Attempt[] = [
   ...OPP_GUARDED.filter((g) => g.expectError === OPP_SETTINGS_WRITE).map(refusedFor("oppViewer")),
   // Test Opp Settings B (only Opportunity Settings): no opportunities themselves
   { name: "List opportunities", actor: "oppSettings", kind: "refused", method: "GET", path: () => "/api/opportunities", expect: 403, expectError: "view opportunities" },
+  { name: "Opportunity timeline", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, expect: 403, expectError: "view opportunities" },
+  { name: "Add an opportunity note", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expect: 403, expectError: "edit opportunities" },
+  // Timeline notes: only their author edits or deletes them (Global Admin
+  // included), and recorded actions never change
+  { name: "Edit another user's note", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedRepNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 403, expectError: "your own notes" },
+  { name: "Delete another user's note", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedRepNoteId}`, expect: 403, expectError: "your own notes" },
+  { name: "Edit an action entry", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedActionId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 403, expectError: "Only notes" },
+  { name: "Delete an action entry", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedActionId}`, expect: 403, expectError: "Only notes" },
+  { name: "Save own note empty", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedAdminNoteId}`, body: () => ({ body: "<p></p>" }), expect: 400, expectError: "can't be empty" },
+  { name: "Note under another opportunity", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.b.opportunityId}/timeline/${c.fx.unassignedAdminNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 404, expectError: "Not found" },
+  { name: "Timeline page with another opportunity's cursor", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/timeline?cursor=${c.fx.unassignedAdminNoteId}`, expect: 400, expectError: "Invalid cursor" },
   { name: "Opportunity related records", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 403, expectError: "view opportunities" },
   { name: "Create an opportunity", actor: "oppSettings", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
 
@@ -1184,7 +1212,7 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
       select: { id: true, name: true, active: true, roleId: true, loginLockedUntil: true },
     }),
     notifications: prisma.notification.count({ where: { companyId: b } }),
-    opportunities: prisma.opportunity.findMany({ where: { companyId: b }, ...byId, include: { attachments: byId } }),
+    opportunities: prisma.opportunity.findMany({ where: { companyId: b }, ...byId, include: { attachments: byId, timeline: byId } }),
     opportunityStages: prisma.opportunityStage.findMany({ where: { companyId: b }, ...byId }),
     opportunityTypes: prisma.opportunityType.findMany({ where: { companyId: b }, ...byId }),
     opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId: b } }),
@@ -1715,6 +1743,80 @@ async function checkStageCategoryClosedAt(prisma: PrismaClient, oppSettings: Ses
   }
 }
 
+// The opportunity timeline, on the unassigned sample opportunity as Test
+// Admin B: a note holding a script tag is stored and returned without it,
+// its author edits it (editedAt set) and deletes it, a stage change through
+// PATCH adds exactly one stage_changed entry, and a PATCH that changes
+// nothing adds none. The stage, its dates, and every entry the step added
+// are put back afterwards.
+async function checkTimeline(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const opportunityId = ctx.fx.unassignedOpportunityId
+  const base = `/api/opportunities/${opportunityId}`
+  const label = (name: string) => `[Admin B] Timeline: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const startedAt = new Date()
+  const original = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { stageId: true, stageChangedAt: true, closedAt: true, title: true } })
+  const otherStageId = ctx.fx.opportunityStageIds.find((s) => s !== original.stageId)
+  const count = (where: Prisma.TimelineEntryWhereInput = {}) => prisma.timelineEntry.count({ where: { opportunityId, ...where } })
+  let noteId: string | null = null
+  try {
+    // A script tag is stripped on save and on the way out, the text kept
+    const add = await admin.request("POST", `${base}/timeline`, { json: { body: "<p>Dev check note</p><script>window.devCheck = 1</script>" } })
+    noteId = add.status === 200 ? ((JSON.parse(add.text) as { id?: string }).id ?? null) : null
+    const stored = noteId ? await prisma.timelineEntry.findUnique({ where: { id: noteId }, select: { body: true, kind: true, authorId: true } }) : null
+    push(
+      "a note with a script tag is saved without it",
+      "200, no script stored or returned",
+      String(add.status),
+      add.status !== 200 || !stored
+        ? `got ${add.status}: ${errorText(add.text)}`
+        : /<script/i.test(stored.body ?? "") || /<script/i.test(add.text)
+          ? "the script tag was kept"
+          : !(stored.body ?? "").includes("Dev check note")
+            ? "the note text was lost"
+            : stored.kind !== "NOTE" || stored.authorId !== ctx.b.adminId
+              ? "not saved as the admin's note"
+              : null
+    )
+    if (!noteId) return
+
+    const listed = await admin.request("GET", `${base}/timeline`)
+    push("the timeline returns it first, without the script", "200, the new note first", String(listed.status),
+      listed.status !== 200 ? `got ${listed.status}` : /<script/i.test(listed.text) ? "a script tag was returned" : (JSON.parse(listed.text) as { entries: { id: string }[] }).entries[0]?.id !== noteId ? "the new note is not first" : null)
+
+    const edit = await admin.request("PATCH", `${base}/timeline/${noteId}`, { json: { body: "<p>Dev check note, edited</p>" } })
+    const edited = await prisma.timelineEntry.findUnique({ where: { id: noteId }, select: { body: true, editedAt: true } })
+    push("its author edits it", "200, editedAt set", String(edit.status),
+      edit.status !== 200 ? `got ${edit.status}: ${errorText(edit.text)}` : !edited?.editedAt || !edited.body?.includes("edited") ? "the edit was not saved" : null)
+
+    const del = await admin.request("DELETE", `${base}/timeline/${noteId}`)
+    const gone = (await prisma.timelineEntry.count({ where: { id: noteId } })) === 0
+    push("its author deletes it", "200, gone", String(del.status), del.status !== 200 ? `got ${del.status}: ${errorText(del.text)}` : !gone ? "the note is still there" : null)
+    if (gone) noteId = null
+
+    if (otherStageId) {
+      const beforeAll = await count()
+      const beforeStage = await count({ action: "stage_changed" })
+      const move = await admin.request("PATCH", base, { json: { stageId: otherStageId } })
+      const addedAll = (await count()) - beforeAll
+      const addedStage = (await count({ action: "stage_changed" })) - beforeStage
+      push("a stage change adds one stage_changed entry", "200, exactly 1 entry", `${move.status}, ${addedAll} added`,
+        move.status !== 200 ? `got ${move.status}: ${errorText(move.text)}` : addedAll !== 1 || addedStage !== 1 ? `added ${addedAll} entries, ${addedStage} stage_changed` : null)
+    }
+
+    const beforeSame = await count()
+    const same = await admin.request("PATCH", base, { json: { title: original.title } })
+    const addedSame = (await count()) - beforeSame
+    push("a PATCH that changes nothing adds none", "200, 0 entries", `${same.status}, ${addedSame} added`,
+      same.status !== 200 ? `got ${same.status}: ${errorText(same.text)}` : addedSame !== 0 ? `added ${addedSame} entries` : null)
+  } finally {
+    if (noteId) await prisma.timelineEntry.deleteMany({ where: { id: noteId } })
+    await prisma.timelineEntry.deleteMany({ where: { opportunityId, kind: "ACTION", createdAt: { gte: startedAt } } })
+    await prisma.opportunity.update({ where: { id: opportunityId }, data: { stageId: original.stageId, stageChangedAt: original.stageChangedAt, closedAt: original.closedAt } })
+  }
+}
+
 // Every line field a copy carries over (all but id, quoteId, createdAt)
 const COPIED_LINE_FIELDS = [
   "catalogItemId", "section", "sortOrder", "name", "description", "sku", "quantity", "unitPrice", "cost", "discount", "taxable",
@@ -2031,6 +2133,7 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await checkOpportunityPages(sessions, ACTOR_LABEL, ctx, rows)
     await checkRelatedVisibility(prisma, sessions, ACTOR_LABEL, ctx, rows)
     await checkStageCategoryClosedAt(prisma, sessions.oppSettings, ctx, rows)
+    await checkTimeline(prisma, sessions.admin, ctx, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length

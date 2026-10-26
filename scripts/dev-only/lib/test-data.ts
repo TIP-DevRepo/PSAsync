@@ -146,6 +146,9 @@ export function testNames(letter: TestLetter, marker: string) {
     repOpportunity: `${marker} Sample Rep Opportunity ${letter}`,
     unassignedOpportunity: `${marker} Sample Unassigned Opportunity ${letter}`,
     opportunityAttachmentPrefix: `${marker}-sample-opportunity-${lower}`,
+    // Each sample opportunity's timeline holds two actions and two notes
+    // starting with this text, one by the admin and one by Test Rep
+    timelineNotePrefix: `${marker} Sample note ${letter}`,
     oppRepRole: `${marker} Opportunity Rep ${letter}`,
     oppViewerName: `${marker} Test Opp Viewer ${letter}`,
     oppViewerEmail: email("opp-viewer"),
@@ -250,6 +253,9 @@ export interface SampleIds {
   opportunityAttachmentId: string
   opportunityStageId: string
   opportunityTypeId: string
+  // On the admin's opportunity: its created action and the admin's note
+  timelineActionId: string
+  timelineNoteId: string
 }
 
 export interface PermissionFixtureIds {
@@ -290,4 +296,9 @@ export interface PermissionFixtureIds {
   opportunityStageIds: string[]
   // The same for the types
   opportunityTypeIds: string[]
+  // On the unassigned opportunity: its created action, the admin's note,
+  // and Test Rep's note
+  unassignedActionId: string
+  unassignedAdminNoteId: string
+  unassignedRepNoteId: string
 }
