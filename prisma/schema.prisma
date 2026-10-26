@@ -49,6 +49,7 @@ model Company {
   opportunityStages       OpportunityStage[]
   opportunityTypes        OpportunityType[]
   opportunitySettings     OpportunitySettings?
+  timelineEntries         TimelineEntry[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -158,6 +159,7 @@ model User {
   ownedOpportunities          Opportunity[]              @relation("OpportunityOwner")
   createdOpportunities        Opportunity[]              @relation("OpportunityCreatedBy")
   opportunityAttachments      OpportunityAttachment[]
+  timelineEntries             TimelineEntry[]
 }
 
 // ─── SESSION (Auth.js) ───────────────────────────────────────────────────────
@@ -1593,7 +1595,6 @@ model Opportunity {
   source            OpportunitySource @default(MANUAL)
   expectedValue     Decimal?          @db.Decimal(12, 2)
   expectedCloseDate DateTime?
-  notes             String?           @db.Text
   // The ticket this opportunity came from. A plain id with no relation
   // because tickets don't exist yet; Phase 2 or 3 adds the relation.
   sourceTicketId    String?
@@ -1607,6 +1608,7 @@ model Opportunity {
   updatedAt         DateTime          @updatedAt
 
   attachments    OpportunityAttachment[]
+  timeline       TimelineEntry[]
   quotes         Quote[]
   salesOrders    SalesOrder[]
   purchaseOrders PurchaseOrder[]
@@ -1631,6 +1633,46 @@ model OpportunityAttachment {
   uploadedByUserId String
   uploadedByUser   User        @relation(fields: [uploadedByUserId], references: [id])
   createdAt        DateTime    @default(now())
+}
+
+// ─── TIMELINE ────────────────────────────────────────────────────────────────
+// The activity history of a record, newest first on its page: notes users
+// write, actions the app records as things change, and later emails in and
+// out. Opportunities use it first; tickets (a later phase) reuse the same
+// model, route pattern, and UI component (src/lib/timeline.ts,
+// src/components/timeline/).
+
+enum TimelineEntryKind {
+  NOTE
+  ACTION
+  // Unused until the mailbox phase records emails on the timeline
+  EMAIL_OUT
+  EMAIL_IN
+}
+
+model TimelineEntry {
+  id            String            @id @default(cuid())
+  companyId     String
+  company       Company           @relation(fields: [companyId], references: [id])
+  // The record the entry belongs to. Tickets add their own nullable link
+  // later; an entry belongs to exactly one record.
+  opportunityId String?
+  opportunity   Opportunity?      @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  kind          TimelineEntryKind
+  // Null means the system (or a user since deleted)
+  authorId      String?
+  author        User?             @relation(fields: [authorId], references: [id], onDelete: SetNull)
+  // NOTE entries: rich text HTML, sanitized on save and when returned
+  body          String?           @db.Text
+  // ACTION entries: what happened, for example stage_changed
+  action        String?
+  // ACTION entries: the before and after values, with names as well as ids
+  data          Json?
+  editedAt      DateTime?
+  createdAt     DateTime          @default(now())
+
+  @@index([companyId])
+  @@index([opportunityId, createdAt])
 }
 
 // ─── RATE LIMITS ──────────────────────────────────────────────────────────────
