@@ -23,6 +23,7 @@ import {
 } from "@/lib/opportunity-view"
 import { StagePill } from "./StagePill"
 import { useClientLocations } from "./useClientLocations"
+import { clientContactHref, clientLocationHref, clientPageHref } from "@/lib/client-links"
 
 // GET /api/opportunities/[id] (opportunityDetailSelect), with the client
 // details only users who may open the opportunity get
@@ -41,18 +42,16 @@ const LINK = "text-primary hover:underline focus-visible:outline-none focus-visi
 const DASH = <span className="text-muted-foreground">-</span>
 const STAGE_GROUPS: StageCategory[] = ["OPEN", "WON", "LOST"]
 
-// Where each name opens, in a new tab. There is no contact or location page,
-// and the client page doesn't open a tab from its URL yet, so the contact
-// and the location open the client page (its Contacts and Locations tabs
-// list them).
-const clientHref = (clientId: string) => `/dashboard/clients/${clientId}`
+// Where each name opens, in a new tab (src/lib/client-links.ts): the client
+// page on its default tab, or its Contacts or Locations tab with that row
+// highlighted. There is no contact or location page of its own.
 
 function LocationText({ location, clientId, note }: { location: ClientLocationSummary; clientId: string; note?: string }) {
   const lines = addressLines(location)
   return (
     <>
       <span className="block font-medium">
-        <InlineFieldLink href={clientHref(clientId)} title={`Open the client page for ${location.name}`}>
+        <InlineFieldLink href={clientLocationHref(clientId, location.id)} title={`Open ${location.name} on the client page`}>
           {location.name}
         </InlineFieldLink>
       </span>
@@ -206,7 +205,7 @@ export function OpportunityInfoPanel({
             <InlineEditField
               label="Client"
               value={o.client.name}
-              renderValue={(name) => <InlineFieldLink href={clientHref(o.client.id)}>{name}</InlineFieldLink>}
+              renderValue={(name) => <InlineFieldLink href={clientPageHref(o.client.id)}>{name}</InlineFieldLink>}
               canEdit={canEdit}
               editing={false}
               onEditingChange={(open) => open && openParty("client")}
@@ -218,7 +217,7 @@ export function OpportunityInfoPanel({
               label="Contact"
               value={contactFullName(o.contact)}
               renderValue={(name) => (
-                <InlineFieldLink href={clientHref(o.client.id)} title={`Open the client page for ${name}`}>
+                <InlineFieldLink href={clientContactHref(o.client.id, o.contact.id)} title={`Open ${name} on the client page`}>
                   {name}
                 </InlineFieldLink>
               )}
