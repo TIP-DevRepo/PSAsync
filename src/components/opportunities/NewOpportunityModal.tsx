@@ -9,7 +9,8 @@ import { OPPORTUNITY_TITLE_MAX, readExpectedValue } from "@/lib/opportunity-rule
 import { ownerFieldChoices, type StageOption, type TypeOption } from "@/lib/opportunity-view"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { isBlankHtml } from "@/lib/timeline-actions"
-import { useClientContacts } from "./useClientContacts"
+import { ClientContactPicker } from "@/components/ClientContactPicker"
+import type { ClientContactValue } from "@/lib/client-contact-choice"
 
 const FIELD =
   "w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
@@ -35,19 +36,18 @@ export function NewOpportunityModal({
   const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
   const [form, setForm] = useState({
     title: "",
-    clientId: "",
-    contactId: "",
-    // Me by default; "" is unassigned
+    // The current user by default; "" is unassigned
     ownerId: myUserId ?? "",
     stageId: stages.find((s) => s.category === "OPEN")?.id ?? "",
     typeId: "",
     expectedValue: "",
     expectedCloseDate: "",
   })
-  const [errors, setErrors] = useState<Partial<Record<keyof typeof form, string>>>({})
+  const [errors, setErrors] = useState<Partial<Record<keyof typeof form | "clientId" | "contactId", string>>>({})
   const [saving, setSaving] = useState(false)
   const [initialNote, setInitialNote] = useState("")
-  const { contacts, loading: contactsLoading } = useClientContacts(form.clientId)
+  // Picking a contact also sets its client (ClientContactPicker)
+  const [party, setParty] = useState<ClientContactValue>({ client: null, contact: null })
 
   // Every user's name (the current user shows by name too); who may be
   // chosen is decided by ownerFieldChoices
@@ -58,20 +58,15 @@ export function NewOpportunityModal({
   }, [])
 
   const update = (field: keyof typeof form, value: string) => {
-    setForm((prev) => ({
-      ...prev,
-      [field]: value,
-      // A contact belongs to one client, so a new client clears it
-      ...(field === "clientId" ? { contactId: "" } : {}),
-    }))
+    setForm((prev) => ({ ...prev, [field]: value }))
     setErrors((prev) => ({ ...prev, [field]: undefined }))
   }
 
   function validate() {
     const next: typeof errors = {}
     if (!form.title.trim()) next.title = "Title is required"
-    if (!form.clientId) next.clientId = "Choose a client"
-    if (!form.contactId) next.contactId = "Choose a contact"
+    if (!party.client) next.clientId = "Choose a client"
+    if (!party.contact) next.contactId = "Choose a contact"
     const value = readExpectedValue(form.expectedValue.trim())
     if (value.error !== undefined) next.expectedValue = value.error
     setErrors(next)
@@ -86,8 +81,8 @@ export function NewOpportunityModal({
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         title: form.title.trim(),
-        clientId: form.clientId,
-        contactId: form.contactId,
+        clientId: party.client?.id,
+        contactId: party.contact?.id,
         ownerId: form.ownerId || null,
         stageId: form.stageId || null,
         typeId: form.typeId || null,
@@ -146,51 +141,17 @@ export function NewOpportunityModal({
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="new-opportunity-client" className={LABEL}>
-              Client <span className="text-danger">*</span>
-            </label>
-            <select
-              id="new-opportunity-client"
-              value={form.clientId}
-              onChange={(e) => update("clientId", e.target.value)}
-              aria-invalid={!!errors.clientId}
-              aria-describedby={describedBy("clientId")}
-              className={FIELD}
-            >
-              <option value="">Choose a client</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-            {fieldError("clientId")}
-          </div>
-          <div>
-            <label htmlFor="new-opportunity-contact" className={LABEL}>
-              Contact <span className="text-danger">*</span>
-            </label>
-            <select
-              id="new-opportunity-contact"
-              value={form.contactId}
-              onChange={(e) => update("contactId", e.target.value)}
-              disabled={!form.clientId || contactsLoading}
-              aria-invalid={!!errors.contactId}
-              aria-describedby={describedBy("contactId")}
-              className={FIELD}
-            >
-              <option value="">
-                {!form.clientId ? "Choose a client first" : contactsLoading ? "Loading contacts..." : contacts.length === 0 ? "This client has no contacts" : "Choose a contact"}
-              </option>
-              {contacts.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.firstName} {c.lastName}
-                </option>
-              ))}
-            </select>
-            {fieldError("contactId")}
-          </div>
+          <ClientContactPicker
+            value={party}
+            onChange={(next) => {
+              setParty(next)
+              setErrors((prev) => ({ ...prev, clientId: undefined, contactId: undefined }))
+            }}
+            clients={clients}
+            required
+            labelClassName={LABEL}
+            errors={{ client: errors.clientId, contact: errors.contactId }}
+          />
 
           <div>
             <label htmlFor="new-opportunity-owner" className={LABEL}>
