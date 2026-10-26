@@ -1,7 +1,7 @@
 "use client"
 
-import { useState, useEffect } from "react"
-import { useParams } from "next/navigation"
+import { useState, useEffect, useRef, Suspense } from "react"
+import { useParams, usePathname, useRouter, useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
@@ -15,6 +15,9 @@ import { ClientAssetsPanel } from "@/components/clients/ClientAssetsPanel"
 import { formatPhoneInput, formatPhoneDisplay } from "@/lib/phone"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
+import { readTabParam, tabHref } from "@/lib/tab-url"
+import { cn } from "@/lib/utils"
+import { CLIENT_CONTACT_PARAM, CLIENT_LOCATION_PARAM, clientHighlightTarget } from "@/lib/client-links"
 
 interface ContactTag {
   id: string
@@ -162,7 +165,12 @@ const breadcrumbItems = [{ label: "Clients", href: "/dashboard/clients" }]
 export default function ClientDetailPage() {
   const { can } = useAccess()
   if (!can("pages.clients")) return <NoAccess />
-  return <ClientDetailPageContent />
+  // The open tab and a row to highlight live in the URL (useSearchParams)
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
+      <ClientDetailPageContent />
+    </Suspense>
+  )
 }
 
 function ClientDetailPageContent() {
@@ -178,7 +186,26 @@ function ClientDetailPageContent() {
 
   const [client, setClient] = useState<ClientDetail | null>(null)
   const [loading, setLoading] = useState(true)
-  const [activeTab, setActiveTab] = useState<ClientTabKey>("details")
+  // The open tab lives in the URL (?tab=contacts, the same parameter as the
+  // opportunity page, src/lib/tab-url.ts), so a link or a refresh opens it.
+  // Details, the default, leaves it out, and a tab this user can't see falls
+  // back to Details. It is also held here so a click shows at once; a URL
+  // change (back, forward) is followed.
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const urlTab = readTabParam(searchParams, tabs.map((t) => t.key), "details")
+  const [activeTab, setActiveTabState] = useState<ClientTabKey>(urlTab)
+  const [seenUrlTab, setSeenUrlTab] = useState<ClientTabKey>(urlTab)
+  if (urlTab !== seenUrlTab) {
+    setSeenUrlTab(urlTab)
+    setActiveTabState(urlTab)
+  }
+  function setActiveTab(key: ClientTabKey) {
+    setActiveTabState(key)
+    // A row to highlight only means something when a link lands
+    router.replace(tabHref(pathname, searchParams.toString(), key, "details", [CLIENT_CONTACT_PARAM, CLIENT_LOCATION_PARAM]), { scroll: false })
+  }
   const [ticketFilter, setTicketFilter] = useState<StatusFilter>("OPEN")
   const [oppFilter, setOppFilter] = useState<StatusFilter>("OPEN")
 
@@ -404,6 +431,40 @@ function ClientDetailPageContent() {
       toast.error(data.error ?? "Couldn't onboard this client")
     }
   }
+
+  // A link to one contact or location (?contact= on Contacts, ?location= on
+  // Locations, built by src/lib/client-links.ts) scrolls its row into view
+  // and tints it briefly in the brand color, then fades. An id that isn't
+  // one of this client's rows is ignored. Uses the rows already loaded.
+  const highlight = client
+    ? clientHighlightTarget(searchParams, activeTab, {
+        contactIds: client.contacts.map((c) => c.id),
+        locationIds: client.locations.map((l) => l.id),
+      })
+    : null
+  const highlightKey = highlight ? `${highlight.kind}:${highlight.id}` : null
+  const [flash, setFlash] = useState<{ id: string; fading: boolean } | null>(null)
+  const handledHighlight = useRef<string | null>(null)
+  useEffect(() => {
+    if (!highlightKey || handledHighlight.current === highlightKey) return
+    const [kind, id] = highlightKey.split(":")
+    const timers: ReturnType<typeof setTimeout>[] = []
+    // After the tab's rows have painted
+    const frame = requestAnimationFrame(() => {
+      handledHighlight.current = highlightKey
+      document.getElementById(`client-${kind}-${id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })
+      setFlash({ id, fading: false })
+      timers.push(setTimeout(() => setFlash({ id, fading: true }), 2500))
+      timers.push(setTimeout(() => setFlash(null), 3600))
+    })
+    return () => {
+      cancelAnimationFrame(frame)
+      timers.forEach(clearTimeout)
+    }
+  }, [highlightKey])
+  // The tint, and a slow fade back once it ends
+  const flashClass = (rowId: string) =>
+    flash?.id === rowId ? (flash.fading ? "duration-1000" : "bg-brand-primary-500/10 ring-1 ring-brand-primary-500/30 duration-300") : ""
 
   if (loading) {
     return (
@@ -776,7 +837,8 @@ function ClientDetailPageContent() {
               {client.locations.map((loc) => (
                 <div
                   key={loc.id}
-                  className="rounded-lg border border-border bg-card shadow-card p-3 text-sm hover:bg-surface-hover transition-colors"
+                  id={`client-location-${loc.id}`}
+                  className={cn("scroll-mt-24 rounded-lg border border-border bg-card shadow-card p-3 text-sm hover:bg-surface-hover transition-colors", flashClass(loc.id))}
                 >
                   <div className="flex justify-between items-start gap-3">
                     <button onClick={() => setViewingLocation(loc)} className="flex-1 text-left min-w-0">
@@ -959,8 +1021,9 @@ function ClientDetailPageContent() {
                 .map((contact) => (
                   <button
                     key={contact.id}
+                    id={`client-contact-${contact.id}`}
                     onClick={() => setViewingContact(contact)}
-                    className="w-full text-left rounded-lg border border-border bg-card shadow-card p-3 text-sm hover:bg-surface-hover transition-colors"
+                    className={cn("scroll-mt-24 w-full text-left rounded-lg border border-border bg-card shadow-card p-3 text-sm hover:bg-surface-hover transition-colors", flashClass(contact.id))}
                   >
                     <p className="font-medium text-foreground flex flex-wrap items-center gap-2">
                       <span>{contact.firstName} {contact.lastName}</span>
