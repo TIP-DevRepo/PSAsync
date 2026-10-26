@@ -14,6 +14,7 @@ import {
   ClipboardList,
   ShoppingCart,
   Boxes,
+  Target,
 } from "lucide-react"
 
 export interface PagePermissions {
@@ -21,6 +22,7 @@ export interface PagePermissions {
   catalog?: boolean
   vendors?: boolean
   quotes?: boolean
+  opportunities?: boolean
   settings?: boolean
   salesOrders?: boolean
   purchaseOrders?: boolean
@@ -34,6 +36,7 @@ const navItems: { label: string; href: string; icon: typeof LayoutDashboard; per
   { label: "Catalog", href: "/dashboard/catalog", icon: Package, permissionKey: "catalog" },
   { label: "Inventory", href: "/dashboard/inventory", icon: Boxes, permissionKey: "inventory" },
   { label: "Quotes", href: "/dashboard/quotes", icon: FileText, permissionKey: "quotes" },
+  { label: "Opportunities", href: "/dashboard/opportunities", icon: Target, permissionKey: "opportunities" },
   { label: "Sales Orders", href: "/dashboard/sales-orders", icon: ClipboardList, permissionKey: "salesOrders" },
   { label: "Purchase Orders", href: "/dashboard/purchase-orders", icon: ShoppingCart, permissionKey: "purchaseOrders" },
   { label: "Settings", href: "/dashboard/settings", icon: Settings, permissionKey: "settings" },
