@@ -16,7 +16,10 @@ import {
   formatCents,
   formatDate,
   formatDateOnly,
+  addressLines,
+  mainClientLocation,
   ownerFieldChoices,
+  type ClientLocationSummary,
   valueCents,
   type OpportunityRow,
   type StageOption,
@@ -26,10 +29,16 @@ import { StagePill } from "./StagePill"
 import { OpportunityRelatedPanel } from "./OpportunityRelatedPanel"
 import { OpportunityAttachments } from "./OpportunityAttachments"
 import { DeleteOpportunityDialog } from "./DeleteOpportunityDialog"
-import { useClientContacts } from "./useClientContacts"
+import { ClientContactPicker } from "@/components/ClientContactPicker"
+import { contactFullName, type ClientContactValue } from "@/lib/client-contact-choice"
+import { OPPORTUNITY_ACTION_BUTTONS } from "@/lib/timeline-buttons"
+import { noteStageChange } from "@/lib/timeline-actions"
 
-// GET /api/opportunities/[id] (opportunityDetailSelect)
+// GET /api/opportunities/[id] (opportunityDetailSelect), with the client
+// details only users who may open the opportunity get
 interface OpportunityDetailData extends OpportunityRow {
+  client: { id: string; name: string; phone: string | null; locations: ClientLocationSummary[]; mainBillingLocation: ClientLocationSummary | null }
+  contact: { id: string; firstName: string; lastName: string; title: string | null; email: string | null; phone: string | null }
   createdBy: { id: string; name: string } | null
   _count: { attachments: number; quotes: number; salesOrders: number; purchaseOrders: number }
 }
@@ -66,10 +75,10 @@ export function OpportunityDetail({ id }: { id: string }) {
   // Bumped after every change the server records on the timeline, so the
   // timeline shows its new entry
   const [timelineKey, setTimelineKey] = useState(0)
-  // A new client waits here until its contact is chosen, since an
-  // opportunity always needs a contact of its own client
-  const [pendingClientId, setPendingClientId] = useState<string | null>(null)
-  const { contacts, loading: contactsLoading } = useClientContacts(canEdit ? pendingClientId ?? opportunity?.client.id ?? "" : "")
+  // A client picked without a contact waits here until one of its contacts
+  // is chosen, since an opportunity always needs a contact of its own client.
+  // Null shows the saved client and contact.
+  const [pendingParty, setPendingParty] = useState<ClientContactValue | null>(null)
 
   const load = useCallback(() => {
     fetch(`/api/opportunities/${id}`)
@@ -169,7 +178,24 @@ export function OpportunityDetail({ id }: { id: string }) {
 
   const o = opportunity
   const owners = ownerFieldChoices(canViewAll, users, myUserId, o.owner)
-  const clientId = pendingClientId ?? o.client.id
+  const savedParty: ClientContactValue = {
+    client: { id: o.client.id, name: o.client.name },
+    contact: { id: o.contact.id, name: contactFullName(o.contact), clientId: o.client.id },
+  }
+
+  // A contact (and with it its client) saves at once. A client on its own
+  // waits for a contact; picking the saved pair again drops the pending one.
+  async function changeParty(next: ClientContactValue) {
+    if (next.client && next.contact && (next.contact.id !== o.contact.id || next.client.id !== o.client.id)) {
+      // Shown while it saves; afterwards the saved opportunity (or, on a
+      // refusal, the reloaded one) is what the fields show
+      setPendingParty(next)
+      await save({ clientId: next.client.id, contactId: next.contact.id }, next.client.id !== o.client.id ? "client and contact" : "contact")
+      setPendingParty(null)
+      return
+    }
+    setPendingParty(next.client?.id === o.client.id && next.contact?.id === o.contact.id ? null : next)
+  }
   // The stage list may not have loaded yet, or may not hold a stage that
   // was just deleted: the current stage is always offered
   const stageOptions = stages.some((s) => s.id === o.stage.id) ? stages : [{ ...o.stage, sortOrder: -1 }, ...stages]
@@ -263,59 +289,15 @@ export function OpportunityDetail({ id }: { id: string }) {
             </h2>
             {canEdit ? (
               <div className="space-y-3">
-                <div>
-                  <label htmlFor="opportunity-client" className={LABEL}>
-                    Client
-                  </label>
-                  <select
-                    id="opportunity-client"
-                    value={clientId}
-                    disabled={saving}
-                    onChange={(e) => setPendingClientId(e.target.value === o.client.id ? null : e.target.value)}
-                    className={FIELD}
-                  >
-                    {!clients.some((c) => c.id === o.client.id) && <option value={o.client.id}>{o.client.name}</option>}
-                    {clients.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label htmlFor="opportunity-contact" className={LABEL}>
-                    Contact
-                  </label>
-                  <select
-                    id="opportunity-contact"
-                    // Changing the client clears the contact until a new one is chosen
-                    value={pendingClientId ? "" : o.contact.id}
-                    disabled={saving || contactsLoading}
-                    aria-describedby={pendingClientId ? "opportunity-contact-hint" : undefined}
-                    onChange={async (e) => {
-                      if (!e.target.value) return
-                      const patch = pendingClientId ? { clientId: pendingClientId, contactId: e.target.value } : { contactId: e.target.value }
-                      if (await save(patch, pendingClientId ? "client and contact" : "contact")) setPendingClientId(null)
-                    }}
-                    className={FIELD}
-                  >
-                    {pendingClientId && <option value="">{contactsLoading ? "Loading contacts..." : contacts.length === 0 ? "This client has no contacts" : "Choose a contact"}</option>}
-                    {!pendingClientId && !contacts.some((c) => c.id === o.contact.id) && <option value={o.contact.id}>{contactName(o.contact)}</option>}
-                    {contacts.map((c) => (
-                      <option key={c.id} value={c.id}>
-                        {c.firstName} {c.lastName}
-                      </option>
-                    ))}
-                  </select>
-                  {pendingClientId && (
-                    <p id="opportunity-contact-hint" className="mt-1 text-xs text-warning">
-                      Choose a contact to save the new client.{" "}
-                      <button type="button" onClick={() => setPendingClientId(null)} className="font-medium underline">
-                        Keep {o.client.name}
-                      </button>
-                    </p>
-                  )}
-                </div>
+                <ClientContactPicker value={pendingParty ?? savedParty} onChange={changeParty} clients={clients} disabled={saving} labelClassName={LABEL} />
+                {pendingParty && !pendingParty.contact && (
+                  <p className="-mt-1 text-xs text-warning">
+                    {pendingParty.client ? "Choose a contact to save the new client." : "Choose a client and contact."}{" "}
+                    <button type="button" onClick={() => setPendingParty(null)} className="font-medium underline">
+                      Keep {o.client.name}
+                    </button>
+                  </p>
+                )}
                 <div>
                   <label htmlFor="opportunity-owner" className={LABEL}>
                     Owner
@@ -422,6 +404,7 @@ export function OpportunityDetail({ id }: { id: string }) {
                 <ReadOnly label="Created" value={formatDate(o.createdAt)} />
               </dl>
             )}
+            <ClientDetails o={o} />
           </section>
 
           <OpportunityAttachments opportunityId={o.id} canEdit={canEdit} onChanged={() => setTimelineKey((k) => k + 1)} />
@@ -429,7 +412,18 @@ export function OpportunityDetail({ id }: { id: string }) {
         </aside>
 
         <div className="min-w-0 lg:col-start-1 lg:row-start-1">
-          <Timeline timelineUrl={`/api/opportunities/${o.id}/timeline`} canAddNotes={canEdit} myUserId={myUserId} refreshKey={timelineKey} />
+          <Timeline
+            timelineUrl={`/api/opportunities/${o.id}/timeline`}
+            canAddNotes={canEdit}
+            myUserId={myUserId}
+            refreshKey={timelineKey}
+            buttons={OPPORTUNITY_ACTION_BUTTONS}
+            stages={stages}
+            // A note that moved the stage changed the opportunity too
+            onPosted={(entry) => {
+              if (noteStageChange(entry.data)) load()
+            }}
+          />
         </div>
       </div>
 
@@ -447,6 +441,63 @@ function ReadOnly({ label, value }: { label: string; value: string }) {
       <dd className="truncate text-foreground" title={value}>
         {value}
       </dd>
+    </div>
+  )
+}
+
+// Read only: the client's main phone and main location, and the contact's
+// name, title, email, and phone, with click to call and click to email
+// links. A dash for anything missing.
+function ClientDetails({ o }: { o: OpportunityDetailData }) {
+  const location = mainClientLocation(o.client)
+  const lines = location ? addressLines(location) : []
+  const link = "text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+  const dash = <span className="text-muted-foreground">-</span>
+  return (
+    <div className="space-y-3 border-t border-border pt-4">
+      <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Client details</h3>
+      <dl className="grid grid-cols-1 gap-3 text-sm">
+        <div className="min-w-0">
+          <dt className="text-xs font-medium text-muted-foreground">Client</dt>
+          <dd className="truncate">
+            <Link href={`/dashboard/clients/${o.client.id}`} className={link} title={o.client.name}>
+              {o.client.name}
+            </Link>
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs font-medium text-muted-foreground">Main phone</dt>
+          <dd className="truncate">{o.client.phone ? <a href={`tel:${o.client.phone}`} className={link}>{o.client.phone}</a> : dash}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs font-medium text-muted-foreground">Main location</dt>
+          <dd className="break-words text-foreground">
+            {location ? (
+              <>
+                <span className="block font-medium">{location.name}</span>
+                {lines.length > 0 ? lines.map((line, i) => <span key={i} className="block text-muted-foreground">{line}</span>) : dash}
+              </>
+            ) : (
+              dash
+            )}
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs font-medium text-muted-foreground">Contact</dt>
+          <dd className="break-words text-foreground">
+            <span className="block font-medium">{contactFullName(o.contact)}</span>
+            <span className="block text-muted-foreground">{o.contact.title || "-"}</span>
+          </dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs font-medium text-muted-foreground">Contact email</dt>
+          <dd className="truncate">{o.contact.email ? <a href={`mailto:${o.contact.email}`} className={link} title={o.contact.email}>{o.contact.email}</a> : dash}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="text-xs font-medium text-muted-foreground">Contact phone</dt>
+          <dd className="truncate">{o.contact.phone ? <a href={`tel:${o.contact.phone}`} className={link}>{o.contact.phone}</a> : dash}</dd>
+        </div>
+      </dl>
     </div>
   )
 }

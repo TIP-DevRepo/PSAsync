@@ -6,7 +6,12 @@ import { Button } from "@/components/ui/button"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
-import { describeTimelineAction, isBlankHtml } from "@/lib/timeline-actions"
+import { describeTimelineAction, isBlankHtml, noteStageChange } from "@/lib/timeline-actions"
+import { presetStageId, type ActionButtonDefinition } from "@/lib/timeline-buttons"
+import { CATEGORY_LABELS } from "@/lib/opportunity-rules"
+import type { StageCategory } from "@/lib/opportunity-view"
+import { StagePill } from "@/components/opportunities/StagePill"
+import { ActionButtonBar } from "./ActionButtonBar"
 import { cn } from "@/lib/utils"
 
 // One entry as every timeline route returns it (timelineEntrySelect). A
@@ -37,16 +42,31 @@ async function errorMessage(res: Response, fallback: string) {
   return typeof data.error === "string" ? data.error : fallback
 }
 
-// The timeline of one record (an opportunity now, a ticket later): a note
-// composer, then every entry newest first, with older pages on request.
-// timelineUrl is the record's timeline route; an entry's own route is
-// timelineUrl/entryId. refreshKey reloads the first page, for a page that
-// just made a change the server recorded as an action.
+// A stage a note can move its record to, in the company's order
+export interface TimelineStageOption {
+  id: string
+  name: string
+  category: StageCategory
+}
+
+const STAGE_GROUPS: StageCategory[] = ["OPEN", "WON", "LOST"]
+
+// The timeline of one record (an opportunity now, a ticket later): a row of
+// action buttons that open the note composer, then every entry newest
+// first, with older pages on request. timelineUrl is the record's timeline
+// route; an entry's own route is timelineUrl/entryId. refreshKey reloads
+// the first page, for a page that just made a change the server recorded
+// as an action. With stages, the composer can also move the record to a
+// stage (sent as stageId with the note), and onPosted runs after a note is
+// saved so the page can reload what the note changed.
 export function Timeline({
   timelineUrl,
   canAddNotes,
   myUserId,
   refreshKey = 0,
+  buttons,
+  stages,
+  onPosted,
 }: {
   timelineUrl: string
   // opportunities.edit (or the subject's own edit permission); also needed
@@ -54,6 +74,11 @@ export function Timeline({
   canAddNotes: boolean
   myUserId: string | null
   refreshKey?: number
+  // The action bar's buttons (src/lib/timeline-buttons.ts); shown only
+  // with canAddNotes
+  buttons: readonly ActionButtonDefinition[]
+  stages?: readonly TimelineStageOption[]
+  onPosted?: (entry: TimelineEntryData) => void
 }) {
   const [entries, setEntries] = useState<TimelineEntryData[]>([])
   const [nextCursor, setNextCursor] = useState<string | null>(null)
@@ -62,7 +87,9 @@ export function Timeline({
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  const [draft, setDraft] = useState("")
+  // The open composer: which button opened it, the note, and the stage it
+  // moves the record to ("" for no change). Null while closed.
+  const [composer, setComposer] = useState<{ buttonId: string; html: string; stageId: string } | null>(null)
   const [posting, setPosting] = useState(false)
   const [editing, setEditing] = useState<{ id: string; html: string } | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -103,10 +130,36 @@ export function Timeline({
     setNextCursor(page.nextCursor)
   }
 
+  // A button opens the composer with its presets. Switching buttons while it
+  // is open keeps the text and only changes the preset stage.
+  function openComposer(button: ActionButtonDefinition) {
+    const stageId = presetStageId(button, stages ?? [])
+    setComposer((prev) => ({ buttonId: button.id, html: prev?.html ?? "", stageId }))
+  }
+
+  async function closeComposer() {
+    if (composer && !isBlankHtml(composer.html)) {
+      const discard = await confirmDialog({
+        title: "Discard this note?",
+        description: "What you typed will be lost.",
+        confirmLabel: "Discard",
+        cancelLabel: "Keep writing",
+        variant: "danger",
+      })
+      if (!discard) return
+    }
+    setComposer(null)
+  }
+
   async function addNote() {
-    if (isBlankHtml(draft)) return
+    if (!composer || isBlankHtml(composer.html)) return
+    const draft = composer.html
     setPosting(true)
-    const res = await fetch(timelineUrl, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: draft }) })
+    const res = await fetch(timelineUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: draft, ...(composer.stageId ? { stageId: composer.stageId } : {}) }),
+    })
     setPosting(false)
     if (!res.ok) {
       toast.error("Couldn't add the note", await errorMessage(res, "Try again."))
@@ -114,7 +167,8 @@ export function Timeline({
     }
     const entry: TimelineEntryData = await res.json()
     setEntries((prev) => [entry, ...prev])
-    setDraft("")
+    setComposer(null)
+    onPosted?.(entry)
   }
 
   async function saveEdit() {
@@ -162,13 +216,49 @@ export function Timeline({
         Timeline
       </h2>
 
-      {canAddNotes && (
-        <div className="space-y-2 rounded-lg border border-border bg-card p-3 shadow-card">
-          <RichTextEditor value={draft} onChange={setDraft} ariaLabel="New note" />
-          <div className="flex justify-end">
-            <Button onClick={addNote} disabled={posting || isBlankHtml(draft)}>
-              {posting ? "Adding..." : "Add note"}
-            </Button>
+      {canAddNotes && <ActionButtonBar buttons={buttons} onSelect={openComposer} activeId={composer?.buttonId} disabled={posting} label="Timeline actions" />}
+
+      {canAddNotes && composer && (
+        <div className="space-y-3 rounded-lg border border-border bg-card p-3 shadow-card">
+          <RichTextEditor value={composer.html} onChange={(html) => setComposer((prev) => (prev ? { ...prev, html } : prev))} ariaLabel="New note" />
+          <div className="flex flex-wrap items-end justify-between gap-3">
+            {stages && stages.length > 0 ? (
+              <div className="w-full sm:w-64">
+                <label htmlFor="timeline-composer-stage" className="mb-1 block text-xs font-medium text-muted-foreground">
+                  Change stage to
+                </label>
+                <select
+                  id="timeline-composer-stage"
+                  value={composer.stageId}
+                  onChange={(e) => setComposer((prev) => (prev ? { ...prev, stageId: e.target.value } : prev))}
+                  className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                >
+                  <option value="">No change</option>
+                  {STAGE_GROUPS.map((category) => {
+                    const inGroup = stages.filter((st) => st.category === category)
+                    return inGroup.length === 0 ? null : (
+                      <optgroup key={category} label={CATEGORY_LABELS[category]}>
+                        {inGroup.map((st) => (
+                          <option key={st.id} value={st.id}>
+                            {st.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )
+                  })}
+                </select>
+              </div>
+            ) : (
+              <span />
+            )}
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={closeComposer} disabled={posting}>
+                Cancel
+              </Button>
+              <Button onClick={addNote} disabled={posting || isBlankHtml(composer.html)}>
+                {posting ? "Posting..." : "Post"}
+              </Button>
+            </div>
           </div>
         </div>
       )}
@@ -178,7 +268,7 @@ export function Timeline({
       ) : loading ? (
         <p className="text-sm text-muted-foreground">Loading...</p>
       ) : entries.length === 0 ? (
-        <p className="text-sm text-muted-foreground">Nothing here yet.{canAddNotes ? " Add the first note above." : ""}</p>
+        <p className="text-sm text-muted-foreground">Nothing here yet.{canAddNotes ? " Use Note above to add the first one." : ""}</p>
       ) : (
         <ol className="space-y-3">
           {entries.map((entry) =>
@@ -206,6 +296,7 @@ export function Timeline({
                       </span>
                     )}
                     <span className="font-semibold text-foreground">{entry.author?.name ?? (entry.kind === "NOTE" ? "Former user" : "System")}</span>
+                    <NoteStagePill data={entry.data} />
                     <time dateTime={entry.createdAt}>{when(entry.createdAt)}</time>
                     {entry.editedAt && (
                       <span title={`Edited ${when(entry.editedAt)}`} className="italic">
@@ -264,5 +355,19 @@ export function Timeline({
         </div>
       )}
     </section>
+  )
+}
+
+// A note posted with a stage change shows the move, for example "New to
+// Qualified", tinted by the stage it moved to
+function NoteStagePill({ data }: { data: unknown }) {
+  const change = noteStageChange(data)
+  if (!change) return null
+  const label = `${change.from.name} to ${change.to.name}`
+  const category = change.to.category
+  return category === "OPEN" || category === "WON" || category === "LOST" ? (
+    <StagePill name={label} category={category} />
+  ) : (
+    <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{label}</span>
   )
 }
