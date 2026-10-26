@@ -46,7 +46,27 @@ export interface TimelineActionData {
   attachment_removed: { attachmentId: string; fileName: string }
 }
 
-export type TimelineAction = { [K in TimelineActionKey]: { action: K; data: TimelineActionData[K] } }[TimelineActionKey]
+// A NOTE posted with a stage change stores the move in its data as
+// { stageChange: { from, to } }, names and ids (and the stage category, for
+// the pill's tint), instead of a separate stage_changed entry. Editing the
+// note later never changes it.
+export interface NoteStageChange {
+  from: TimelineRef & { category?: string }
+  to: TimelineRef & { category?: string }
+}
+
+// The stage change a note's data holds, or null. Reads stored data without
+// trusting its shape.
+export function noteStageChange(data: unknown): NoteStageChange | null {
+  const change = data && typeof data === "object" ? (data as { stageChange?: unknown }).stageChange : null
+  if (!change || typeof change !== "object") return null
+  const { from, to } = change as { from?: unknown; to?: unknown }
+  const isRef = (r: unknown): r is NoteStageChange["to"] =>
+    !!r && typeof r === "object" && typeof (r as TimelineRef).id === "string" && typeof (r as TimelineRef).name === "string"
+  return isRef(from) && isRef(to) ? { from, to } : null
+}
+
+export type TimelineAction ={ [K in TimelineActionKey]: { action: K; data: TimelineActionData[K] } }[TimelineActionKey]
 
 // True when HTML holds no text at all once its tags are removed (the editor
 // sends "<p></p>" for an empty note). The server checks the sanitized body;
