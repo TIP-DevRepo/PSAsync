@@ -10,6 +10,7 @@ import { ownerFieldChoices, type StageOption, type TypeOption } from "@/lib/oppo
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { isBlankHtml } from "@/lib/timeline-actions"
 import { ClientContactPicker } from "@/components/ClientContactPicker"
+import { useClientLocations } from "./useClientLocations"
 import type { ClientContactValue } from "@/lib/client-contact-choice"
 
 const FIELD =
@@ -48,6 +49,13 @@ export function NewOpportunityModal({
   const [initialNote, setInitialNote] = useState("")
   // Picking a contact also sets its client (ClientContactPicker)
   const [party, setParty] = useState<ClientContactValue>({ client: null, contact: null })
+  // The location the user picked for the current client ("" for none).
+  // Untouched, the select shows the client's main location and the request
+  // leaves it out, so the server saves the main location.
+  const [locationPick, setLocationPick] = useState<{ clientId: string; value: string } | null>(null)
+  const { locations, mainId, loading: locationsLoading } = useClientLocations(party.client?.id ?? null)
+  const locationTouched = !!party.client && locationPick?.clientId === party.client.id
+  const locationValue = locationTouched ? locationPick!.value : (mainId ?? "")
 
   // Every user's name (the current user shows by name too); who may be
   // chosen is decided by ownerFieldChoices
@@ -83,6 +91,7 @@ export function NewOpportunityModal({
         title: form.title.trim(),
         clientId: party.client?.id,
         contactId: party.contact?.id,
+        ...(locationTouched ? { clientLocationId: locationPick!.value || null } : {}),
         ownerId: form.ownerId || null,
         stageId: form.stageId || null,
         typeId: form.typeId || null,
@@ -152,6 +161,34 @@ export function NewOpportunityModal({
             labelClassName={LABEL}
             errors={{ client: errors.clientId, contact: errors.contactId }}
           />
+          <div>
+            <label htmlFor="new-opportunity-location" className={LABEL}>
+              Location
+            </label>
+            <select
+              id="new-opportunity-location"
+              value={locationValue}
+              disabled={!party.client || locationsLoading}
+              onChange={(e) => party.client && setLocationPick({ clientId: party.client.id, value: e.target.value })}
+              className={FIELD}
+            >
+              {!party.client ? (
+                <option value="">Choose a client first</option>
+              ) : locationsLoading ? (
+                <option value={locationValue}>Loading locations...</option>
+              ) : (
+                <>
+                  <option value="">{locations.length === 0 ? "This client has no locations" : "No location"}</option>
+                  {locations.map((l) => (
+                    <option key={l.id} value={l.id}>
+                      {l.name}
+                      {l.id === mainId ? " (main)" : ""}
+                    </option>
+                  ))}
+                </>
+              )}
+            </select>
+          </div>
 
           <div>
             <label htmlFor="new-opportunity-owner" className={LABEL}>
