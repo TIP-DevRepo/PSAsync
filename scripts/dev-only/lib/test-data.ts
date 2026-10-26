@@ -131,6 +131,12 @@ export function testNames(letter: TestLetter, marker: string) {
     // quantity, a recurring line) over two sections and an empty one
     copyClient: `${marker} Sample Copy Client ${letter}`,
     copyClientLocation: `${marker} Sample Copy Location ${letter}`,
+    // Each sample client has a second location that isn't its main one
+    clientLocation2: `${marker} Sample Second Location ${letter}`,
+    copyClientLocation2: `${marker} Sample Copy Second Location ${letter}`,
+    // The sample contact's mobile, which only users who may open an
+    // opportunity on it get back
+    contactMobile: `555-01${letter === "B" ? "02" : "03"}`,
     copyClientPaymentTerms: "Net45",
     copyContactFirstName: "Copy",
     copyContactLastName: `Contact ${letter} ${marker}`,
@@ -283,6 +289,11 @@ export interface PermissionFixtureIds {
   costTemplateId: string
   costTemplateLineId: string
   copyClientId: string
+  // The sample client's second location (not its main one), and the copy
+  // client's main and second locations
+  clientLocation2Id: string
+  copyClientLocationId: string
+  copyClientLocation2Id: string
   copyContactId: string
   copyQuoteId: string
   oppRepRoleId: string

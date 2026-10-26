@@ -243,6 +243,11 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         data: { clientId: client.id, name: n.clientLocation, address: n.clientLocationAddress, city: n.clientLocationCity, isPrimary: true },
       })
     )
+    // A second location, not primary, for the opportunity location checks
+    const clientLocation2 = rec(
+      "clientLocation",
+      await prisma.clientLocation.create({ data: { clientId: client.id, name: n.clientLocation2, address: "9 Second Street", city: n.clientLocationCity } })
+    )
     const contact = rec(
       "contact",
       await prisma.contact.create({
@@ -251,6 +256,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
           firstName: n.contactFirstName,
           lastName: n.contactLastName,
           email: n.contactEmail,
+          mobile: n.contactMobile,
           locationId: clientLocation.id,
           isPrimary: true,
         },
@@ -485,6 +491,10 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
       where: { id: copyClient.id },
       data: { mainShippingLocationId: copyLocation.id, mainBillingLocationId: copyLocation.id },
     })
+    const copyLocation2 = rec(
+      "clientLocation",
+      await prisma.clientLocation.create({ data: { clientId: copyClient.id, name: n.copyClientLocation2, address: "4 Copy Lane", city: "Copyton" } })
+    )
     const copyContact = rec(
       "contact",
       await prisma.contact.create({
@@ -628,6 +638,8 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
               title,
               clientId: client.id,
               contactId: contact.id,
+              // The client's main location, as a create without one saves
+              clientLocationId: clientLocation.id,
               ownerId,
               stageId: opportunityStages[0].id,
               typeId: opportunityTypes[0].id,
@@ -741,6 +753,9 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         costTemplateLineId: costTemplateLine.id,
         copyClientId: copyClient.id,
         copyContactId: copyContact.id,
+        clientLocation2Id: clientLocation2.id,
+        copyClientLocationId: copyLocation.id,
+        copyClientLocation2Id: copyLocation2.id,
         copyQuoteId: copyQuote.id,
         oppRepRoleId,
         repOpportunityId: repOpportunity.id,

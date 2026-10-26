@@ -100,6 +100,12 @@
 // is refused without opportunities.edit, and with another company's, a made
 // up, or a non text stageId. The opportunity GET's client details reach
 // only users who may open it, and the list never carries them.
+// checkOpportunityLocation checks a create without a location saves the
+// client's main location, another of the client's locations saves with one
+// location_changed entry (none when saved again), and a client change resets
+// the location to the new client's main one. A location of another client
+// of the same company is refused (400). The contact's mobile comes only with
+// an opportunity the user may open.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -771,6 +777,8 @@ const ATTEMPTS: Attempt[] = [
   { name: "Own opportunity related records", actor: "rep", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}/related`, expect: 200, contains: () => ['"quotes"', '"salesOrders"', '"purchaseOrders"'] },
   // Client details come with an opportunity the user may open, and never with the list
   { name: "Unassigned opportunity with client details", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 200, contains: (c) => [c.b.clientId, '"mainBillingLocation"', '"locations"', '"title"', '"email"'] },
+  { name: "Unassigned opportunity with the contact's mobile", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 200, contains: (c) => [c.names.contactMobile, '"clientLocation"'] },
+  { name: "List opportunities without the contact's mobile", actor: "admin", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.fx.unassignedOpportunityId], notContains: (c) => [c.names.contactMobile] },
   { name: "List opportunities without client details", actor: "admin", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.fx.unassignedOpportunityId], notContains: () => ['"mainBillingLocation"', '"locations"'] },
   { name: "Unassigned opportunity timeline", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, expect: 200, contains: (c) => [c.fx.unassignedRepNoteId, c.fx.unassignedAdminNoteId, c.fx.unassignedActionId] },
   { name: "Unassigned opportunity related records", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 200, contains: () => ['"quotes"'] },
@@ -1136,6 +1144,10 @@ const ATTEMPTS: Attempt[] = [
   // details only reach users who may open the opportunity
   { name: "Client details of the admin's opportunity", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}`, expect: 404, expectError: "Not found" },
   { name: "Client details without the Opportunities page", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 403, expectError: "view opportunities" },
+  // An opportunity's location must belong to its own client
+  { name: "Opportunity location of another client", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: (c) => ({ clientLocationId: c.fx.copyClientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Create with a location of another client", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, clientLocationId: c.fx.copyClientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Change the client with the old client's location", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: (c) => ({ clientId: c.fx.copyClientId, contactId: c.fx.copyContactId, clientLocationId: c.b.clientLocationId }), expect: 400, expectError: "Invalid location" },
   // A note's stageId is checked like any body id
   { name: "Note with another company's stage", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", stageId: c.c.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
   { name: "Note with a made up stage", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", stageId: c.fakeId }), expect: 400, expectError: "Invalid stage" },
@@ -1883,6 +1895,70 @@ async function checkNoteStageChange(prisma: PrismaClient, admin: Session, ctx: A
   }
 }
 
+// Opportunity locations, as Test Admin B: a create without a location saves
+// the client's main location (the created row is removed right after), a
+// PATCH to the client's second location adds exactly one location_changed
+// entry and saving it again adds none, and changing the client (no location
+// given) resets it to the new client's main location. The unassigned sample
+// opportunity's client, contact, location, and the entries the step added
+// are put back afterwards.
+async function checkOpportunityLocation(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const opportunityId = ctx.fx.unassignedOpportunityId
+  const base = `/api/opportunities/${opportunityId}`
+  const label = (name: string) => `[Admin B] Opportunity location: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const locationOf = (text: string) => {
+    try {
+      return (JSON.parse(text) as { clientLocation?: { id?: string } | null }).clientLocation?.id ?? null
+    } catch {
+      return null
+    }
+  }
+  const startedAt = new Date()
+  const original = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { clientId: true, contactId: true, clientLocationId: true } })
+  const count = (action?: string) => prisma.timelineEntry.count({ where: { opportunityId, ...(action ? { action } : {}) } })
+  let createdId: string | null = null
+  try {
+    const create = await admin.request("POST", "/api/opportunities", { json: { title: "Dev check location", clientId: ctx.b.clientId, contactId: ctx.b.contactId } })
+    try {
+      createdId = (JSON.parse(create.text) as { id?: string }).id ?? null
+    } catch {
+      // reported below
+    }
+    push("a create without one saves the main location", "200, the main location", String(create.status),
+      create.status !== 200 ? `got ${create.status}: ${errorText(create.text)}` : locationOf(create.text) !== ctx.b.clientLocationId ? `saved ${locationOf(create.text) ?? "none"}` : null)
+
+    const beforeAll = await count()
+    const beforeLocation = await count("location_changed")
+    const second = await admin.request("PATCH", base, { json: { clientLocationId: ctx.fx.clientLocation2Id } })
+    const addedAll = (await count()) - beforeAll
+    const addedLocation = (await count("location_changed")) - beforeLocation
+    push("another of the client's locations saves with one entry", "200, 1 location_changed", `${second.status}, ${addedAll} added`,
+      second.status !== 200
+        ? `got ${second.status}: ${errorText(second.text)}`
+        : locationOf(second.text) !== ctx.fx.clientLocation2Id
+          ? "the location did not change"
+          : addedAll !== 1 || addedLocation !== 1
+            ? `added ${addedAll} entries, ${addedLocation} location_changed`
+            : null)
+
+    const beforeSame = await count()
+    const same = await admin.request("PATCH", base, { json: { clientLocationId: ctx.fx.clientLocation2Id } })
+    const addedSame = (await count()) - beforeSame
+    push("the same location again adds no entry", "200, 0 entries", `${same.status}, ${addedSame} added`,
+      same.status !== 200 ? `got ${same.status}: ${errorText(same.text)}` : addedSame !== 0 ? `added ${addedSame} entries` : null)
+
+    const move = await admin.request("PATCH", base, { json: { clientId: ctx.fx.copyClientId, contactId: ctx.fx.copyContactId } })
+    push("a new client resets it to that client's main location", "200, the new client's main location", String(move.status),
+      move.status !== 200 ? `got ${move.status}: ${errorText(move.text)}` : locationOf(move.text) !== ctx.fx.copyClientLocationId ? `saved ${locationOf(move.text) ?? "none"}` : null)
+  } finally {
+    if (createdId) await prisma.opportunity.deleteMany({ where: { id: createdId } })
+    await prisma.opportunity.update({ where: { id: opportunityId }, data: { clientId: original.clientId, contactId: original.contactId, clientLocationId: original.clientLocationId } })
+    await prisma.timelineEntry.deleteMany({ where: { opportunityId, createdAt: { gte: startedAt } } })
+  }
+}
+
 // Every line field a copy carries over (all but id, quoteId, createdAt)
 const COPIED_LINE_FIELDS = [
   "catalogItemId", "section", "sortOrder", "name", "description", "sku", "quantity", "unitPrice", "cost", "discount", "taxable",
@@ -2201,6 +2277,7 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await checkStageCategoryClosedAt(prisma, sessions.oppSettings, ctx, rows)
     await checkTimeline(prisma, sessions.admin, ctx, rows)
     await checkNoteStageChange(prisma, sessions.admin, ctx, rows)
+    await checkOpportunityLocation(prisma, sessions.admin, ctx, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
