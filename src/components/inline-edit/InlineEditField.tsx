@@ -128,7 +128,10 @@ export interface InlineOption {
   label: string
 }
 
-// A select editor: choosing a value saves it, Escape or leaving it cancels
+// A select editor: choosing a value with the pointer saves it. Some browsers
+// change a closed select's value on each arrow key, so a value picked with
+// the keyboard waits for Enter (or leaving the field) instead of saving on
+// the first arrow press. Escape cancels; leaving it unchanged cancels.
 export function InlineSelect({
   value,
   options,
@@ -144,19 +147,39 @@ export function InlineSelect({
   cancel: () => void
   ariaLabel: string
 }) {
+  const [draft, setDraft] = useState(value)
+  const byKeyboard = useRef(false)
+  const done = useRef(false)
+  const finish = (next: string | null) => {
+    if (done.current) return
+    done.current = true
+    if (next === null || next === value) cancel()
+    else commit(next)
+  }
   return (
     <select
       autoFocus
       aria-label={ariaLabel}
-      value={value}
-      onChange={(e) => commit(e.target.value)}
+      value={draft}
+      onChange={(e) => {
+        setDraft(e.target.value)
+        if (!byKeyboard.current) finish(e.target.value)
+      }}
       onKeyDown={(e) => {
         if (e.key === "Escape") {
           e.preventDefault()
-          cancel()
+          finish(null)
+        } else if (e.key === "Enter") {
+          e.preventDefault()
+          finish(draft)
+        } else if (e.key.startsWith("Arrow") || e.key === "Home" || e.key === "End" || e.key.length === 1) {
+          byKeyboard.current = true
         }
       }}
-      onBlur={cancel}
+      onPointerDown={() => {
+        byKeyboard.current = false
+      }}
+      onBlur={() => finish(draft)}
       className={EDITOR}
     >
       {options?.map((o) => (
