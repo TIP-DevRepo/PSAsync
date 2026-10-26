@@ -24,10 +24,29 @@ export const opportunityListSelect = {
   type: { select: { id: true, name: true } },
 } satisfies Prisma.OpportunitySelect
 
-// The detail adds the long fields and how many records link to it (all of
-// them, as the delete block counts them)
+// A client location as the Client details section shows it
+const clientLocationFields = {
+  select: { name: true, address: true, address2: true, city: true, state: true, zip: true, country: true },
+} as const
+
+// The detail adds how many records link to it (all of them, as the delete
+// block counts them), and the Client details the opportunity page shows:
+// the client's main phone, its primary location (falling back to its main
+// billing location, see mainClientLocation in src/lib/opportunity-view.ts),
+// and the contact's title, email, and phone. Only users who may open the
+// opportunity get these, and nothing else from the client record.
 export const opportunityDetailSelect = {
   ...opportunityListSelect,
+  client: {
+    select: {
+      id: true,
+      name: true,
+      phone: true,
+      locations: { where: { isPrimary: true }, ...clientLocationFields, orderBy: { name: "asc" }, take: 1 },
+      mainBillingLocation: clientLocationFields,
+    },
+  },
+  contact: { select: { id: true, firstName: true, lastName: true, title: true, email: true, phone: true } },
   sourceTicketId: true,
   createdBy: userName,
   _count: { select: { attachments: true, quotes: true, salesOrders: true, purchaseOrders: true } },

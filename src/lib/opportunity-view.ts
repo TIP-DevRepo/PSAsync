@@ -304,3 +304,31 @@ export function formatDate(value: string | null): string {
 export function contactName(contact: { firstName: string; lastName: string }): string {
   return `${contact.firstName} ${contact.lastName}`.trim()
 }
+
+// ─── Client details ─────────────────────────────────────────────────────────
+
+export interface ClientLocationSummary {
+  name: string
+  address: string | null
+  address2: string | null
+  city: string | null
+  state: string | null
+  zip: string | null
+  country: string | null
+}
+
+// The client's main location for the Client details section: its primary
+// location, else its main billing location, else none
+export function mainClientLocation(client: {
+  locations?: ClientLocationSummary[]
+  mainBillingLocation?: ClientLocationSummary | null
+}): ClientLocationSummary | null {
+  return client.locations?.[0] ?? client.mainBillingLocation ?? null
+}
+
+// A location's address as lines (street, second line, "City, ST 12345",
+// country), leaving out what is empty
+export function addressLines(location: ClientLocationSummary): string[] {
+  const cityLine = [[location.city, location.state].filter(Boolean).join(", "), location.zip].filter(Boolean).join(" ")
+  return [location.address, location.address2, cityLine, location.country].filter((line): line is string => !!line && line.trim() !== "")
+}
