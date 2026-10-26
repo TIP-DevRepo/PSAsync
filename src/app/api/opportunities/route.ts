@@ -23,6 +23,8 @@ import {
   readText,
 } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
+import { isBlankHtml, readNoteBody, recordTimelineActions } from "@/lib/timeline"
+import { opportunityCreatedAction } from "@/lib/opportunity-timeline"
 import type { Prisma } from "@/generated/prisma"
 
 const DAY = 24 * 60 * 60 * 1000
@@ -112,6 +114,13 @@ export async function POST(req: NextRequest) {
   if (expectedValue.error !== undefined) return apiError(400, expectedValue.error)
   const expectedCloseDate = readDate(body.expectedCloseDate)
   if (expectedCloseDate.error !== undefined) return apiError(400, expectedCloseDate.error)
+  // Optional: the first note on the timeline. Left out, null, or blank adds none.
+  const hasNote = typeof body.initialNote === "string" && !isBlankHtml(body.initialNote)
+  if (body.initialNote !== undefined && body.initialNote !== null && typeof body.initialNote !== "string") {
+    return apiError(400, "The initial note must be text")
+  }
+  const initialNote = hasNote ? readNoteBody(body.initialNote) : null
+  if (initialNote?.error !== undefined) return apiError(400, initialNote.error)
 
   if (body.clientId === undefined || body.clientId === null || body.clientId === "") {
     return apiError(400, "A client is required")
@@ -160,7 +169,7 @@ export async function POST(req: NextRequest) {
   try {
     const opportunity = await prisma.$transaction(async (tx) => {
       const number = await takeOpportunityNumber(tx, ctx.companyId, now)
-      return tx.opportunity.create({
+      const created = await tx.opportunity.create({
         data: {
           companyId: ctx.companyId,
           number,
@@ -179,6 +188,18 @@ export async function POST(req: NextRequest) {
         },
         select: opportunityDetailSelect,
       })
+
+      // The created entry, then the initial note a moment after it, so the
+      // note reads first on a newest first timeline
+      const subject = { opportunityId: created.id }
+      await recordTimelineActions(tx, { companyId: ctx.companyId, authorId: ctx.userId, subject, actions: [opportunityCreatedAction(created)], at: now })
+      if (initialNote?.value) {
+        await tx.timelineEntry.create({
+          data: { companyId: ctx.companyId, ...subject, kind: "NOTE", authorId: ctx.userId, body: initialNote.value, createdAt: new Date(now.getTime() + 1) },
+          select: { id: true },
+        })
+      }
+      return created
     })
     return NextResponse.json(opportunity)
   } catch (err) {

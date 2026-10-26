@@ -6,7 +6,8 @@ import { escapeHtmlWithBreaks } from "@/lib/html"
 // strings that an API response already sanitized.
 //
 // Quote terms (Quote.terms, QuoteTemplate.terms, and the company default
-// CompanySettings.quoteTerms) are rich text from the TipTap editor in
+// CompanySettings.quoteTerms) and timeline notes (TimelineEntry.body, through
+// src/lib/timeline.ts) are rich text from the TipTap editor in
 // src/components/ui/rich-text-editor.tsx, which enables StarterKit only.
 // The allowlist below is exactly what StarterKit's extensions render:
 //   Paragraph p, HardBreak br, Bold strong, Italic em, Strike s,

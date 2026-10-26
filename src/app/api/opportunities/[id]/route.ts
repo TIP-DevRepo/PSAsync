@@ -25,6 +25,8 @@ import {
   stageChangeData,
 } from "@/lib/opportunity-rules"
 import { deleteStoredObjects } from "@/lib/uploads"
+import { recordTimelineActions } from "@/lib/timeline"
+import { opportunityChangeActions, opportunityTimelineSnapshotSelect } from "@/lib/opportunity-timeline"
 import { userFacingError } from "@/lib/user-error"
 import type { Prisma } from "@/generated/prisma"
 
@@ -52,7 +54,8 @@ export async function GET(
   return NextResponse.json(opportunity)
 }
 
-// Changes only the fields the body includes
+// Changes only the fields the body includes, and records a timeline ACTION
+// entry for each field that actually changed
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -142,10 +145,26 @@ export async function PATCH(
   }
 
   try {
-    const opportunity = await prisma.opportunity.update({
-      where: opportunityWhere(ctx, existing.id),
-      data,
-      select: opportunityDetailSelect,
+    // The change and its timeline entries are saved together. The before
+    // values are read again inside the transaction, right before the write.
+    const opportunity = await prisma.$transaction(async (tx) => {
+      const before = await tx.opportunity.findFirstOrThrow({
+        where: opportunityWhere(ctx, existing.id),
+        select: opportunityTimelineSnapshotSelect,
+      })
+      const saved = await tx.opportunity.update({
+        where: opportunityWhere(ctx, existing.id),
+        data,
+        select: opportunityDetailSelect,
+      })
+      // Nothing when the PATCH changed nothing
+      await recordTimelineActions(tx, {
+        companyId: ctx.companyId,
+        authorId: ctx.userId,
+        subject: { opportunityId: existing.id },
+        actions: opportunityChangeActions(before, saved),
+      })
+      return saved
     })
     return NextResponse.json(opportunity)
   } catch (err) {

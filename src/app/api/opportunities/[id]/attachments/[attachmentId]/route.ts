@@ -4,6 +4,8 @@ import { requireAccess, notFound } from "@/lib/api-access"
 import { loadOpportunityAttachment, opportunityAttachmentWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { deleteStoredObject } from "@/lib/uploads"
+import { recordTimelineActions } from "@/lib/timeline"
+import { attachmentAction } from "@/lib/opportunity-timeline"
 
 export async function DELETE(
   req: NextRequest,
@@ -21,9 +23,19 @@ export async function DELETE(
   const existing = await loadOpportunityAttachment(ctx, id, attachmentId)
   if (!existing) return notFound()
 
-  const deleted = await prisma.opportunityAttachment.delete({
-    where: opportunityAttachmentWhere(ctx, id, attachmentId),
-    select: { fileUrl: true, opportunityId: true },
+  // The row and its timeline entry go together
+  const deleted = await prisma.$transaction(async (tx) => {
+    const removed = await tx.opportunityAttachment.delete({
+      where: opportunityAttachmentWhere(ctx, id, attachmentId),
+      select: { id: true, fileName: true, fileUrl: true, opportunityId: true },
+    })
+    await recordTimelineActions(tx, {
+      companyId: ctx.companyId,
+      authorId: ctx.userId,
+      subject: { opportunityId: removed.opportunityId },
+      actions: [attachmentAction("removed", removed)],
+    })
+    return removed
   })
 
   // Best effort once the row is gone: a failure is logged, never shown
