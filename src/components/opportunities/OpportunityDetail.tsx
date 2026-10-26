@@ -2,21 +2,23 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { Pencil } from "lucide-react"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
 import { Timeline, type TimelineHandle } from "@/components/timeline/Timeline"
 import { ActionButtonBar } from "@/components/timeline/ActionButtonBar"
+import { TabsBar } from "@/components/ui/tabs-bar"
 import { toast } from "@/lib/toast"
 import { promptDialog } from "@/lib/prompt-dialog"
 import { OPPORTUNITY_TITLE_MAX } from "@/lib/opportunity-rules"
 import { formatDate, type StageOption, type TypeOption } from "@/lib/opportunity-view"
-import { OPPORTUNITY_ACTION_BUTTONS } from "@/lib/timeline-buttons"
+import { OPPORTUNITY_ACTION_BUTTONS, type ActionButtonDefinition } from "@/lib/timeline-buttons"
+import { opportunityTabHref, readOpportunityTab, tabLabel, visibleOpportunityTabs, type OpportunityTabKey } from "@/lib/opportunity-tabs"
 import { noteStageChange } from "@/lib/timeline-actions"
 import { StagePill } from "./StagePill"
-import { OpportunityRelatedPanel } from "./OpportunityRelatedPanel"
+import { OpportunityRelatedPanel, relatedCount, useOpportunityRelated } from "./OpportunityRelatedPanel"
 import { OpportunityAttachments } from "./OpportunityAttachments"
 import { DeleteOpportunityDialog } from "./DeleteOpportunityDialog"
 import { OpportunityInfoPanel, type OpportunityDetailData } from "./OpportunityInfoPanel"
@@ -25,9 +27,10 @@ const breadcrumbItems = [{ label: "Opportunities", href: "/dashboard/opportuniti
 
 // Laid out like HaloPSA: the client and number large on the first line, the
 // title under it, then the stage pill, created and closed text, and the
-// action buttons on one row. The timeline is the main column; the details
-// panel (edited in place), attachments, and Related are on the right. At
-// phone width the right column comes first, then the timeline.
+// action buttons on one row. The main column is tabs (src/lib/opportunity-
+// tabs.ts, kept in ?tab=): Details (the timeline), Attachments, and Related.
+// The details panel (edited in place) is on the right. At phone width the
+// panel comes first, then the tabs.
 export function OpportunityDetail({ id }: { id: string }) {
   const router = useRouter()
   // For hiding controls only: every route checks the same keys itself
@@ -52,6 +55,32 @@ export function OpportunityDetail({ id }: { id: string }) {
   // The header's action bar opens the timeline's composer
   const timelineRef = useRef<TimelineHandle>(null)
   const [openButtonId, setOpenButtonId] = useState<string | null>(null)
+  const { related, failed: relatedFailed } = useOpportunityRelated(id)
+
+  // The open tab lives in the URL, so a refresh or a shared link keeps it.
+  // It is also held here, so a header button can switch to Details and open
+  // the composer in one go; a URL change (back, forward) is followed.
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+  const tabs = visibleOpportunityTabs(can)
+  const urlTab = readOpportunityTab(searchParams, tabs)
+  const [tab, setTabState] = useState<OpportunityTabKey>(urlTab)
+  const [seenUrlTab, setSeenUrlTab] = useState<OpportunityTabKey>(urlTab)
+  if (urlTab !== seenUrlTab) {
+    setSeenUrlTab(urlTab)
+    setTabState(urlTab)
+  }
+  function setTab(key: OpportunityTabKey) {
+    setTabState(key)
+    router.replace(opportunityTabHref(pathname, searchParams.toString(), key), { scroll: false })
+  }
+
+  // A header button opens the composer at the top of the timeline, on the
+  // Details tab
+  function openFromHeader(button: ActionButtonDefinition) {
+    if (tab !== "details") setTab("details")
+    timelineRef.current?.openComposer(button)
+  }
 
   const load = useCallback(() => {
     fetch(`/api/opportunities/${id}`)
@@ -146,6 +175,8 @@ export function OpportunityDetail({ id }: { id: string }) {
 
   const o = opportunity
   const linkedCount = o._count.quotes + o._count.salesOrders + o._count.purchaseOrders
+  // Shown on a tab when there is at least one
+  const counts: Partial<Record<OpportunityTabKey, number>> = { attachments: o._count.attachments, related: relatedCount(related) }
 
   return (
     <div className="w-full space-y-6">
@@ -202,7 +233,7 @@ export function OpportunityDetail({ id }: { id: string }) {
             <div className="w-full md:ml-auto md:w-auto">
               <ActionButtonBar
                 buttons={OPPORTUNITY_ACTION_BUTTONS}
-                onSelect={(button) => timelineRef.current?.openComposer(button)}
+                onSelect={openFromHeader}
                 activeId={openButtonId}
                 label="Timeline actions"
               />
@@ -211,10 +242,10 @@ export function OpportunityDetail({ id }: { id: string }) {
         </div>
       </header>
 
-      {/* The right column comes first in the page, so at phone width the
-          details lead; from lg up the grid puts the timeline on the left */}
+      {/* The panel comes first in the page, so at phone width it leads;
+          from lg up the grid puts the tabs on the left */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <aside className="min-w-0 space-y-6 lg:col-start-2 lg:row-start-1">
+        <aside className="min-w-0 lg:col-start-2 lg:row-start-1">
           <OpportunityInfoPanel
             o={o}
             canEdit={canEdit}
@@ -226,26 +257,53 @@ export function OpportunityDetail({ id }: { id: string }) {
             canViewAll={canViewAll}
             save={save}
           />
-          <OpportunityAttachments opportunityId={o.id} canEdit={canEdit} onChanged={() => setTimelineKey((k) => k + 1)} />
-          <OpportunityRelatedPanel opportunityId={o.id} linkedCount={linkedCount} />
         </aside>
 
-        <div className="min-w-0 lg:col-start-1 lg:row-start-1">
-          <Timeline
-            ref={timelineRef}
-            timelineUrl={`/api/opportunities/${o.id}/timeline`}
-            canAddNotes={canEdit}
-            myUserId={myUserId}
-            refreshKey={timelineKey}
-            buttons={OPPORTUNITY_ACTION_BUTTONS}
-            showButtons={false}
-            onComposerChange={setOpenButtonId}
-            stages={stages}
-            // A note that moved the stage changed the opportunity too
-            onPosted={(entry) => {
-              if (noteStageChange(entry.data)) load()
-            }}
+        <div className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-1">
+          <TabsBar
+            tabs={tabs.map((t) => ({ key: t.key, label: tabLabel(t.label, counts[t.key]) }))}
+            activeTab={tab}
+            onChange={setTab}
+            ariaLabel="Opportunity sections"
           />
+
+          {/* Details stays mounted (hidden on other tabs), so a composer the
+              header opens is ready and a draft survives switching tabs */}
+          <div role="tabpanel" id="tabpanel-details" aria-labelledby="tab-details" hidden={tab !== "details"}>
+            <Timeline
+              ref={timelineRef}
+              timelineUrl={`/api/opportunities/${o.id}/timeline`}
+              canAddNotes={canEdit}
+              myUserId={myUserId}
+              refreshKey={timelineKey}
+              buttons={OPPORTUNITY_ACTION_BUTTONS}
+              showButtons={false}
+              onComposerChange={setOpenButtonId}
+              stages={stages}
+              // A note that moved the stage changed the opportunity too
+              onPosted={(entry) => {
+                if (noteStageChange(entry.data)) load()
+              }}
+            />
+          </div>
+          {tab === "attachments" && (
+            <div role="tabpanel" id="tabpanel-attachments" aria-labelledby="tab-attachments">
+              <OpportunityAttachments
+                opportunityId={o.id}
+                canEdit={canEdit}
+                // The tab's count and the timeline both change
+                onChanged={() => {
+                  setTimelineKey((k) => k + 1)
+                  load()
+                }}
+              />
+            </div>
+          )}
+          {tab === "related" && (
+            <div role="tabpanel" id="tabpanel-related" aria-labelledby="tab-related">
+              <OpportunityRelatedPanel related={related} failed={relatedFailed} linkedCount={linkedCount} />
+            </div>
+          )}
         </div>
       </div>
 

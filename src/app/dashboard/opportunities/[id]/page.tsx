@@ -1,3 +1,4 @@
+import { Suspense } from "react"
 import { auth } from "@/auth"
 import { checkAccess } from "@/lib/access-check"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
@@ -18,5 +19,10 @@ export default async function OpportunityRoute({ params }: { params: Promise<{ i
   }
 
   const { id } = await params
-  return <OpportunityDetail id={id} />
+  // The open tab lives in the URL (useSearchParams)
+  return (
+    <Suspense fallback={<p className="text-sm text-muted-foreground">Loading...</p>}>
+      <OpportunityDetail id={id} />
+    </Suspense>
+  )
 }

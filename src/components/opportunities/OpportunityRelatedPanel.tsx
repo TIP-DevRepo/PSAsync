@@ -20,23 +20,38 @@ const SECTIONS: { key: keyof OpportunityRelated; label: string; href: (id: strin
   { key: "quotes", label: "Quotes", href: (id) => `/dashboard/quotes/${id}`, status: (s) => QUOTE_STATUS_LABELS[s] ?? statusLabel(s) },
   { key: "salesOrders", label: "Sales orders", href: (id) => `/dashboard/sales-orders/${id}`, status: statusLabel },
   { key: "purchaseOrders", label: "Purchase orders", href: (id) => `/dashboard/purchase-orders/${id}`, status: statusLabel },
+  // Tickets: a later phase adds a "tickets" list to OpportunityRelated (the
+  // related route) and its section here, with the ticket view rule
 ]
 
-// Linked quotes, sales orders, and purchase orders, only the ones this user
-// may open (the related route filters them). linkedCount is every link,
-// visible or not, from the opportunity itself.
-export function OpportunityRelatedPanel({ opportunityId, linkedCount }: { opportunityId: string; linkedCount: number }) {
-  const [related, setRelated] = useState<OpportunityRelated | null>(null)
-  const [failed, setFailed] = useState(false)
-
+// The linked records this user may open (the related route filters them),
+// loaded once by the page, which also shows their count on the Related tab
+export function useOpportunityRelated(opportunityId: string) {
+  const [state, setState] = useState<{ id: string; related: OpportunityRelated | null; failed: boolean }>({ id: "", related: null, failed: false })
   useEffect(() => {
+    let cancelled = false
     fetch(`/api/opportunities/${opportunityId}/related`)
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("refused"))))
-      .then((data: OpportunityRelated) => setRelated(data))
-      .catch(() => setFailed(true))
+      .then((data: OpportunityRelated) => !cancelled && setState({ id: opportunityId, related: data, failed: false }))
+      .catch(() => !cancelled && setState({ id: opportunityId, related: null, failed: true }))
+    return () => {
+      cancelled = true
+    }
   }, [opportunityId])
+  const ready = state.id === opportunityId
+  return { related: ready ? state.related : null, failed: ready && state.failed }
+}
 
-  const shown = related ? related.quotes.length + related.salesOrders.length + related.purchaseOrders.length : 0
+// How many linked records the user can see
+export function relatedCount(related: OpportunityRelated | null): number {
+  return related ? related.quotes.length + related.salesOrders.length + related.purchaseOrders.length : 0
+}
+
+// Linked quotes, sales orders, and purchase orders, only the ones this user
+// may open. linkedCount is every link, visible or not, from the opportunity
+// itself.
+export function OpportunityRelatedPanel({ related, failed, linkedCount }: { related: OpportunityRelated | null; failed: boolean; linkedCount: number }) {
+  const shown = relatedCount(related)
 
   return (
     <section aria-labelledby="opportunity-related-heading" className="space-y-3 rounded-lg border border-border bg-card p-4 shadow-card">
