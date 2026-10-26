@@ -3,10 +3,13 @@
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { Pencil } from "lucide-react"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
+import { Timeline } from "@/components/timeline/Timeline"
 import { toast } from "@/lib/toast"
+import { promptDialog } from "@/lib/prompt-dialog"
 import { OPPORTUNITY_TITLE_MAX, readExpectedValue } from "@/lib/opportunity-rules"
 import {
   contactName,
@@ -37,6 +40,11 @@ const FIELD =
   "w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
 const LABEL = "mb-1 block text-xs font-medium text-muted-foreground"
 
+// Laid out like HaloPSA: the client and number large on the first line, the
+// title under it, the timeline in the main column, and Opportunity
+// information, attachments, and Related on the right. At phone width the
+// right column comes first (details, attachments, Related), then the
+// timeline.
 export function OpportunityDetail({ id }: { id: string }) {
   const router = useRouter()
   // For hiding controls only: every route checks the same keys itself
@@ -55,6 +63,9 @@ export function OpportunityDetail({ id }: { id: string }) {
   const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
   const [saving, setSaving] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
+  // Bumped after every change the server records on the timeline, so the
+  // timeline shows its new entry
+  const [timelineKey, setTimelineKey] = useState(0)
   // A new client waits here until its contact is chosen, since an
   // opportunity always needs a contact of its own client
   const [pendingClientId, setPendingClientId] = useState<string | null>(null)
@@ -108,7 +119,22 @@ export function OpportunityDetail({ id }: { id: string }) {
       return false
     }
     setOpportunity(data)
+    setTimelineKey((k) => k + 1)
     return true
+  }
+
+  async function changeStage(stageId: string, stageName: string | undefined) {
+    if (await save({ stageId }, "stage")) toast.success(`Moved to ${stageName ?? "the new stage"}`)
+  }
+
+  async function editTitle(current: string) {
+    const title = await promptDialog({ title: "Rename opportunity", defaultValue: current, confirmLabel: "Save" })
+    if (title === null || title === current) return
+    if (title.length > OPPORTUNITY_TITLE_MAX) {
+      toast.error("Couldn't save the title", `Title must be ${OPPORTUNITY_TITLE_MAX} characters or fewer`)
+      return
+    }
+    save({ title }, "title")
   }
 
   async function handleDelete(): Promise<string | null> {
@@ -148,90 +174,94 @@ export function OpportunityDetail({ id }: { id: string }) {
   const stageOptions = stages.some((s) => s.id === o.stage.id) ? stages : [{ ...o.stage, sortOrder: -1 }, ...stages]
   const linkedCount = o._count.quotes + o._count.salesOrders + o._count.purchaseOrders
 
+  const stageSelect = (selectId: string, className: string) => (
+    <select
+      id={selectId}
+      value={o.stage.id}
+      disabled={saving}
+      onChange={(e) => changeStage(e.target.value, stageOptions.find((s) => s.id === e.target.value)?.name)}
+      className={className}
+    >
+      {stageOptions.map((s) => (
+        <option key={s.id} value={s.id}>
+          {s.name}
+        </option>
+      ))}
+    </select>
+  )
+
   return (
     <div className="w-full space-y-6">
-      <div>
-        <Breadcrumbs items={breadcrumbItems} current={o.number} />
-        <Link href="/dashboard/opportunities" className="mb-2 inline-block text-sm text-muted-foreground hover:text-foreground hover:underline">
-          ← Back to Opportunities
-        </Link>
+      <header className="space-y-3">
+        <div>
+          <Breadcrumbs items={breadcrumbItems} current={o.number} />
+          <Link href="/dashboard/opportunities" className="mb-2 inline-block text-sm text-muted-foreground hover:text-foreground hover:underline">
+            ← Back to Opportunities
+          </Link>
+        </div>
+
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="min-w-0 space-y-1">
-            <p className="text-sm font-medium tabular-nums text-muted-foreground">{o.number}</p>
-            <h1 className="break-words text-display font-semibold tracking-tight text-foreground">{o.title}</h1>
-            <p className="text-sm text-muted-foreground">
-              Owner: <span className="text-foreground">{o.owner?.name ?? "Unassigned"}</span>
-            </p>
-            <p className="text-xs text-muted-foreground">
-              Created{o.createdBy ? ` by ${o.createdBy.name}` : ""} on {formatDate(o.createdAt)}
-              {o.closedAt ? ` · Closed ${formatDate(o.closedAt)}` : ""}
-            </p>
-          </div>
-          <div className="flex flex-wrap items-center gap-2">
-            {canEdit ? (
-              <>
-                <label htmlFor="opportunity-stage" className="sr-only">
-                  Stage
-                </label>
-                <select
-                  id="opportunity-stage"
-                  value={o.stage.id}
+            {/* Line 1: who the deal is with, and its number */}
+            <h1 className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-display font-bold tracking-tight text-foreground">
+              <Link href={`/dashboard/clients/${o.client.id}`} className="break-words hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                {o.client.name}
+              </Link>
+              <span className="tabular-nums text-muted-foreground">{o.number}</span>
+            </h1>
+            {/* Line 2: the title, smaller but clear */}
+            <p className="flex items-start gap-2 text-lg font-medium text-foreground">
+              <span className="break-words">{o.title}</span>
+              {canEdit && (
+                <button
+                  type="button"
+                  onClick={() => editTitle(o.title)}
                   disabled={saving}
-                  onChange={async (e) => {
-                    const stage = stageOptions.find((s) => s.id === e.target.value)
-                    if (await save({ stageId: e.target.value }, "stage")) toast.success(`Moved to ${stage?.name ?? "the new stage"}`)
-                  }}
-                  className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-label="Rename opportunity"
+                  className="mt-1 shrink-0 rounded p-1 text-muted-foreground hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
                 >
-                  {stageOptions.map((s) => (
-                    <option key={s.id} value={s.id}>
-                      {s.name}
-                    </option>
-                  ))}
-                </select>
-              </>
-            ) : null}
-            <StagePill name={o.stage.name} category={o.stage.category} />
-            {canDelete && (
-              <Button variant="outline" onClick={() => setShowDelete(true)} className="text-danger hover:text-danger">
-                Delete
-              </Button>
-            )}
+                  <Pencil size={14} aria-hidden="true" />
+                </button>
+              )}
+            </p>
           </div>
+          {canDelete && (
+            <Button variant="outline" onClick={() => setShowDelete(true)} className="text-danger hover:text-danger">
+              Delete
+            </Button>
+          )}
         </div>
-      </div>
 
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+          {canEdit && (
+            <>
+              <label htmlFor="opportunity-stage" className="sr-only">
+                Stage
+              </label>
+              {stageSelect(
+                "opportunity-stage",
+                "rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              )}
+            </>
+          )}
+          <StagePill name={o.stage.name} category={o.stage.category} />
+          <p className="text-xs text-muted-foreground">
+            Created{o.createdBy ? ` by ${o.createdBy.name}` : ""} on {formatDate(o.createdAt)}
+            {o.closedAt ? ` · Closed ${formatDate(o.closedAt)}` : ""}
+          </p>
+        </div>
+      </header>
+
+      {/* The right column comes first in the page, so at phone width the
+          details lead; from lg up the grid puts the timeline on the left */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
-        <div className="min-w-0 space-y-6">
-          <section aria-labelledby="opportunity-details-heading" className="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
-            <h2 id="opportunity-details-heading" className="text-sm font-semibold text-foreground">
-              Details
+        <aside className="min-w-0 space-y-6 lg:col-start-2 lg:row-start-1">
+          <section aria-labelledby="opportunity-information-heading" className="space-y-4 rounded-lg border border-border bg-card p-4 shadow-card">
+            <h2 id="opportunity-information-heading" className="text-sm font-semibold text-foreground">
+              Opportunity information
             </h2>
             {canEdit ? (
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div className="sm:col-span-2">
-                  <label htmlFor="opportunity-title" className={LABEL}>
-                    Title
-                  </label>
-                  <input
-                    key={`title-${o.title}`}
-                    id="opportunity-title"
-                    defaultValue={o.title}
-                    maxLength={OPPORTUNITY_TITLE_MAX}
-                    onBlur={(e) => {
-                      const title = e.target.value.trim()
-                      if (title === o.title) return
-                      if (!title) {
-                        toast.error("Title is required")
-                        e.target.value = o.title
-                        return
-                      }
-                      save({ title }, "title")
-                    }}
-                    className={FIELD}
-                  />
-                </div>
-
+              <div className="space-y-3">
                 <div>
                   <label htmlFor="opportunity-client" className={LABEL}>
                     Client
@@ -285,7 +315,6 @@ export function OpportunityDetail({ id }: { id: string }) {
                     </p>
                   )}
                 </div>
-
                 <div>
                   <label htmlFor="opportunity-owner" className={LABEL}>
                     Owner
@@ -303,6 +332,12 @@ export function OpportunityDetail({ id }: { id: string }) {
                       </option>
                     ))}
                   </select>
+                </div>
+                <div>
+                  <label htmlFor="opportunity-details-stage" className={LABEL}>
+                    Stage
+                  </label>
+                  {stageSelect("opportunity-details-stage", FIELD)}
                 </div>
                 <div>
                   <label htmlFor="opportunity-type" className={LABEL}>
@@ -324,7 +359,6 @@ export function OpportunityDetail({ id }: { id: string }) {
                     ))}
                   </select>
                 </div>
-
                 <div>
                   <label htmlFor="opportunity-value" className={LABEL}>
                     Expected value
@@ -369,24 +403,32 @@ export function OpportunityDetail({ id }: { id: string }) {
                     className={FIELD}
                   />
                 </div>
+                <dl className="grid grid-cols-1 gap-3 border-t border-border pt-3 text-sm">
+                  <ReadOnly label="Created by" value={o.createdBy?.name ?? "-"} />
+                  <ReadOnly label="Created" value={formatDate(o.createdAt)} />
+                </dl>
               </div>
             ) : (
-              <dl className="grid grid-cols-1 gap-x-6 gap-y-3 text-sm sm:grid-cols-2">
+              <dl className="grid grid-cols-1 gap-3 text-sm">
                 <ReadOnly label="Client" value={o.client.name} />
                 <ReadOnly label="Contact" value={contactName(o.contact)} />
                 <ReadOnly label="Owner" value={o.owner?.name ?? "Unassigned"} />
+                <ReadOnly label="Stage" value={o.stage.name} />
                 <ReadOnly label="Type" value={o.type?.name ?? "-"} />
                 <ReadOnly label="Expected value" value={o.expectedValue === null ? "-" : formatCents(valueCents(o.expectedValue))} />
                 <ReadOnly label="Expected close date" value={formatDateOnly(o.expectedCloseDate)} />
+                <ReadOnly label="Created by" value={o.createdBy?.name ?? "-"} />
+                <ReadOnly label="Created" value={formatDate(o.createdAt)} />
               </dl>
             )}
           </section>
 
-          <OpportunityAttachments opportunityId={o.id} canEdit={canEdit} />
-        </div>
-
-        <div className="min-w-0">
+          <OpportunityAttachments opportunityId={o.id} canEdit={canEdit} onChanged={() => setTimelineKey((k) => k + 1)} />
           <OpportunityRelatedPanel opportunityId={o.id} linkedCount={linkedCount} />
+        </aside>
+
+        <div className="min-w-0 lg:col-start-1 lg:row-start-1">
+          <Timeline timelineUrl={`/api/opportunities/${o.id}/timeline`} canAddNotes={canEdit} myUserId={myUserId} refreshKey={timelineKey} />
         </div>
       </div>
 

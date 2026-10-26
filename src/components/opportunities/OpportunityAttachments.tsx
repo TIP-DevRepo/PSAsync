@@ -22,8 +22,18 @@ function fileSizeLabel(bytes: number | null) {
 
 // The sales order Attachments tab's list and upload zone, for an
 // opportunity: the shared FileUploadZone (ATTACHMENT profile, so the same
-// file types and size checks), and Remove only with opportunities.edit
-export function OpportunityAttachments({ opportunityId, canEdit }: { opportunityId: string; canEdit: boolean }) {
+// file types and size checks), and Remove only with opportunities.edit.
+// onChanged runs after an upload or a removal (each is recorded on the
+// timeline).
+export function OpportunityAttachments({
+  opportunityId,
+  canEdit,
+  onChanged,
+}: {
+  opportunityId: string
+  canEdit: boolean
+  onChanged?: () => void
+}) {
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const [loaded, setLoaded] = useState(false)
 
@@ -40,6 +50,11 @@ export function OpportunityAttachments({ opportunityId, canEdit }: { opportunity
     load()
   }, [load])
 
+  const handleUploaded = useCallback(() => {
+    load()
+    onChanged?.()
+  }, [load, onChanged])
+
   async function handleRemove(attachment: Attachment) {
     const confirmed = await confirmDialog({
       title: `Remove ${attachment.fileName}?`,
@@ -51,6 +66,7 @@ export function OpportunityAttachments({ opportunityId, canEdit }: { opportunity
     const res = await fetch(`/api/opportunities/${opportunityId}/attachments/${attachment.id}`, { method: "DELETE" })
     if (res.ok) {
       toast.success("Attachment removed")
+      onChanged?.()
     } else {
       const data = await res.json().catch(() => ({}))
       toast.error("Couldn't remove the attachment", data.error)
@@ -63,7 +79,7 @@ export function OpportunityAttachments({ opportunityId, canEdit }: { opportunity
       <h2 id="opportunity-attachments-heading" className="text-sm font-semibold text-foreground">
         Attachments
       </h2>
-      {canEdit && <FileUploadZone uploadUrl={`/api/opportunities/${opportunityId}/attachments`} onUploaded={load} />}
+      {canEdit && <FileUploadZone uploadUrl={`/api/opportunities/${opportunityId}/attachments`} onUploaded={handleUploaded} />}
       <div className="space-y-2">
         {loaded && attachments.length === 0 && <p className="text-sm text-muted-foreground">No files attached yet.</p>}
         {attachments.map((a) => (
