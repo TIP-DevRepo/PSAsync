@@ -28,6 +28,9 @@ export interface SenderInput {
   // A mailbox picked in the dialog, looked up within this company only
   requestedId?: string | null
   requested?: SenderMailbox | null
+  // What to say when the sender has no mailbox of their own; quotes by
+  // default
+  connectMessage?: string
 }
 
 const CONNECT_YOURS =
@@ -43,6 +46,7 @@ const CONNECT_YOURS =
 // A missing mailbox is an error, never a fallback to someone else's.
 export function chooseQuoteSender(input: SenderInput): SenderDecision {
   const isShared = (m: SenderMailbox) => input.sharedMode && !!input.shared && m.id === input.shared.id
+  const connectYours = input.connectMessage ?? CONNECT_YOURS
 
   if (input.requestedId) {
     if (!input.canSendAsOthers) {
@@ -71,7 +75,7 @@ export function chooseQuoteSender(input: SenderInput): SenderDecision {
         ok: false,
         status: 400,
         error: input.isOwner
-          ? CONNECT_YOURS
+          ? connectYours
           : "The quote owner hasn't connected a mailbox yet. Ask them to connect it in Settings > Microsoft Integration, or choose another mailbox.",
       }
     }
@@ -79,7 +83,7 @@ export function chooseQuoteSender(input: SenderInput): SenderDecision {
   }
 
   if (!input.clicker) {
-    return { ok: false, status: 400, error: CONNECT_YOURS }
+    return { ok: false, status: 400, error: connectYours }
   }
   return { ok: true, mailbox: input.clicker, isShared: false }
 }
@@ -190,6 +194,53 @@ export async function loadSenderInput(
 
 export async function resolveQuoteSender(ctx: SenderCaller, quote: { userId: string }, requestedId?: string | null) {
   return chooseQuoteSender(await loadSenderInput(ctx, quote, requestedId))
+}
+
+// The From choices a send dialog shows: the default sender (or why there
+// is none), whether the user may pick another mailbox (quotes.sendAsOthers),
+// and the mailboxes they may pick from. Someone without the permission only
+// ever gets their default sender back. Never returns tokens or any other
+// credential.
+export async function senderOptionsFor(ctx: SenderCaller, owner: { userId: string }, connectMessage?: string) {
+  const input = await loadSenderInput(ctx, owner)
+  const decision = chooseQuoteSender({ ...input, connectMessage })
+  const canChooseSender = input.canSendAsOthers
+
+  const toOption = (m: SenderMailbox) => ({
+    connectionId: m.id,
+    email: m.email,
+    ownerName: m.ownerName,
+    isShared: m.id === input.sharedId,
+  })
+
+  const options = canChooseSender
+    ? (await listCompanyMailboxes(ctx.companyId)).map(toOption)
+    : decision.ok
+      ? [toOption(decision.mailbox)]
+      : []
+
+  return {
+    defaultConnectionId: decision.ok ? decision.mailbox.id : null,
+    // Why there is no default, e.g. the user still has to connect a mailbox
+    defaultError: decision.ok ? null : decision.error,
+    canChooseSender,
+    options,
+  }
+}
+
+// Email sent from a record with no owner rule of its own (an opportunity
+// now, a ticket later) uses Send Quote's rule with the sender as the owner:
+// the shared mailbox when Quote Settings names one, otherwise the user's
+// own, and another mailbox only with quotes.sendAsOthers
+export const CONNECT_YOURS_FOR_EMAIL = "Connect your mailbox in Settings > Microsoft Integration to send email."
+
+export async function resolveOwnSender(ctx: SenderCaller, requestedId?: string | null) {
+  const input = await loadSenderInput(ctx, { userId: ctx.userId }, requestedId)
+  return chooseQuoteSender({ ...input, connectMessage: CONNECT_YOURS_FOR_EMAIL })
+}
+
+export function ownSenderOptions(ctx: SenderCaller) {
+  return senderOptionsFor(ctx, { userId: ctx.userId }, CONNECT_YOURS_FOR_EMAIL)
 }
 
 // The name the audit note uses for whoever clicked Send
