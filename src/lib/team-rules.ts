@@ -93,3 +93,51 @@ export function sidebarCounts(
     }),
   }
 }
+
+// ─── Screens ────────────────────────────────────────────────────────────────
+
+export interface TeamRole {
+  id: string
+  name: string
+  rank: number
+  color: string | null
+  isGlobalAdmin: boolean
+}
+
+// One team as GET /api/teams returns it (toTeamResponse in src/lib/teams.ts)
+export interface TeamSummary {
+  id: string
+  name: string
+  description: string | null
+  isDefault: boolean
+  sortOrder: number
+  memberCount: number
+  defaultRoles: TeamRole[]
+  // Whether the signed in user is in it
+  isMember: boolean
+  // The active members the signed in user may make an opportunity's owner
+  // in this team (visibleTeamMemberIds)
+  assignableOwnerIds: string[]
+  // Only for users who manage teams
+  members?: { id: string; name: string; active: boolean }[]
+}
+
+// The signed in user's rank as the server compares it (Global Admin highest)
+export function actorRank(access: { isGlobalAdmin: boolean; rank: number } | null | undefined): number {
+  if (!access) return 0
+  return access.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : access.rank
+}
+
+// Why a role can't be added as a team's default role, or null when it can.
+// A role already on the team can always be kept or removed.
+export function defaultRoleBlockReason(role: Pick<TeamRole, "rank" | "isGlobalAdmin">, myRank: number, alreadyOnTeam: boolean): string | null {
+  if (role.isGlobalAdmin) return "Global Admin can't be a team's default role"
+  if (!alreadyOnTeam && role.rank >= myRank) return "At or above your rank"
+  return null
+}
+
+// Why new members can't be added to a team with these default roles, or
+// null when they can (adding a member grants the team's roles)
+export function addMemberBlockReason(roles: readonly Pick<TeamRole, "rank">[], myRank: number): string | null {
+  return roles.some((r) => r.rank >= myRank) ? "This team gives a role at or above your rank" : null
+}

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
-import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target } from "lucide-react"
+import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
@@ -18,6 +18,7 @@ import { DistributorSettingsPanel } from "@/components/settings/DistributorSetti
 import { MicrosoftSettingsPanel } from "@/components/settings/MicrosoftSettingsPanel"
 import { SalesOrderSettingsPanel } from "@/components/settings/SalesOrderSettingsPanel"
 import { OpportunitySettingsPanel } from "@/components/settings/OpportunitySettingsPanel"
+import { TeamsSettingsPanel } from "@/components/settings/TeamsSettingsPanel"
 import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
 import { NoAccess } from "@/components/NoAccess"
 import { useAccess } from "@/components/AccessProvider"
@@ -26,6 +27,7 @@ type PanelKey =
   | "company"
   | "users"
   | "roles"
+  | "teams"
   | "industries"
   | "contactTags"
   | "categories"
@@ -58,6 +60,7 @@ const settingsCategories: SettingsCategory[] = [
     items: [
       { key: "users", label: "Manage Users", icon: UserCog },
       { key: "roles", label: "Roles & Permissions", icon: ShieldCheck },
+      { key: "teams", label: "Teams", icon: UsersRound },
     ],
   },
   {
@@ -107,6 +110,7 @@ const PANEL_PERMISSION: Record<PanelKey, string | null> = {
   company: "settingsSections.company",
   users: "settingsSections.users",
   roles: "settingsSections.users",
+  teams: "settingsSections.teams",
   industries: "settingsSections.company",
   contactTags: "settingsSections.company",
   categories: "settingsSections.company",
@@ -138,6 +142,8 @@ function renderPanel(key: PanelKey | null) {
       return <UsersSettingsPanel />
       case "roles":
       return <RolesPermissionsPanel />
+    case "teams":
+      return <TeamsSettingsPanel />
         case "industries":
       return <IndustriesSettingsPanel />
     case "categories":
