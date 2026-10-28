@@ -1,12 +1,13 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
 import { Modal } from "@/components/Modal"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
 import { OPPORTUNITY_TITLE_MAX, readExpectedValue } from "@/lib/opportunity-rules"
-import { ownerFieldChoices, type StageOption, type TypeOption } from "@/lib/opportunity-view"
+import { ownerFieldChoices, teamChoices, type StageOption, type TypeOption } from "@/lib/opportunity-view"
+import type { TeamSummary } from "@/lib/team-rules"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { isBlankHtml } from "@/lib/timeline-actions"
 import { ClientContactPicker } from "@/components/ClientContactPicker"
@@ -21,22 +22,30 @@ export function NewOpportunityModal({
   stages,
   types,
   clients,
+  teams,
+  users,
+  initialTeamId,
   onClose,
   onCreated,
 }: {
   stages: StageOption[]
   types: TypeOption[]
   clients: { id: string; name: string }[]
+  // GET /api/teams and GET /api/users, loaded by the page
+  teams: TeamSummary[]
+  users: { id: string; name: string; active: boolean }[]
+  // The team the page is filtered to, chosen first when the user may use it
+  initialTeamId?: string
   onClose: () => void
   onCreated: (id: string) => void
 }) {
-  const { access, can } = useAccess()
-  const myUserId = access?.userId ?? null
+  const { can } = useAccess()
   const canViewAll = can("opportunities.viewAll")
 
-  const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
   const [form, setForm] = useState({
     title: "",
+    // "" until the user picks one: the page's team filter when allowed, else General
+    teamId: "",
     // New records start unassigned (""); the user picks an owner if needed
     ownerId: "",
     stageId: stages.find((s) => s.category === "OPEN")?.id ?? "",
@@ -57,13 +66,20 @@ export function NewOpportunityModal({
   const locationTouched = !!party.client && locationPick?.clientId === party.client.id
   const locationValue = locationTouched ? locationPick!.value : (mainId ?? "")
 
-  // Every user's name (the current user shows by name too); who may be
-  // chosen is decided by ownerFieldChoices
-  useEffect(() => {
-    fetch("/api/users")
-      .then((res) => (res.ok ? res.json() : []))
-      .then((data) => Array.isArray(data) && setUsers(data))
-  }, [])
+  // The teams the user may put it in: their own teams, every team with
+  // viewAll, and General always. Owners are Unassigned and the chosen
+  // team's members the user may assign (ownerFieldChoices).
+  const teamOptions = teamChoices(teams, canViewAll, { includeDefault: true })
+  const defaultTeamId =
+    teamOptions.find((t) => t.id === initialTeamId)?.id ?? teamOptions.find((t) => t.isDefault)?.id ?? teamOptions[0]?.id ?? ""
+  const teamId = form.teamId || defaultTeamId
+  const team = teams.find((t) => t.id === teamId) ?? null
+
+  // Changing the team clears an owner who isn't one of its members
+  function changeTeam(nextId: string) {
+    const next = teams.find((t) => t.id === nextId)
+    setForm((prev) => ({ ...prev, teamId: nextId, ownerId: prev.ownerId && next?.assignableOwnerIds.includes(prev.ownerId) ? prev.ownerId : "" }))
+  }
 
   const update = (field: keyof typeof form, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }))
@@ -94,6 +110,7 @@ export function NewOpportunityModal({
         clientId: party.client?.id,
         contactId: party.contact?.id,
         ...(locationTouched ? { clientLocationId: locationPick!.value || null } : {}),
+        teamId: teamId || null,
         ownerId: form.ownerId || null,
         stageId: form.stageId || null,
         typeId: form.typeId || null,
@@ -113,7 +130,7 @@ export function NewOpportunityModal({
     onCreated(data.id)
   }
 
-  const owners = ownerFieldChoices(canViewAll, users, myUserId)
+  const owners = ownerFieldChoices(team?.assignableOwnerIds ?? [], users)
   const fieldError = (field: keyof typeof form) =>
     errors[field] ? (
       <p id={`new-opportunity-${field}-error`} className="mt-1 text-xs text-danger">
@@ -193,11 +210,24 @@ export function NewOpportunityModal({
           </div>
 
           <div>
+            <label htmlFor="new-opportunity-team" className={LABEL}>
+              Team
+            </label>
+            <select id="new-opportunity-team" value={teamId} onChange={(e) => changeTeam(e.target.value)} disabled={teamOptions.length === 0} className={FIELD}>
+              {teamOptions.length === 0 && <option value="">Loading...</option>}
+              {teamOptions.map((t) => (
+                <option key={t.id} value={t.id}>
+                  {t.name}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
             <label htmlFor="new-opportunity-owner" className={LABEL}>
               Owner
             </label>
             <select id="new-opportunity-owner" value={form.ownerId} onChange={(e) => update("ownerId", e.target.value)} className={FIELD}>
-              {/* The current user (the default) shows by name once the user list loads */}
+              {/* An owner shows by name once the user list loads */}
               {!owners.some((o) => o.value === form.ownerId) && <option value={form.ownerId}>Loading...</option>}
               {owners.map((o) => (
                 <option key={o.value || "unassigned"} value={o.value}>

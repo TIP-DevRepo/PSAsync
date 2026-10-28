@@ -141,16 +141,18 @@ export async function POST(req: NextRequest) {
     return apiError(400, "A contact is required")
   }
 
-  // The team: left out, null, or blank is the General team, open to every
-  // creator. A team that is named must be one the creator belongs to (any
-  // team with opportunities.viewAll).
+  // The team: left out, null, or blank is the General team. General is open
+  // to every creator (it is where new opportunities go unless another team
+  // is chosen); any other team must be one the creator belongs to (any team
+  // with opportunities.viewAll).
   const team = readOptionalId(body.teamId)
   if (team.error !== undefined) return apiError(400, "Invalid team", "INVALID_REFERENCE")
   if (team.value) {
     const invalidTeam = await assertRefs(ctx, { teamId: team.value })
     if (invalidTeam) return invalidTeam
   }
-  const teamId = team.value ?? (await loadDefaultTeamId(ctx.companyId))
+  const defaultTeamId = await loadDefaultTeamId(ctx.companyId)
+  const teamId = team.value ?? defaultTeamId
   if (!teamId) return apiError(400, "Invalid team", "INVALID_REFERENCE")
 
   // New records start unassigned: left out, null, or blank is unassigned. A
@@ -161,7 +163,7 @@ export async function POST(req: NextRequest) {
   const ownerId = owner.value
   const members = await loadTeamMemberIds(ctx, teamId, [ctx.userId, ownerId])
   const actorInTeam = members.has(ctx.userId)
-  if (team.value && !mayUseOpportunityTeam(ctx, actorInTeam)) {
+  if (teamId !== defaultTeamId && !mayUseOpportunityTeam(ctx, actorInTeam)) {
     return apiError(403, TEAM_NOT_MEMBER_MESSAGE, "FORBIDDEN")
   }
   if (!mayAssignOpportunityTo(ctx, ownerId, actorInTeam)) {
