@@ -6,7 +6,7 @@ import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { readJsonObject, stageChangeData, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
 import { readActionRequest } from "@/lib/action-buttons"
-import { readNoteBody, readOptionalNoteBody, timelineEntrySelect, toTimelineEntryResponse } from "@/lib/timeline"
+import { NOTE_EMPTY_MESSAGE, readNoteBody, readOptionalNoteBody, timelineEntrySelect, toTimelineEntryResponse } from "@/lib/timeline"
 import type { NoteStageChange } from "@/lib/timeline-actions"
 import { readAttachmentIds, readEmailRecipients, readEmailSubject, RECORD_EMAIL_MESSAGES } from "@/lib/record-email"
 import { resolveOwnSender } from "@/lib/quote-sender"
@@ -69,7 +69,7 @@ export async function POST(
   if (action.response) return action.response
   const { button, stage } = action
   const message = action.noteRequired ? readNoteBody(body.body) : readOptionalNoteBody(body.body)
-  if (message.error !== undefined) return apiError(400, message.error)
+  if (message.error !== undefined) return apiError(400, message.error === NOTE_EMPTY_MESSAGE ? RECORD_EMAIL_MESSAGES.messageRequired : message.error)
 
   const requested = body.sendAsConnectionId
   if (requested !== undefined && requested !== null && typeof requested !== "string") {

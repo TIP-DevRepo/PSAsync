@@ -15,6 +15,7 @@ export const RECORD_EMAIL_MESSAGES = {
   noRecipient: "Add at least one recipient",
   tooManyRecipients: `An email can go to at most ${RECORD_EMAIL_MAX_RECIPIENTS} recipients`,
   subjectRequired: "Subject is required",
+  messageRequired: "A message is required",
   subjectTooLong: `Subject must be ${RECORD_EMAIL_SUBJECT_MAX} characters or fewer`,
   invalidAttachments: "Invalid attachment",
   tooManyAttachments: `An email can have at most ${RECORD_EMAIL_MAX_ATTACHMENTS} attachments`,
