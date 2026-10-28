@@ -50,6 +50,7 @@ model Company {
   opportunityTypes        OpportunityType[]
   opportunitySettings     OpportunitySettings?
   timelineEntries         TimelineEntry[]
+  teams                   Team[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -160,6 +161,7 @@ model User {
   createdOpportunities        Opportunity[]              @relation("OpportunityCreatedBy")
   opportunityAttachments      OpportunityAttachment[]
   timelineEntries             TimelineEntry[]
+  teamMemberships             TeamMember[]
 }
 
 // ─── SESSION (Auth.js) ───────────────────────────────────────────────────────
@@ -1303,6 +1305,7 @@ model Role {
   users             User[]
   userRoles         UserRole[]         @relation("UserRoleRole")
   approvalWorkflows ApprovalWorkflow[]
+  teamDefaultRoles  TeamDefaultRole[]
 
   @@unique([companyId, name])
 }
@@ -1320,6 +1323,58 @@ model UserRole {
 
   @@unique([userId, roleId])
   @@index([userId])
+  @@index([roleId])
+}
+
+// ─── TEAMS ───────────────────────────────────────────────────────────────────
+// Admin managed groups of users, shared by opportunities now and tickets
+// later. A user can be in several teams. Every company has one default
+// catch all team (isDefault, named General when it is created), which can be
+// renamed but never deleted; src/lib/team-defaults.ts creates it on first
+// use. A team's default roles are granted to its members while they are in
+// it, worked out when permissions are resolved (getEffectiveAccess), never
+// copied into UserRole.
+model Team {
+  id          String   @id @default(cuid())
+  companyId   String
+  company     Company  @relation(fields: [companyId], references: [id])
+  name        String
+  description String?
+  // Exactly one per company: the General team
+  isDefault   Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members       TeamMember[]
+  defaultRoles  TeamDefaultRole[]
+  opportunities Opportunity[]
+
+  @@unique([companyId, name])
+  @@index([companyId])
+}
+
+model TeamMember {
+  id        String   @id @default(cuid())
+  teamId    String
+  team      Team     @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([teamId, userId])
+  @@index([userId])
+}
+
+// Roles every member of the team holds while they are in it
+model TeamDefaultRole {
+  id     String @id @default(cuid())
+  teamId String
+  team   Team   @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([teamId, roleId])
   @@index([roleId])
 }
 
@@ -1610,6 +1665,13 @@ model Opportunity {
   // Set when the opportunity moves into a WON or LOST stage, cleared when
   // it moves back to an OPEN one
   closedAt          DateTime?
+  // Every opportunity has a team (src/lib/team-defaults.ts creates the
+  // General team and moves every opportunity without one into it, and
+  // createOpportunity always sets one). Nullable only so this column could
+  // be added to a table that already had rows, without a backfill inside
+  // the migration; the app never writes null.
+  teamId            String?
+  team              Team?             @relation(fields: [teamId], references: [id], onDelete: Restrict)
   createdById       String
   createdBy         User              @relation("OpportunityCreatedBy", fields: [createdById], references: [id])
   createdAt         DateTime          @default(now())
@@ -1627,6 +1689,7 @@ model Opportunity {
   @@index([ownerId])
   @@index([clientId])
   @@index([clientLocationId])
+  @@index([teamId])
 }
 
 // ─── OPPORTUNITY ATTACHMENTS ──────────────────────────────────────────────
