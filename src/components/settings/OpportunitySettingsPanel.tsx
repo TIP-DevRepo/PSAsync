@@ -244,36 +244,37 @@ function StagesSection({ stages, setStages }: { stages: StageOption[]; setStages
       </div>
       <SectionError message={error} onDismiss={() => setError(null)} />
 
-      {/* Fixed column widths, scrolling sideways on a narrow screen */}
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
-          <colgroup>
-            <col style={{ width: 48 }} />
-            <col />
-            <col style={{ width: 130 }} />
-            <col style={{ width: 120 }} />
-            <col style={{ width: 160 }} />
-          </colgroup>
-          <thead>
-            <tr className="border-b border-border text-left text-caption text-muted-foreground">
-              <th scope="col" className="py-2 pl-2">
-                <span className="sr-only">Order</span>
-              </th>
-              <th scope="col" className="py-2 pr-3">
-                Name
-              </th>
-              <th scope="col" className="py-2 pr-3">
-                Category
-              </th>
-              <th scope="col" className="py-2 pr-3 text-right">
-                Win probability
-              </th>
-              <th scope="col" className="py-2 pr-3 text-right">
-                <span className="sr-only">Actions</span>
-              </th>
-            </tr>
-          </thead>
-          <DndContext id="opportunity-stages-order" sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} accessibility={{ announcements: announcementsFor(stageName) }}>
+      {/* Fixed column widths, scrolling sideways on a narrow screen. DndContext renders hidden
+          accessibility elements where it sits, so it wraps the table, never goes inside it. */}
+      <DndContext id="opportunity-stages-order" sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} accessibility={{ announcements: announcementsFor(stageName) }}>
+        <div className="overflow-x-auto rounded-lg border border-border">
+          <table className="w-full min-w-[640px] table-fixed border-collapse text-sm">
+            <colgroup>
+              <col style={{ width: 48 }} />
+              <col />
+              <col style={{ width: 130 }} />
+              <col style={{ width: 120 }} />
+              <col style={{ width: 160 }} />
+            </colgroup>
+            <thead>
+              <tr className="border-b border-border text-left text-caption text-muted-foreground">
+                <th scope="col" className="py-2 pl-2">
+                  <span className="sr-only">Order</span>
+                </th>
+                <th scope="col" className="py-2 pr-3">
+                  Name
+                </th>
+                <th scope="col" className="py-2 pr-3">
+                  Category
+                </th>
+                <th scope="col" className="py-2 pr-3 text-right">
+                  Win probability
+                </th>
+                <th scope="col" className="py-2 pr-3 text-right">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
             <SortableContext items={stages.map((s) => s.id)} strategy={verticalListSortingStrategy}>
               <tbody>
                 {stages.map((stage) => (
@@ -293,9 +294,9 @@ function StagesSection({ stages, setStages }: { stages: StageOption[]; setStages
                 ))}
               </tbody>
             </SortableContext>
-          </DndContext>
-        </table>
-      </div>
+          </table>
+        </div>
+      </DndContext>
 
       <form
         className="flex flex-wrap items-end gap-3"
