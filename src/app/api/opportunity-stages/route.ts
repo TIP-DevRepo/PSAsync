@@ -13,11 +13,11 @@ import {
 } from "@/lib/opportunity-rules"
 import { OpportunityStageCategory } from "@/generated/prisma"
 
-// The Opportunities page and Opportunity Settings both list the stages, in
-// the company's order
+// The Opportunities page, Opportunity Settings, and Action Buttons (a
+// button's fixed stage) all list the stages, in the company's order
 export async function GET() {
   const { ctx, response } = await requireAccess({
-    permission: ["pages.opportunities", "settingsSections.opportunities"],
+    permission: ["pages.opportunities", "settingsSections.opportunities", "settingsSections.actionButtons"],
     message: "You do not have permission to view opportunity stages",
   })
   if (response) return response
