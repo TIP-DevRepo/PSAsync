@@ -10,6 +10,9 @@ import {
   ROLE_AT_OR_ABOVE_RANK_MESSAGE,
 } from "@/lib/user-roles"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
+import { effectiveRoles, rankOf } from "@/lib/team-roles"
+
+const targetRoleFields = { id: true, rank: true, isGlobalAdmin: true, isEveryone: true } as const
 
 export async function PATCH(
   req: NextRequest,
@@ -48,7 +51,12 @@ export async function PATCH(
       active: true,
       userRoles: {
         where: { role: { isEveryone: false } },
-        select: { role: { select: { rank: true, isGlobalAdmin: true } } },
+        select: { role: { select: targetRoleFields } },
+      },
+      // Team default roles count toward the user's rank, as everywhere else
+      teamMemberships: {
+        where: { team: { companyId } },
+        select: { team: { select: { id: true, defaultRoles: { select: { role: { select: targetRoleFields } } } } } },
       },
     },
   })
@@ -57,12 +65,11 @@ export async function PATCH(
   }
 
   // Hierarchy: you can only change the roles of, or activate/deactivate, a
-  // user whose highest role is below your own highest role, and you can't
+  // user whose highest role (direct or from a team) is below your own, and you can't
   // hand out a role at or above your own rank either, otherwise this would
   // let someone edit their way around the same protection.
   const actorRank = await getUserRank(ctx.userId)
-  const targetRanks = targetUser.userRoles.map((ur) => ur.role.rank)
-  const targetRank = targetRanks.length > 0 ? Math.max(...targetRanks) : 0
+  const targetRank = rankOf(effectiveRoles(targetUser.userRoles.map((ur) => ur.role), targetUser.teamMemberships))
 
   if (roleIds !== undefined && targetRank >= actorRank) {
     return NextResponse.json(
