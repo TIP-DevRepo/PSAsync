@@ -1,13 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
-import { assertRefs, loadOpportunityTimelineEntry, loadViewableOpportunity, opportunityStageWhere, opportunityWhere } from "@/lib/scoped-loaders"
+import { loadOpportunityTimelineEntry, loadViewableOpportunity, opportunityWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
-import { readJsonObject, readOptionalId, stageChangeData, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
+import { readJsonObject, stageChangeData, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
 import type { NoteStageChange } from "@/lib/timeline-actions"
 import type { Prisma } from "@/generated/prisma"
-import { INVALID_CURSOR_MESSAGE, readNoteBody, readTimelinePage, timelineEntrySelect, toTimelineEntryResponse } from "@/lib/timeline"
+import {
+  INVALID_CURSOR_MESSAGE,
+  NOTE_EMPTY_MESSAGE,
+  readNoteBody,
+  readOptionalNoteBody,
+  readTimelinePage,
+  timelineEntrySelect,
+  toTimelineEntryResponse,
+} from "@/lib/timeline"
+import { readActionRequest } from "@/lib/action-buttons"
 
 // The opportunity's timeline, newest first, TIMELINE_PAGE_SIZE at a time.
 // ?cursor= is the last entry of the previous page (nextCursor), which must
@@ -45,6 +54,13 @@ export async function GET(
 // cleared). The move is recorded on the note itself (data.stageChange),
 // never as a separate stage_changed entry. Moving to the stage it is
 // already in records no change.
+//
+// An optional actionButtonId names the NOTE button the note was posted
+// with (readActionRequest): its stage rule decides the stage (none, the
+// one asked for, or its fixed stage), its note rule whether the text may
+// be empty, and its label is stored on the entry (data.actionButton). A
+// note left empty under an optional button must move the stage, or there
+// is nothing to post.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -64,20 +80,14 @@ export async function POST(
 
   const body = await readJsonObject(req)
   if (!body) return apiError(400, INVALID_BODY_MESSAGE)
-  const note = readNoteBody(body.body)
+  const action = await readActionRequest(ctx, body, "NOTE")
+  if (action.response) return action.response
+  const { button, stage } = action
+  const note = action.noteRequired ? readNoteBody(body.body) : readOptionalNoteBody(body.body)
   if (note.error !== undefined) return apiError(400, note.error)
 
-  const stageRef = readOptionalId(body.stageId)
-  if (stageRef.error !== undefined) return apiError(400, "Invalid stage", "INVALID_REFERENCE")
-  const invalid = await assertRefs(ctx, { opportunityStageId: stageRef.value })
-  if (invalid) return invalid
-  const stage = stageRef.value
-    ? await prisma.opportunityStage.findFirst({ where: opportunityStageWhere(ctx, stageRef.value), select: { id: true, name: true, category: true } })
-    : null
-  if (stageRef.value && !stage) return apiError(400, "Invalid stage", "INVALID_REFERENCE")
-
   const now = new Date()
-  const entry = await prisma.$transaction(async (tx) => {
+  const result = await prisma.$transaction(async (tx) => {
     let stageChange: NoteStageChange | null = null
     if (stage) {
       const before = await tx.opportunity.findFirstOrThrow({
@@ -90,6 +100,12 @@ export async function POST(
         stageChange = { from: before.stage, to: stage }
       }
     }
+    // An empty optional note that moves nothing has nothing to say
+    if (note.value === null && !stageChange) return null
+    const data = {
+      ...(stageChange ? { stageChange } : {}),
+      ...(button ? { actionButton: { id: button.id, label: button.label } } : {}),
+    }
     return tx.timelineEntry.create({
       data: {
         companyId: ctx.companyId,
@@ -97,11 +113,12 @@ export async function POST(
         kind: "NOTE",
         authorId: ctx.userId,
         body: note.value,
-        ...(stageChange ? { data: { stageChange } as unknown as Prisma.InputJsonObject } : {}),
+        ...(Object.keys(data).length > 0 ? { data: data as unknown as Prisma.InputJsonObject } : {}),
         createdAt: now,
       },
       select: timelineEntrySelect,
     })
   })
-  return NextResponse.json(toTimelineEntryResponse(entry))
+  if (!result) return apiError(400, NOTE_EMPTY_MESSAGE)
+  return NextResponse.json(toTimelineEntryResponse(result))
 }

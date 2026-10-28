@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
-import { describeTimelineAction, isBlankHtml, noteStageChange } from "@/lib/timeline-actions"
+import { describeTimelineAction, entryActionButton, isBlankHtml, noteStageChange } from "@/lib/timeline-actions"
 import { presetStageId, type ActionButtonDefinition } from "@/lib/timeline-buttons"
 import { CATEGORY_LABELS } from "@/lib/opportunity-rules"
 import type { StageCategory } from "@/lib/opportunity-view"
@@ -62,14 +62,19 @@ const STAGE_GROUPS: StageCategory[] = ["OPEN", "WON", "LOST"]
 // route; an entry's own route is timelineUrl/entryId. refreshKey reloads
 // the first page, for a page that just made a change the server recorded
 // as an action. With stages, the composer can also move the record to a
-// stage (sent as stageId with the note), and onPosted runs after a note is
-// saved so the page can reload what the note changed.
+// stage (sent as stageId with the note) as the button's stage mode allows:
+// not at all, a stage the user picks, or the button's fixed stage, shown
+// read only. A button whose note is required keeps Post disabled until
+// there is text. The note is sent with the button's id, so the server
+// applies the same rules. onPosted runs after a note is saved so the page
+// can reload what the note changed.
 export function Timeline({
   timelineUrl,
   canAddNotes,
   myUserId,
   refreshKey = 0,
   buttons,
+  unavailableReason,
   stages,
   onPosted,
   showButtons = true,
@@ -78,13 +83,15 @@ export function Timeline({
 }: {
   timelineUrl: string
   // opportunities.edit (or the subject's own edit permission); also needed
-  // to edit or delete one's own notes
+  // to use the buttons and to edit or delete one's own notes
   canAddNotes: boolean
   myUserId: string | null
   refreshKey?: number
-  // The action bar's buttons (src/lib/timeline-buttons.ts); shown only
-  // with canAddNotes
+  // The action bar's buttons (src/lib/timeline-buttons.ts), shown to
+  // everyone who can view the record
   buttons: readonly ActionButtonDefinition[]
+  // Why a button can't be used (no edit access), or null
+  unavailableReason?: (button: ActionButtonDefinition) => string | null
   stages?: readonly TimelineStageOption[]
   onPosted?: (entry: TimelineEntryData) => void
   // False when the page shows the bar elsewhere (the opportunity header) and
@@ -101,9 +108,9 @@ export function Timeline({
   const [loadedKey, setLoadedKey] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
   const [loadingMore, setLoadingMore] = useState(false)
-  // The open composer: which button opened it, the note, and the stage it
-  // moves the record to ("" for no change). Null while closed.
-  const [composer, setComposer] = useState<{ buttonId: string; html: string; stageId: string } | null>(null)
+  // The open composer: the button that opened it, the note, and the stage
+  // it moves the record to ("" for no change). Null while closed.
+  const [composer, setComposer] = useState<{ button: ActionButtonDefinition; html: string; stageId: string } | null>(null)
   const [posting, setPosting] = useState(false)
   const [editing, setEditing] = useState<{ id: string; html: string } | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
@@ -149,7 +156,7 @@ export function Timeline({
   useImperativeHandle(ref, () => ({ openComposer }))
 
   const composerRef = useRef<HTMLDivElement>(null)
-  const openButtonId = composer?.buttonId ?? null
+  const openButtonId = composer?.button.id ?? null
   // A bar outside the timeline (the header) shows which button is open, and
   // the composer is brought into view, which matters when the timeline sits
   // below the details panel at phone width
@@ -159,9 +166,14 @@ export function Timeline({
   }, [openButtonId, onComposerChange])
 
   function openComposer(button: ActionButtonDefinition) {
+    if (!canAddNotes || unavailableReason?.(button)) return
     const stageId = presetStageId(button, stages ?? [])
-    setComposer((prev) => ({ buttonId: button.id, html: prev?.html ?? "", stageId }))
+    setComposer((prev) => ({ button, html: prev?.html ?? "", stageId }))
   }
+
+  // Post needs text when the button requires it, and an empty optional
+  // note must at least move the stage
+  const canPost = !!composer && (!isBlankHtml(composer.html) || (!composer.button.opens.noteRequired && !!composer.stageId))
 
   async function closeComposer() {
     if (composer && !isBlankHtml(composer.html)) {
@@ -178,13 +190,16 @@ export function Timeline({
   }
 
   async function addNote() {
-    if (!composer || isBlankHtml(composer.html)) return
-    const draft = composer.html
+    if (!composer || !canPost) return
     setPosting(true)
     const res = await fetch(timelineUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: draft, ...(composer.stageId ? { stageId: composer.stageId } : {}) }),
+      body: JSON.stringify({
+        body: composer.html,
+        actionButtonId: composer.button.id,
+        ...(composer.stageId ? { stageId: composer.stageId } : {}),
+      }),
     })
     setPosting(false)
     if (!res.ok) {
@@ -242,13 +257,21 @@ export function Timeline({
         Timeline
       </h2>
 
-      {canAddNotes && showButtons && <ActionButtonBar buttons={buttons} onSelect={openComposer} activeId={composer?.buttonId} disabled={posting} label="Timeline actions" />}
+      {showButtons && (
+        <ActionButtonBar buttons={buttons} onSelect={openComposer} activeId={openButtonId} unavailableReason={unavailableReason} label="Timeline actions" />
+      )}
 
       {canAddNotes && composer && (
         <div ref={composerRef} className="scroll-mt-4 space-y-3 rounded-lg border border-border bg-card p-3 shadow-card">
+          <p className="text-sm font-medium text-foreground">
+            {composer.button.label}
+            {!composer.button.opens.noteRequired && <span className="ml-2 text-xs font-normal text-muted-foreground">Note optional</span>}
+          </p>
           <RichTextEditor value={composer.html} onChange={(html) => setComposer((prev) => (prev ? { ...prev, html } : prev))} ariaLabel="New note" />
           <div className="flex flex-wrap items-end justify-between gap-3">
-            {stages && stages.length > 0 ? (
+            {composer.button.opens.stageMode === "FIXED" ? (
+              <FixedStage stage={stages?.find((st) => st.id === composer.stageId) ?? null} />
+            ) : composer.button.opens.stageMode === "CHOOSE" && stages && stages.length > 0 ? (
               <div className="w-full sm:w-64">
                 <label htmlFor="timeline-composer-stage" className="mb-1 block text-xs font-medium text-muted-foreground">
                   Change stage to
@@ -281,7 +304,7 @@ export function Timeline({
               <Button variant="outline" onClick={closeComposer} disabled={posting}>
                 Cancel
               </Button>
-              <Button onClick={addNote} disabled={posting || isBlankHtml(composer.html)}>
+              <Button onClick={addNote} disabled={posting || !canPost}>
                 {posting ? "Posting..." : "Post"}
               </Button>
             </div>
@@ -322,6 +345,7 @@ export function Timeline({
                       </span>
                     )}
                     <span className="font-semibold text-foreground">{entry.author?.name ?? (entry.kind === "NOTE" ? "Former user" : "System")}</span>
+                    <EntryButtonLabel data={entry.data} />
                     <NoteStagePill data={entry.data} />
                     <time dateTime={entry.createdAt}>{when(entry.createdAt)}</time>
                     {entry.editedAt && (
@@ -382,6 +406,23 @@ export function Timeline({
       )}
     </section>
   )
+}
+
+// The stage a fixed stage button moves to, read only
+function FixedStage({ stage }: { stage: TimelineStageOption | null }) {
+  return (
+    <div className="w-full sm:w-64">
+      <p className="mb-1 text-xs font-medium text-muted-foreground">Moves stage to</p>
+      {stage ? <StagePill name={stage.name} category={stage.category} /> : <p className="text-sm text-muted-foreground">Loading...</p>}
+    </div>
+  )
+}
+
+// The action button an entry was made with, as it was named then
+function EntryButtonLabel({ data }: { data: unknown }) {
+  const button = entryActionButton(data)
+  if (!button) return null
+  return <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{button.name}</span>
 }
 
 // A note posted with a stage change shows the move, for example "New to

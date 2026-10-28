@@ -544,6 +544,12 @@ export interface BodyRefs {
   opportunityTypeId?: unknown
   // Teams of the company (one id or a list)
   teamId?: unknown
+  actionButtonId?: unknown
+  // An opportunity of the company; the parent of opportunityAttachmentId
+  opportunityId?: unknown
+  // Attachments of opportunityId when it's given, otherwise of any company
+  // opportunity (one id or a list)
+  opportunityAttachmentId?: unknown
 }
 
 type RefKey = keyof BodyRefs
@@ -570,6 +576,9 @@ const REF_LABELS: Record<RefKey, string> = {
   opportunityStageId: "stage",
   opportunityTypeId: "opportunity type",
   teamId: "team",
+  actionButtonId: "action button",
+  opportunityId: "opportunity",
+  opportunityAttachmentId: "attachment",
 }
 
 // Turns a single id *Where builder's clause into one matching every id in
@@ -596,7 +605,7 @@ function readIds(value: unknown): string[] | null {
 // view rule (viewableSalesOrderId) read userId and can
 type RefScope = Scope & Partial<Pick<AccessContext, "userId" | "can">>
 
-function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string, vendorId?: string) {
+function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string, vendorId?: string, opportunityId?: string) {
   const [first] = ids
   const company = { companyId: ctx.companyId }
   switch (key) {
@@ -647,6 +656,14 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
       return prisma.opportunityType.count({ where: whereIds(opportunityTypeWhere(ctx, first), ids) })
     case "teamId":
       return prisma.team.count({ where: whereIds(teamWhere(ctx, first), ids) })
+    case "actionButtonId":
+      return prisma.actionButton.count({ where: { id: { in: ids }, companyId: ctx.companyId } })
+    case "opportunityId":
+      return prisma.opportunity.count({ where: whereIds(opportunityWhere(ctx, first), ids) })
+    case "opportunityAttachmentId":
+      return prisma.opportunityAttachment.count({
+        where: opportunityId ? whereIds(opportunityAttachmentWhere(ctx, opportunityId, first), ids) : { id: { in: ids }, opportunity: company },
+      })
   }
 }
 
@@ -656,11 +673,13 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
 // same whether the id is made up or belongs to another company:
 //   const invalid = await assertRefs(ctx, { clientId: body.clientId, contactId: body.contactId })
 //   if (invalid) return invalid
-// contactId and clientLocationId are tied to clientId, and vendorLocationId
-// to vendorId, when that parent is a single id.
+// contactId and clientLocationId are tied to clientId, vendorLocationId
+// to vendorId, and opportunityAttachmentId to opportunityId, when that
+// parent is a single id.
 export async function assertRefs(ctx: RefScope, refs: BodyRefs) {
   const clientId = typeof refs.clientId === "string" && refs.clientId ? refs.clientId : undefined
   const vendorId = typeof refs.vendorId === "string" && refs.vendorId ? refs.vendorId : undefined
+  const opportunityId = typeof refs.opportunityId === "string" && refs.opportunityId ? refs.opportunityId : undefined
 
   const checks: { key: RefKey; ids: string[] | null }[] = []
   for (const key of Object.keys(REF_LABELS) as RefKey[]) {
@@ -670,7 +689,7 @@ export async function assertRefs(ctx: RefScope, refs: BodyRefs) {
   }
 
   const counts = await Promise.all(
-    checks.map(({ key, ids }) => (ids ? countRefs(ctx, key, ids, clientId, vendorId) : Promise.resolve(-1)))
+    checks.map(({ key, ids }) => (ids ? countRefs(ctx, key, ids, clientId, vendorId, opportunityId) : Promise.resolve(-1)))
   )
 
   const failed = checks.find(({ ids }, i) => !ids || counts[i] !== ids.length)

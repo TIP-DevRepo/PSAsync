@@ -70,6 +70,17 @@ export function noteStageChange(data: unknown): NoteStageChange | null {
   return isRef(from) && isRef(to) ? { from, to } : null
 }
 
+// An entry made through an action button stores the button as it was named
+// then, { actionButton: { id, label } }, so the entry still reads correctly
+// after the button is renamed or deleted
+export function entryActionButton(data: unknown): TimelineRef | null {
+  const button = data && typeof data === "object" ? (data as { actionButton?: unknown }).actionButton : null
+  if (!button || typeof button !== "object") return null
+  const { id, name, label } = button as { id?: unknown; name?: unknown; label?: unknown }
+  const text = typeof label === "string" ? label : name
+  return typeof id === "string" && typeof text === "string" && text ? { id, name: text } : null
+}
+
 export type TimelineAction ={ [K in TimelineActionKey]: { action: K; data: TimelineActionData[K] } }[TimelineActionKey]
 
 // True when HTML holds no text at all once its tags are removed (the editor

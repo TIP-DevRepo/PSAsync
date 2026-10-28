@@ -59,6 +59,16 @@ export function readNoteBody(value: unknown): { value: string; error?: undefined
   return { value: html }
 }
 
+// A note body under an action button whose note is optional: empty (left
+// out, or no text once sanitized) is null, anything else is read as
+// readNoteBody reads it
+export function readOptionalNoteBody(value: unknown): { value: string | null; error?: undefined } | { error: string; value?: undefined } {
+  if (value === undefined || value === null) return { value: null }
+  const read = readNoteBody(value)
+  if (read.error === NOTE_EMPTY_MESSAGE) return { value: null }
+  return read
+}
+
 // What every timeline route returns for an entry. Authors are names only.
 export const timelineEntrySelect = {
   id: true,

@@ -18,6 +18,7 @@ import {
   WIN_PROBABILITY_MESSAGE,
 } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
+import { stageUsedByButtonMessage } from "@/lib/action-buttons"
 import { OpportunityStageCategory, type Prisma } from "@/generated/prisma"
 
 function refusalResponse(refusal: Refusal) {
@@ -105,8 +106,9 @@ export async function PATCH(
   return NextResponse.json(result)
 }
 
-// Refused while any opportunity uses the stage, when it is the last stage of
-// its category, or when it is the stage a sent quote moves to
+// Refused while any opportunity uses the stage, while an action button
+// moves to it, when it is the last stage of its category, or when it is the
+// stage a sent quote moves to
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -128,6 +130,12 @@ export async function DELETE(
 
       const inUse = await tx.opportunity.count({ where: { companyId, stageId: stage.id } })
       if (inUse > 0) return refuse(409, stageInUseMessage(inUse), "STAGE_IN_USE")
+      const button = await tx.actionButton.findFirst({
+        where: { companyId, fixedStageId: stage.id },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        select: { label: true },
+      })
+      if (button) return refuse(409, stageUsedByButtonMessage(button.label), "STAGE_USED_BY_BUTTON")
       const sameCategory = await tx.opportunityStage.count({ where: { companyId, category: stage.category } })
       if (sameCategory <= 1) return refuse(409, lastStageMessage(stage.category, "deleted"), "LAST_STAGE_IN_CATEGORY")
       if (stage.id === settings.quoteSentStageId) return refuse(409, QUOTE_SENT_STAGE_DELETE_MESSAGE, "QUOTE_SENT_STAGE")
@@ -138,8 +146,8 @@ export async function DELETE(
     if (isRefusal(result)) return refusalResponse(result)
     return NextResponse.json(result)
   } catch (err) {
-    // An opportunity moved into the stage since the count above (the
-    // database refuses the delete)
+    // An opportunity moved into the stage, or a button was set to it, since
+    // the checks above (the database refuses the delete)
     if (isPrismaError(err, "P2003")) return apiError(409, stageInUseMessage(null), "STAGE_IN_USE")
     const { message, status } = userFacingError(err, "Deleting an opportunity stage")
     return apiError(status, message)
