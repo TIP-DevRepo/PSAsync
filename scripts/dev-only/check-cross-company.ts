@@ -15,8 +15,14 @@
 // records (if any fails the harness itself is broken and nothing else
 // runs), then every attempt below in both directions, then the team
 // lists (the sidebar counts and GET /api/teams must hold the caller's own
-// teams and nothing of the other company's), then the deactivated user
-// check. Any FAIL or UNEXPECTED exits non zero.
+// teams and nothing of the other company's), the action button lists
+// (likewise, own buttons only), then the deactivated user check. Any FAIL
+// or UNEXPECTED exits non zero.
+//
+// The Email action is only called on the other company's opportunity (a
+// 404 before anything is read) or with the other company's attachment or
+// button (a 400 before anything is sent). The test companies have no
+// Microsoft credentials either, so nothing could go out.
 
 import type { PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -252,6 +258,18 @@ const ATTEMPTS: Attempt[] = [
   { name: "Opportunity POST teamId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, teamId: c.other.salesTeamId }), expect: 400, expectError: "Invalid team" },
   { name: "Opportunity PATCH teamId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ teamId: c.other.generalTeamId, ownerId: null }), expect: 400, expectError: "Invalid team" },
 
+  // ── Action buttons ──
+  { name: "PATCH other company's action button", directions: "both", method: "PATCH", path: (c) => `/api/action-buttons/${c.other.actionButtonId}`, body: () => ({ label: "Changed" }), expect: 404 },
+  { name: "DELETE other company's action button", directions: "both", method: "DELETE", path: (c) => `/api/action-buttons/${c.other.actionButtonId}`, expect: 404 },
+  { name: "Reorder with other company's action button", directions: "both", method: "POST", path: () => "/api/action-buttons/reorder", body: (c) => ({ buttonIds: [c.other.actionButtonId] }), expect: 409, expectError: "The button list changed" },
+  { name: "Action button POST fixedStageId", directions: "both", method: "POST", path: () => "/api/action-buttons", body: (c) => ({ label: "Should Not Exist", icon: "note", color: "#1B3A5C", kind: "NOTE", stageMode: "FIXED", fixedStageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Action button PATCH fixedStageId", directions: "both", method: "PATCH", path: (c) => `/api/action-buttons/${c.own.actionButtonId}`, body: (c) => ({ fixedStageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Note on own opportunity with other company's actionButtonId", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", actionButtonId: c.other.actionButtonId }), expect: 400, expectError: "Invalid action button" },
+  { name: "Email from other company's opportunity", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.other.opportunityId}/email`, body: () => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>" }), expect: 404 },
+  { name: "Email options of other company's opportunity", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}/email-options`, expect: 404 },
+  { name: "Email from own opportunity with other company's attachment", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/email`, body: (c) => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>", attachmentIds: [c.other.opportunityAttachmentId] }), expect: 400, expectError: "Invalid attachment" },
+  { name: "Email from own opportunity with other company's actionButtonId", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/email`, body: (c) => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>", actionButtonId: c.other.actionButtonId }), expect: 400, expectError: "Invalid action button" },
+
   // ── Teams ──
   { name: "PATCH other company's team", directions: "both", method: "PATCH", path: (c) => `/api/teams/${c.other.salesTeamId}`, body: () => ({ name: "Changed" }), expect: 404 },
   { name: "DELETE other company's team", directions: "both", method: "DELETE", path: (c) => `/api/teams/${c.other.salesTeamId}`, expect: 404 },
@@ -442,6 +460,7 @@ async function snapshot(prisma: PrismaClient, companyId: string): Promise<Record
     opportunityTypes: prisma.opportunityType.findMany({ where: { companyId }, ...byId }),
     opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId } }),
     teams: prisma.team.findMany({ where: { companyId }, ...byId, include: { members: byId, defaultRoles: byId } }),
+    actionButtons: prisma.actionButton.findMany({ where: { companyId }, ...byId }),
     roles: prisma.role.findMany({ where: { companyId }, ...byId }),
     settings: prisma.companySettings.findUnique({ where: { companyId } }),
     users: prisma.user.findMany({ where: { companyId }, ...byId, select: { id: true, active: true, roleId: true } }),
@@ -529,6 +548,7 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       { name: "GET own opportunity timeline", method: "GET", path: `/api/opportunities/${own.opportunityId}/timeline`, mustContain: own.timelineNoteId },
       { name: "GET own opportunity stages", method: "GET", path: "/api/opportunity-stages", mustContain: own.opportunityStageId },
       { name: "GET own teams", method: "GET", path: "/api/teams", mustContain: own.salesTeamId },
+      { name: "GET own action buttons", method: "GET", path: "/api/action-buttons", mustContain: own.actionButtonId },
       // Writes the values already stored, so nothing visible changes
       { name: "PATCH own vendor contact", method: "PATCH", path: `/api/vendors/${own.vendorId}/contacts/${own.vendorContactId}`, json: { lastName: n.vendorContactLastName }, mustContain: own.vendorContactId },
       { name: "PATCH own PO line item", method: "PATCH", path: `/api/purchase-orders/${own.purchaseOrderId}/line-items/${own.poLineId}`, json: { name: n.poLine }, mustContain: own.poLineId },
@@ -646,6 +666,26 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
               ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
               : null
       rows.push({ attempt: `${ownLetter} ${path} holds only its own teams`, expected: "200, own teams only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+    }
+  }
+
+  // The action button lists: each admin's lists hold its own buttons and
+  // nothing of the other company's
+  for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+    const own = ids[ownLetter]
+    const other = ids[otherLetter]
+    for (const path of ["/api/action-buttons", "/api/action-buttons?for=opportunity"]) {
+      const res = await admins[ownLetter].request("GET", path)
+      const leaked = [other.actionButtonId, ...markersFor(other, names[otherLetter])].filter((m) => res.text.includes(m))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : !res.text.includes(own.actionButtonId)
+            ? "its own button is missing"
+            : leaked.length > 0
+              ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
+              : null
+      rows.push({ attempt: `${ownLetter} ${path} holds only its own buttons`, expected: "200, own buttons only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
     }
   }
 

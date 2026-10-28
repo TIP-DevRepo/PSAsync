@@ -139,6 +139,30 @@
 // legitimate cases go through (Ops' Team Lite removed and attached again,
 // Test Team Basic B added, Test Team Manager B removing itself, and Test
 // Manager B giving Team Lite directly) and puts everything back.
+//
+// Action buttons (ACTION_BUTTON_GUARDED and the attempts after it): the
+// admin routes need settingsSections.actionButtons (refused for Test
+// Everyone B, Test Opp Viewer B, and Test Opp Settings B), the record list
+// (?for=opportunity) is readable by Test Opp Viewer B, and bad buttons are
+// refused with 400 (a color that isn't #RRGGBB, a fixed stage left out,
+// stage settings on a kind that can't change the stage). A stage a button
+// moves to can't be deleted (409). A note through a button follows its
+// rules: the Lost button refuses an empty note, the Won button refuses
+// another stage, and an Email button can't post a note.
+// checkActionButtonNotes posts an empty note through Won and a note
+// through the custom button, checking each moves to the button's stage
+// with one NOTE entry holding the move and the button's label, and puts
+// everything back. checkRecordButtonList adds a hidden button and a Raise
+// Quote button through the API, checks the record list leaves both out
+// while the admin list has them, refuses a note through the hidden one,
+// and deletes both.
+//
+// The Email action is only ever called with input it refuses before
+// anything is sent: without opportunities.edit (403), on an opportunity the
+// user can't open (404), with a bad address, more than 20 recipients,
+// another opportunity's attachment, a Note button, or a stage the Email
+// button doesn't allow (400). The test companies have no Microsoft
+// credentials either (findExternalServices), so nothing could go out.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -501,6 +525,39 @@ const OPP_GUARDED: Guarded[] = [
   { name: "Opportunity settings", method: "GET", path: () => "/api/opportunity-settings", expectError: "view opportunity settings" },
   { name: "Edit opportunity settings", method: "PATCH", path: () => "/api/opportunity-settings", body: () => ({ prefix: "NOPE" }), expectError: OPP_SETTINGS_WRITE },
 ]
+
+const ACTION_BUTTON_WRITE = "manage action buttons"
+// A complete, valid button, so a create can only be refused for the reason
+// under test
+const buttonBody = (extra: Record<string, unknown> = {}) => ({
+  label: "Should Not Exist",
+  icon: "note",
+  color: "#1B3A5C",
+  forOpportunities: true,
+  forTickets: false,
+  kind: "NOTE",
+  stageMode: "NONE",
+  fixedStageId: null,
+  noteMode: "REQUIRED",
+  isHidden: false,
+  ...extra,
+})
+const ACTION_BUTTON_GUARDED: Guarded[] = [
+  { name: "All action buttons", method: "GET", path: () => "/api/action-buttons", expectError: ACTION_BUTTON_WRITE },
+  { name: "Add an action button", method: "POST", path: () => "/api/action-buttons", body: () => buttonBody(), expectError: ACTION_BUTTON_WRITE },
+  { name: "Edit an action button", method: "PATCH", path: (c) => `/api/action-buttons/${c.b.actionButtonId}`, body: () => ({ label: "Changed" }), expectError: ACTION_BUTTON_WRITE },
+  { name: "Delete an action button", method: "DELETE", path: (c) => `/api/action-buttons/${c.b.actionButtonId}`, expectError: ACTION_BUTTON_WRITE },
+  { name: "Reorder action buttons", method: "POST", path: () => "/api/action-buttons/reorder", body: (c) => ({ buttonIds: [...c.fx.actionButtonIds].reverse() }), expectError: ACTION_BUTTON_WRITE },
+]
+
+// A complete email, so an email attempt can only be refused for the reason
+// under test. Never sent: every attempt below is refused before sending.
+const emailBody = (extra: Record<string, unknown> = {}) => ({
+  to: ["nobody@example.test"],
+  subject: "Dev only check, never sent",
+  body: "<p>Dev only check, never sent</p>",
+  ...extra,
+})
 
 // A created opportunity must belong to the expected owner (null for
 // unassigned). It is removed again once checked.
@@ -1347,6 +1404,55 @@ const ATTEMPTS: Attempt[] = [
   { name: "Opportunity related records", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 403, expectError: "view opportunities" },
   { name: "Create an opportunity", actor: "oppSettings", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
 
+  // ── Action buttons ──
+  ...ACTION_BUTTON_GUARDED.map(refusedFor("everyone")),
+  ...ACTION_BUTTON_GUARDED.map(refusedFor("oppViewer")),
+  ...ACTION_BUTTON_GUARDED.map(refusedFor("oppSettings")),
+  { name: "Opportunity action buttons", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/action-buttons?for=opportunity", expect: 403, expectError: "view opportunities" },
+  {
+    name: "Opportunity action buttons (a viewer)",
+    actor: "oppViewer",
+    kind: "allowed",
+    method: "GET",
+    path: () => "/api/action-buttons?for=opportunity",
+    expect: 200,
+    contains: (c) => [c.fx.noteButtonId, c.fx.emailButtonId, c.fx.wonButtonId, c.fx.lostButtonId, c.b.actionButtonId],
+  },
+  { name: "All action buttons", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/action-buttons", expect: 200, contains: (c) => c.fx.actionButtonIds },
+  { name: "Action buttons for an unknown record type", actor: "admin", kind: "refused", method: "GET", path: () => "/api/action-buttons?for=invoice", expect: 400, expectError: "Invalid record type" },
+  { name: "Action button with a color that isn't hex", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: () => buttonBody({ color: "red" }), expect: 400, expectError: "Color must be a hex color" },
+  { name: "Action button with a fixed stage left out", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: () => buttonBody({ stageMode: "FIXED" }), expect: 400, expectError: "Choose the stage this button moves to" },
+  { name: "Action button changing the stage on another kind", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: () => buttonBody({ kind: "RAISE_QUOTE", stageMode: "CHOOSE" }), expect: 400, expectError: "Only Note and Email buttons can change the stage" },
+  { name: "Action button with a fixed stage on another kind", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: (c) => buttonBody({ kind: "APPOINTMENT", stageMode: "FIXED", fixedStageId: c.fx.customButtonStageId }), expect: 400, expectError: "Only Note and Email buttons can change the stage" },
+  { name: "Action button label over 40 characters", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: () => buttonBody({ label: "x".repeat(41) }), expect: 400, expectError: "40 characters or fewer" },
+  { name: "Action button shown nowhere", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: () => buttonBody({ forOpportunities: false, forTickets: false }), expect: 400, expectError: "Choose where the button shows" },
+  { name: "Action button with an unknown icon", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: () => buttonBody({ icon: "rocket" }), expect: 400, expectError: "Choose an icon" },
+  { name: "Action button losing its fixed stage mode but keeping the stage", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/action-buttons/${c.b.actionButtonId}`, body: () => ({ stageMode: "CHOOSE" }), expect: 400, expectError: "A stage can only be set" },
+  { name: "Action button with a made up stage", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: (c) => buttonBody({ stageMode: "FIXED", fixedStageId: c.fakeId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Delete a stage an action button moves to", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/opportunity-stages/${c.fx.customButtonStageId}`, expect: 409, expectError: "action button moves to this stage" },
+  // Notes through a button follow its rules on the server
+  { name: "Empty note through the Lost button", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p></p>", actionButtonId: c.fx.lostButtonId }), expect: 400, expectError: "A note can't be empty" },
+  { name: "Empty note through the custom button", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ actionButtonId: c.b.actionButtonId }), expect: 400, expectError: "A note can't be empty" },
+  { name: "Note through the Won button to another stage", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", actionButtonId: c.fx.wonButtonId, stageId: c.fx.customButtonStageId }), expect: 400, expectError: "always moves to its own stage" },
+  { name: "Note through the Email button", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", actionButtonId: c.fx.emailButtonId }), expect: 400, expectError: "Invalid action button" },
+  { name: "Note through a made up button", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", actionButtonId: c.fakeId }), expect: 400, expectError: "Invalid action button" },
+  { name: "Note through a button without edit access", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", actionButtonId: c.fx.noteButtonId }), expect: 403, expectError: "edit opportunities" },
+
+  // ── The Email action, never with input that could be sent ──
+  { name: "Send an opportunity email (no edit)", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email`, body: () => emailBody(), expect: 403, expectError: "edit opportunities" },
+  { name: "Opportunity email options (no edit)", actor: "oppViewer", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email-options`, expect: 403, expectError: "edit opportunities" },
+  { name: "Opportunity email options", actor: "everyone", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email-options`, expect: 403, expectError: "edit opportunities" },
+  { name: "Email from someone else's hidden opportunity", actor: "teamBasic", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.b.opportunityId}/email`, body: () => emailBody(), expect: 404, expectError: "Not found" },
+  { name: "Email options of someone else's hidden opportunity", actor: "teamBasic", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/email-options`, expect: 404, expectError: "Not found" },
+  { name: "Email to an invalid address", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email`, body: () => emailBody({ to: ["not-an-address"] }), expect: 400, expectError: "is not a valid email address" },
+  { name: "Email with an invalid CC address", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email`, body: () => emailBody({ cc: ["nobody@"] }), expect: 400, expectError: "is not a valid email address" },
+  { name: "Email to more than 20 recipients", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email`, body: () => emailBody({ to: ["a@example.test"], cc: Array.from({ length: 10 }, (_, i) => `cc${i}@example.test`), bcc: Array.from({ length: 10 }, (_, i) => `bcc${i}@example.test`) }), expect: 400, expectError: "at most 20 recipients" },
+  { name: "Email with no recipient", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email`, body: () => emailBody({ to: [] }), expect: 400, expectError: "Add at least one recipient" },
+  { name: "Email with another opportunity's attachment", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email`, body: (c) => emailBody({ attachmentIds: [c.fx.repOpportunityAttachmentId] }), expect: 400, expectError: "Invalid attachment" },
+  { name: "Email through the Note button", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email`, body: (c) => emailBody({ actionButtonId: c.fx.noteButtonId }), expect: 400, expectError: "Invalid action button" },
+  { name: "Email through the Email button with a stage", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email`, body: (c) => emailBody({ actionButtonId: c.fx.emailButtonId, stageId: c.fx.customButtonStageId }), expect: 400, expectError: "doesn't change the stage" },
+  { name: "Email through the Email button with no message", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/email`, body: (c) => emailBody({ actionButtonId: c.fx.emailButtonId, body: "<p></p>" }), expect: 400, expectError: "A message is required" },
+
   ...TEAM_ATTEMPTS,
 
   { name: "Disconnect someone else's shared mailbox", actor: "sender", kind: "refused", sharedMode: "admin", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
@@ -1432,6 +1538,7 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
     opportunityStages: prisma.opportunityStage.findMany({ where: { companyId: b }, ...byId }),
     opportunityTypes: prisma.opportunityType.findMany({ where: { companyId: b }, ...byId }),
     opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId: b } }),
+    actionButtons: prisma.actionButton.findMany({ where: { companyId: b }, ...byId }),
   }
   const keys = Object.keys(sections) as (keyof typeof sections)[]
   const values = await Promise.all(keys.map((k) => sections[k]))
@@ -2262,6 +2369,112 @@ async function checkTeamChange(prisma: PrismaClient, admin: Session, ctx: Attemp
 }
 
 // Every line field a copy carries over (all but id, quoteId, createdAt)
+// Notes through a fixed stage button, as Test Admin B on the unassigned
+// sample opportunity: an empty note through Won (its note is optional)
+// moves to the first WON stage, and a note through the custom button moves
+// to its stage, each adding one NOTE entry that holds the move and the
+// button's label. The stage, its dates, and the notes are put back.
+async function checkActionButtonNotes(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const opportunityId = ctx.fx.unassignedOpportunityId
+  const label = (name: string) => `[Admin B] Action button note: ${name}`
+  const startedAt = new Date()
+  const original = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { stageId: true, stageChangedAt: true, closedAt: true } })
+  const won = await prisma.actionButton.findUniqueOrThrow({ where: { id: ctx.fx.wonButtonId }, select: { label: true, fixedStageId: true } })
+  const custom = await prisma.actionButton.findUniqueOrThrow({ where: { id: ctx.b.actionButtonId }, select: { label: true, fixedStageId: true } })
+  try {
+    for (const step of [
+      { name: "an empty note through Won moves to its stage", json: { body: "<p></p>", actionButtonId: ctx.fx.wonButtonId }, button: won, closed: true, empty: true },
+      { name: "a note through the custom button moves to its stage", json: { body: "<p>Dev check button note</p>", actionButtonId: ctx.b.actionButtonId }, button: custom, closed: false, empty: false },
+    ]) {
+      const before = await prisma.timelineEntry.count({ where: { opportunityId } })
+      const res = await admin.request("POST", `/api/opportunities/${opportunityId}/timeline`, { json: step.json })
+      const added = (await prisma.timelineEntry.count({ where: { opportunityId } })) - before
+      const latest = await prisma.timelineEntry.findFirst({ where: { opportunityId, createdAt: { gte: startedAt } }, orderBy: { createdAt: "desc" }, select: { kind: true, body: true, data: true } })
+      const opp = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { stageId: true, closedAt: true } })
+      const data = latest?.data as { stageChange?: { to?: { id?: string } }; actionButton?: { label?: string } } | null
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : opp.stageId !== step.button.fixedStageId
+            ? "the stage did not move to the button's stage"
+            : step.closed !== (opp.closedAt !== null)
+              ? "closedAt doesn't match the stage"
+              : added !== 1
+                ? `added ${added} entries, expected 1`
+                : latest?.kind !== "NOTE" || data?.stageChange?.to?.id !== step.button.fixedStageId
+                  ? "the note doesn't hold the stage change"
+                  : data?.actionButton?.label !== step.button.label
+                    ? "the note doesn't hold the button's label"
+                    : step.empty && latest.body !== null
+                      ? "an empty optional note stored a body"
+                      : null
+      rows.push({ attempt: label(step.name), expected: "200, stage moved, 1 entry", actual: `${res.status}, ${added} added`, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+    }
+  } finally {
+    await prisma.timelineEntry.deleteMany({ where: { opportunityId, createdAt: { gte: startedAt } } })
+    await prisma.opportunity.update({ where: { id: opportunityId }, data: { stageId: original.stageId, stageChangedAt: original.stageChangedAt, closedAt: original.closedAt } })
+  }
+}
+
+// Test Admin B adds a hidden Note button and a Raise Quote button (a kind
+// not built yet) through the API. The record list Test Opp Viewer B reads
+// leaves both out, the admin list has both (Raise Quote marked not
+// available), and a note through the hidden one is refused. Both are then
+// deleted through the API (and by id afterwards, whatever happened).
+async function checkRecordButtonList(prisma: PrismaClient, admin: Session, oppViewer: Session, ctx: AttemptContext, rows: Row[]) {
+  const label = (name: string) => `[Admin B] Action button list: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const createdIds: string[] = []
+  try {
+    const create = async (body: Record<string, unknown>) => {
+      const res = await admin.request("POST", "/api/action-buttons", { json: body })
+      const id = res.status === 201 ? ((JSON.parse(res.text) as { id?: string }).id ?? null) : null
+      if (id) createdIds.push(id)
+      return { res, id }
+    }
+    const hidden = await create(buttonBody({ label: "Dev check hidden", isHidden: true }))
+    push("a hidden button is created", "201", String(hidden.res.status), hidden.id ? null : `got ${hidden.res.status}: ${errorText(hidden.res.text)}`)
+    const later = await create(buttonBody({ label: "Dev check quote", kind: "RAISE_QUOTE" }))
+    push("a Raise Quote button is created", "201", String(later.res.status), later.id ? null : `got ${later.res.status}: ${errorText(later.res.text)}`)
+    if (!hidden.id || !later.id) return
+
+    const record = await oppViewer.request("GET", "/api/action-buttons?for=opportunity")
+    push("the record list leaves out hidden and unavailable kinds", "200, neither listed", String(record.status),
+      record.status !== 200
+        ? `got ${record.status}: ${errorText(record.text)}`
+        : record.text.includes(hidden.id)
+          ? "the hidden button is listed"
+          : record.text.includes(later.id)
+            ? "the Raise Quote button is listed"
+            : !record.text.includes(ctx.fx.noteButtonId)
+              ? "the Note button is missing"
+              : null)
+
+    const all = await admin.request("GET", "/api/action-buttons")
+    const listed = all.status === 200 ? (JSON.parse(all.text) as { id: string; available?: boolean }[]) : []
+    push("the admin list has both, Raise Quote not available", "200, both listed", String(all.status),
+      all.status !== 200
+        ? `got ${all.status}: ${errorText(all.text)}`
+        : !listed.some((b) => b.id === hidden.id)
+          ? "the hidden button is missing"
+          : listed.find((b) => b.id === later.id)?.available !== false
+            ? "the Raise Quote button isn't marked unavailable"
+            : null)
+
+    const note = await admin.request("POST", `/api/opportunities/${ctx.fx.unassignedOpportunityId}/timeline`, { json: { body: "<p>Should not exist</p>", actionButtonId: hidden.id } })
+    push("a note through the hidden button is refused", '400 "Invalid action button"', String(note.status),
+      note.status === 400 && errorText(note.text).includes("Invalid action button") ? null : `got ${note.status}: ${errorText(note.text)}`)
+
+    for (const id of [hidden.id, later.id]) {
+      const del = await admin.request("DELETE", `/api/action-buttons/${id}`)
+      push("a button is deleted", "200", String(del.status), del.status === 200 ? null : `got ${del.status}: ${errorText(del.text)}`)
+    }
+  } finally {
+    if (createdIds.length > 0) await prisma.actionButton.deleteMany({ where: { id: { in: createdIds } } })
+  }
+}
+
 const COPIED_LINE_FIELDS = [
   "catalogItemId", "section", "sortOrder", "name", "description", "sku", "quantity", "unitPrice", "cost", "discount", "taxable",
   "isRecurring", "recurringInterval", "isOptional", "optionalSelected", "quantityAdjustable", "choiceGroup", "isTextBlock",
@@ -2589,6 +2802,11 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await checkTimeline(prisma, sessions.admin, ctx, rows)
     await checkNoteStageChange(prisma, sessions.admin, ctx, rows)
     await checkOpportunityLocation(prisma, sessions.admin, ctx, rows)
+
+    // Action buttons: fixed stage buttons move the stage with one entry,
+    // and hidden or unavailable buttons stay off records
+    await checkActionButtonNotes(prisma, sessions.admin, ctx, rows)
+    await checkRecordButtonList(prisma, sessions.admin, sessions.oppViewer, ctx, rows)
 
     // Teams: default roles applied on the next request, and team changes
     await checkTeamDefaultRoles(prisma, sessions.admin, sessions.everyone, ctx, rows)

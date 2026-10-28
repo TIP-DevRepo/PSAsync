@@ -188,6 +188,11 @@ export function testNames(letter: TestLetter, marker: string) {
     salesViewerOpportunity: `${marker} Sample Sales Viewer Opportunity ${letter}`,
     salesBasicOpportunity: `${marker} Sample Sales Basic Opportunity ${letter}`,
     salesUnassignedOpportunity: `${marker} Sample Sales Unassigned Opportunity ${letter}`,
+    // Action buttons: the four defaults (made by ensureActionButtonDefaults)
+    // plus this custom Note button, which always moves to the second stage
+    // (Qualified, which no sample opportunity is in) and needs a note.
+    // Labels are at most 40 characters.
+    customActionButton: `${marker} Qualify ${letter}`,
   }
 }
 
@@ -319,6 +324,8 @@ export interface SampleIds {
   generalTeamId: string
   salesTeamId: string
   teamGrantRoleId: string
+  // The custom action button (see testNames)
+  actionButtonId: string
 }
 
 export interface PermissionFixtureIds {
@@ -382,4 +389,12 @@ export interface PermissionFixtureIds {
   salesViewerOpportunityId: string
   salesBasicOpportunityId: string
   salesUnassignedOpportunityId: string
+  // Action buttons: every id in the company's order, the four defaults, and
+  // the stage the custom button moves to
+  actionButtonIds: string[]
+  noteButtonId: string
+  emailButtonId: string
+  wonButtonId: string
+  lostButtonId: string
+  customButtonStageId: string
 }
