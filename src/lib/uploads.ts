@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto"
-import { S3Client, PutObjectCommand, DeleteObjectCommand } from "@aws-sdk/client-s3"
+import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3"
 import { NextResponse } from "next/server"
 import {
   PROFILE_EXTENSIONS,
@@ -11,10 +11,10 @@ import {
 } from "@/lib/upload-rules"
 import { attachmentDisposition } from "@/lib/content-disposition"
 
-// The only place that validates uploaded files and writes to or deletes
-// from the uploads bucket. Every upload route reads its file with
+// The only place that validates uploaded files and reads, writes, or
+// deletes in the uploads bucket. Every upload route reads its file with
 // readUpload, stores it with storeUpload, and removes stored objects with
-// deleteStoredObject. The allowed types and size limits live in
+// deleteStoredObject; readStoredObject reads one back (an email attachment). The allowed types and size limits live in
 // src/lib/upload-rules.ts so the browser can check them too.
 
 let s3Client: S3Client | null = null
@@ -241,6 +241,25 @@ export async function storeUpload(
   const key = buildObjectKey(target.folder, file.ext, target.namePrefix)
   await client().send(new PutObjectCommand(putObjectParams(file, key, target.profile)))
   return `${bucketBaseUrl()}${key}`
+}
+
+// The bytes of a file this app stored, for attaching it to an email.
+// Anything outside the app's bucket or the expected prefix is refused
+// (null), and a failed read is logged with the key only and returns null.
+export async function readStoredObject(url: string | null | undefined, expectedPrefix: string): Promise<Uint8Array | null> {
+  const key = storedObjectKey(url, expectedPrefix)
+  if (!key) {
+    if (url) console.warn(`readStoredObject: refused a URL outside ${expectedPrefix} in the uploads bucket`)
+    return null
+  }
+  try {
+    const result = await client().send(new GetObjectCommand({ Bucket: process.env.AWS_S3_BUCKET_NAME, Key: key }))
+    return result.Body ? await result.Body.transformToByteArray() : null
+  } catch (err) {
+    const name = err instanceof Error ? err.name : "Error"
+    console.error(`readStoredObject: could not read stored file ${key} (${name})`)
+    return null
+  }
 }
 
 export type DeleteResult =

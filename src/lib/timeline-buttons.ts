@@ -47,7 +47,7 @@ export const ACTION_KIND_LABELS: Record<ActionButtonKindName, string> = {
 // show on records. The others can be configured in Settings now and stay
 // hidden on records until a later branch builds the feature and adds the
 // kind here (Raise Quote is next).
-export const AVAILABLE_ACTION_KINDS: readonly ActionButtonKindName[] = ["NOTE"]
+export const AVAILABLE_ACTION_KINDS: readonly ActionButtonKindName[] = ["NOTE", "EMAIL"]
 
 export function isAvailableActionKind(kind: string): boolean {
   return (AVAILABLE_ACTION_KINDS as readonly string[]).includes(kind)

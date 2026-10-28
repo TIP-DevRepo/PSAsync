@@ -8,6 +8,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
 import { Timeline, type TimelineHandle } from "@/components/timeline/Timeline"
+import { emailUnavailableReason, type EmailOptions } from "@/components/timeline/EmailComposer"
 import { ActionButtonBar } from "@/components/timeline/ActionButtonBar"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { toast } from "@/lib/toast"
@@ -18,6 +19,7 @@ import type { TeamSummary } from "@/lib/team-rules"
 import type { ActionButtonDefinition } from "@/lib/timeline-buttons"
 import { opportunityTabHref, readOpportunityTab, tabLabel, visibleOpportunityTabs, type OpportunityTabKey } from "@/lib/opportunity-tabs"
 import { noteStageChange } from "@/lib/timeline-actions"
+import { defaultEmailSubject } from "@/lib/record-email"
 import { StagePill } from "./StagePill"
 import { OpportunityRelatedPanel, relatedCount, useOpportunityRelated } from "./OpportunityRelatedPanel"
 import { OpportunityAttachments } from "./OpportunityAttachments"
@@ -61,6 +63,10 @@ export function OpportunityDetail({ id }: { id: string }) {
   const [openButtonId, setOpenButtonId] = useState<string | null>(null)
   // The company's buttons for opportunities (Settings > Action Buttons)
   const [buttons, setButtons] = useState<ActionButtonDefinition[]>([])
+  // The Email action's From choices, signature, and contacts; loaded when
+  // the user can use it
+  const [emailOptions, setEmailOptions] = useState<EmailOptions | null>(null)
+  const hasEmailButton = buttons.some((b) => b.opens.kind === "email")
   const { related, failed: relatedFailed } = useOpportunityRelated(id)
 
   // The open tab lives in the URL, so a refresh or a shared link keeps it.
@@ -82,13 +88,20 @@ export function OpportunityDetail({ id }: { id: string }) {
   }
 
   // Everyone who can open the opportunity sees its buttons; without edit
-  // access they are dimmed and say why
-  const unavailableReason = useCallback((): string | null => (canEdit ? null : NEEDS_EDIT_MESSAGE), [canEdit])
+  // access they are dimmed and say why. Email also needs a mailbox to send
+  // from.
+  const unavailableReason = useCallback(
+    (button: ActionButtonDefinition): string | null => {
+      if (!canEdit) return NEEDS_EDIT_MESSAGE
+      return button.opens.kind === "email" ? emailUnavailableReason(emailOptions) : null
+    },
+    [canEdit, emailOptions]
+  )
 
   // A header button opens the composer at the top of the timeline, on the
   // Details tab
   function openFromHeader(button: ActionButtonDefinition) {
-    if (unavailableReason()) return
+    if (unavailableReason(button)) return
     if (tab !== "details") setTab("details")
     timelineRef.current?.openComposer(button)
   }
@@ -127,6 +140,14 @@ export function OpportunityDetail({ id }: { id: string }) {
     // The teams it may move to, and who may own it in each
     fetch("/api/teams").then(json).then((data) => Array.isArray(data) && setTeams(data))
   }, [load, canEdit])
+
+  useEffect(() => {
+    if (!canEdit || !hasEmailButton) return
+    fetch(`/api/opportunities/${id}/email-options`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: EmailOptions | null) => data && setEmailOptions(data))
+      .catch(() => undefined)
+  }, [id, canEdit, hasEmailButton])
 
   // Saves only the fields given. The page takes the saved opportunity back,
   // or keeps what it had (the old value shows again) and says why.
@@ -296,7 +317,14 @@ export function OpportunityDetail({ id }: { id: string }) {
               showButtons={false}
               onComposerChange={setOpenButtonId}
               stages={stages}
-              // A note that moved the stage changed the opportunity too
+              email={{
+                sendUrl: `/api/opportunities/${o.id}/email`,
+                attachmentsUrl: `/api/opportunities/${o.id}/attachments`,
+                options: emailOptions,
+                defaultSubject: defaultEmailSubject(o.number, o.title),
+                defaultTo: o.contact.email ? [o.contact.email] : [],
+              }}
+              // A note or email that moved the stage changed the opportunity too
               onPosted={(entry) => {
                 if (noteStageChange(entry.data)) {
                   load()

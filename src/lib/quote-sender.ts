@@ -252,20 +252,6 @@ export async function actorName(ctx: Pick<AccessContext, "userId" | "userName">)
 
 // Recipient limit for one quote email, To and CC together
 export const MAX_RECIPIENTS = 25
-const EMAIL_PATTERN = /^[^\s@,;<>()"']+@[^\s@,;<>()"']+\.[^\s@,;<>()"']+$/
 
-// A comma separated recipient list from the Send Quote dialog, trimmed and
-// checked. Returns the cleaned list, or an error naming the bad address.
-export function parseRecipients(
-  value: unknown
-): { list: string[]; error?: undefined } | { error: string; list?: undefined } {
-  if (value === undefined || value === null || value === "") return { list: [] }
-  if (typeof value !== "string") return { error: "Recipients must be a list of email addresses" }
-  const list = value
-    .split(",")
-    .map((e) => e.trim())
-    .filter(Boolean)
-  const bad = list.find((e) => e.length > 254 || !EMAIL_PATTERN.test(e))
-  if (bad) return { error: `"${bad}" is not a valid email address` }
-  return { list }
-}
+// The address checks live in a browser safe module so send dialogs share them
+export { parseRecipients } from "@/lib/email-address"

@@ -81,6 +81,28 @@ export function entryActionButton(data: unknown): TimelineRef | null {
   return typeof id === "string" && typeof text === "string" && text ? { id, name: text } : null
 }
 
+// What an EMAIL_OUT entry's data says about the email, for its card. Reads
+// stored data without trusting its shape; null when it holds none.
+export function emailOutDetails(data: unknown): { from: string; to: string[]; cc: string[]; bcc: string[]; subject: string; attachments: string[] } | null {
+  const email = data && typeof data === "object" ? (data as { email?: unknown }).email : null
+  if (!email || typeof email !== "object") return null
+  const e = email as Record<string, unknown>
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [])
+  const from = e.from && typeof e.from === "object" ? (e.from as Record<string, unknown>) : {}
+  const fromEmail = typeof from.email === "string" ? from.email : ""
+  const fromName = typeof from.name === "string" && from.name ? from.name : null
+  return {
+    from: fromName ? `${fromName} (${fromEmail})` : fromEmail,
+    to: list(e.to),
+    cc: list(e.cc),
+    bcc: list(e.bcc),
+    subject: typeof e.subject === "string" ? e.subject : "",
+    attachments: Array.isArray(e.attachments)
+      ? e.attachments.map((a) => (a && typeof a === "object" ? (a as { fileName?: unknown }).fileName : null)).filter((n): n is string => typeof n === "string")
+      : [],
+  }
+}
+
 export type TimelineAction ={ [K in TimelineActionKey]: { action: K; data: TimelineActionData[K] } }[TimelineActionKey]
 
 // True when HTML holds no text at all once its tags are removed (the editor
