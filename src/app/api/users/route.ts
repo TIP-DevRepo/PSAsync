@@ -19,6 +19,27 @@ import { usesMicrosoftSso } from "@/lib/sso-account"
 const EMAIL_NOT_USABLE_MESSAGE = "This email cannot be used"
 const INVITE_EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
+const roleFields = { id: true, name: true, rank: true, color: true, isGlobalAdmin: true } as const
+
+type TeamRole = { id: string; name: string; rank: number; color: string | null; isGlobalAdmin: boolean }
+
+// A user's teams, and each role those teams give them with the teams it
+// comes from, highest rank first
+function teamRolesOf(memberships: { team: { id: string; name: string; defaultRoles: { role: TeamRole }[] } }[]) {
+  const byRole = new Map<string, TeamRole & { teams: { id: string; name: string }[] }>()
+  for (const { team } of memberships) {
+    for (const { role } of team.defaultRoles) {
+      const entry = byRole.get(role.id) ?? { ...role, teams: [] }
+      entry.teams.push({ id: team.id, name: team.name })
+      byRole.set(role.id, entry)
+    }
+  }
+  return {
+    teams: memberships.map(({ team }) => ({ id: team.id, name: team.name })),
+    teamRoles: [...byRole.values()].sort((a, b) => b.rank - a.rank),
+  }
+}
+
 // Any active user, since pickers on other pages (quote assign, inventory
 // checkout, approval workflows, SO notify rules) list users by name. Email
 // addresses only go to users who manage users.
@@ -39,7 +60,18 @@ export async function GET() {
       loginLockedUntil: true,
       userRoles: {
         where: { role: { isEveryone: false } },
-        select: { role: { select: { id: true, name: true, rank: true, color: true, isGlobalAdmin: true } } },
+        select: { role: { select: roleFields } },
+      },
+      // Teams and the roles they give, for Manage Users only (nothing is
+      // read for anyone else)
+      teamMemberships: {
+        where: showContact ? { team: { companyId: ctx.companyId } } : { id: { in: [] } },
+        select: {
+          team: {
+            select: { id: true, name: true, defaultRoles: { where: { role: { isEveryone: false, isGlobalAdmin: false } }, select: { role: { select: roleFields } } } },
+          },
+        },
+        orderBy: [{ team: { sortOrder: "asc" } }, { team: { createdAt: "asc" } }],
       },
     },
     orderBy: { createdAt: "asc" },
@@ -50,15 +82,18 @@ export async function GET() {
   const showLocks = ctx.access.isGlobalAdmin
   const now = Date.now()
 
-  // roles is every role the user holds (highest rank first), with the rank
-  // and color Manage Users needs for its pills and hierarchy locks. role is
-  // the highest of them.
+  // roles is every role the user was given directly (highest rank first),
+  // with the rank and color Manage Users needs for its pills and hierarchy
+  // locks. role is the highest of them. For users who manage users, teams
+  // is the teams they are in and teamRoles every role a team gives them,
+  // each with the teams it comes from (a role can also be in roles).
   return NextResponse.json(
-    users.map(({ userRoles, loginLockedUntil, ...user }) => {
+    users.map(({ userRoles, loginLockedUntil, teamMemberships, ...user }) => {
       const roles = userRoles.map((ur) => ur.role).sort((a, b) => b.rank - a.rank)
-      if (!showLocks) return { ...user, role: roles[0] ?? null, roles }
+      const teamInfo = showContact ? teamRolesOf(teamMemberships) : {}
+      if (!showLocks) return { ...user, role: roles[0] ?? null, roles, ...teamInfo }
       const lockedUntil = loginLockedUntil && loginLockedUntil.getTime() > now ? loginLockedUntil : null
-      return { ...user, role: roles[0] ?? null, roles, loginLockedUntil: lockedUntil }
+      return { ...user, role: roles[0] ?? null, roles, ...teamInfo, loginLockedUntil: lockedUntil }
     })
   )
 }

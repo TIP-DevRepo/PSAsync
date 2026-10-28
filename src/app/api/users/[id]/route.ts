@@ -11,6 +11,8 @@ import {
 } from "@/lib/user-roles"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
 import { effectiveRoles, rankOf } from "@/lib/team-roles"
+import { assertRefs } from "@/lib/scoped-loaders"
+import { MEMBER_GRANT_REFUSAL, readIdList, setUserTeams, teamsGrantAboveRank } from "@/lib/teams"
 
 const targetRoleFields = { id: true, rank: true, isGlobalAdmin: true, isEveryone: true } as const
 
@@ -36,6 +38,16 @@ export async function PATCH(
   }
   if (active !== undefined && typeof active !== "boolean") {
     return NextResponse.json({ error: "Invalid active value" }, { status: 400 })
+  }
+  // teamIds replaces the teams the user is in (Manage Users). It also needs
+  // Teams access, and adding a team grants its default roles, so it follows
+  // the same rule as the team members route (checked below).
+  const teamIds = body.teamIds === undefined ? undefined : readIdList(body.teamIds)
+  if (teamIds === null) {
+    return NextResponse.json({ error: "Invalid team", code: "INVALID_REFERENCE" }, { status: 400 })
+  }
+  if (teamIds !== undefined && !ctx.can("settingsSections.teams")) {
+    return NextResponse.json({ error: "You do not have permission to manage teams", code: "FORBIDDEN" }, { status: 403 })
   }
 
   // Deactivating yourself would sign you out with no way back in, so it's
@@ -97,6 +109,14 @@ export async function PATCH(
     newRoles = loaded.roles
   }
 
+  let addedTeamIds: string[] = []
+  if (teamIds !== undefined) {
+    const invalidTeam = await assertRefs(ctx, { teamId: teamIds })
+    if (invalidTeam) return invalidTeam
+    const currentTeamIds = new Set(targetUser.teamMemberships.map((m) => m.team.id))
+    addedTeamIds = teamIds.filter((teamId) => !currentTeamIds.has(teamId))
+  }
+
   // A company must never be left without an active Global Admin. If this
   // change would take the target from an active Global Admin to not one
   // (by removing the role or deactivating them), at least one other active
@@ -124,6 +144,10 @@ export async function PATCH(
       })
       if (otherGlobalAdmins === 0) return { lastGlobalAdmin: true as const }
     }
+    // Read with the write, so a default role added to a team in the meantime counts
+    if (addedTeamIds.length > 0 && (await teamsGrantAboveRank(tx, ctx, addedTeamIds))) {
+      return { teamGrantRefused: true as const }
+    }
 
     if (active !== undefined) {
       await tx.user.update({ where: { id, companyId }, data: { active } })
@@ -131,6 +155,9 @@ export async function PATCH(
     if (roleIds !== undefined) {
       // Also keeps the legacy roleId in sync with the highest of these roles
       await setUserRoles(tx, id, roleIds)
+    }
+    if (teamIds !== undefined) {
+      await setUserTeams(tx, companyId, id, teamIds)
     }
 
     return {
@@ -149,6 +176,9 @@ export async function PATCH(
     }
   })
 
+  if ("teamGrantRefused" in result) {
+    return NextResponse.json({ error: MEMBER_GRANT_REFUSAL.error, code: MEMBER_GRANT_REFUSAL.code }, { status: MEMBER_GRANT_REFUSAL.status })
+  }
   if ("lastGlobalAdmin" in result) {
     return NextResponse.json(
       { error: "This is the last active Global Admin. Give another active user the Global Admin role first." },
