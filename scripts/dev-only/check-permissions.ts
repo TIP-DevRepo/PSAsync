@@ -110,12 +110,31 @@
 // Creating an opportunity needs an initial note (OPP_NOTE on every create
 // attempt); one left out, empty, or script only (empty after sanitizing) is
 // refused with 400, and a create without an owner is unassigned.
+//
+// Teams (TEAM_ATTEMPTS, fixtures in lib/run-data.ts): the three visibility
+// levels on the list, an opportunity, its timeline, its related records,
+// and the sidebar counts (Test Team Basic B: own plus the team's
+// unassigned; Test Team Viewer B: every one in its team; Test Admin B:
+// all), the owner rules (an owner must be in the opportunity's team, and
+// only viewTeam or viewAll may pick someone else), the team change rules
+// (only to a team the user is in, and an owner outside the new team needs
+// a new owner in the same request), Global Admin and Everyone refused as
+// default roles, General and a team in use not deleted, and the Teams
+// routes and the Settings section gated by settingsSections.teams. Test
+// Team Manager B (Teams only, rank 5) can't give a team a role at or above
+// its rank, or add a member to a team that has one. checkTeamDefaultRoles
+// has Test Everyone B gain the Catalog page by joining Sales, lose it on
+// leaving, and keep it when the role is also given directly.
+// checkTeamChange moves opportunities between teams (one team_changed
+// entry) and puts them back.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import { PLACEHOLDER_TOKEN, SAMPLE_ITEM_COST, type PermissionFixtureIds, type SampleIds, type TestNames } from "./lib/test-data"
 import { HarnessBroken, ServerUnreachable, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
 import { addRunMailbox, addRunRole, addRunUser, isEntryScript, withRunData, type RunData } from "./lib/run-data"
+// Only imports Prisma types, so loading it can't reach the database
+import { setUserRoles } from "@/lib/user-roles"
 
 // Must stay first: nothing below may run before the guard has passed
 enforceDevGuard("check-permissions")
@@ -137,14 +156,18 @@ enforceDevGuard("check-permissions")
 //                (Test Opp Viewer B: only the Opportunities page), or
 //                oppSettings (Test Opp Settings B: only Opportunity
 //                Settings). Test Rep B also holds the Opportunities page
-//                and opportunities.create, without see all.
+//                and opportunities.create, without see all. teamBasic
+//                (Test Team Basic B: the Opportunities page, create, and
+//                edit, in Sales), teamViewer (Test Team Viewer B: the
+//                same plus opportunities.viewTeam, in Sales), or
+//                teamManager (Test Team Manager B: only Teams, rank 5).
 //   kind         control: must succeed, and if it doesn't the harness is
 //                broken and nothing else runs. allowed: must succeed.
 //                refused: must be refused with exactly expect, and must not
 //                change any data.
 //   expect       the status: 200, 307 (a redirect the route answers with),
-//                400, 403 (missing permission), or 404 (a record the user
-//                may not open)
+//                400, 403 (missing permission), 404 (a record the user
+//                may not open), or 409 (a delete that is blocked)
 //   expectError  text a refusal must contain, so a refusal for some other
 //                reason can't pass
 //   location     text a 307 redirect's Location must contain
@@ -154,7 +177,21 @@ enforceDevGuard("check-permissions")
 //   sharedMode   runs with Quote Settings set to send every quote from Test
 //                Admin B's mailbox ("admin") or Test Sender B's ("sender")
 
-type Actor = "admin" | "rep" | "clerk" | "everyone" | "sender" | "orders" | "templater" | "viewer" | "manager" | "oppViewer" | "oppSettings"
+type Actor =
+  | "admin"
+  | "rep"
+  | "clerk"
+  | "everyone"
+  | "sender"
+  | "orders"
+  | "templater"
+  | "viewer"
+  | "manager"
+  | "oppViewer"
+  | "oppSettings"
+  | "teamBasic"
+  | "teamViewer"
+  | "teamManager"
 
 interface AttemptContext {
   b: SampleIds
@@ -181,7 +218,7 @@ interface Attempt {
   method: Method
   path: (c: AttemptContext) => string
   body?: (c: AttemptContext) => unknown
-  expect: 200 | 307 | 400 | 403 | 404
+  expect: 200 | 307 | 400 | 403 | 404 | 409
   expectError?: string
   location?: string
   contains?: (c: AttemptContext) => string[]
@@ -516,6 +553,106 @@ async function openPOsCountOwn(json: unknown, companyId: string, userId: string,
   })
   return count === own ? null : `count is ${count}, the user has ${own} open purchase orders`
 }
+
+// ─── Teams ───────────────────────────────────────────────────────────────────
+// The fixtures (lib/run-data.ts): General holds Test Rep B and Test Opp
+// Viewer B and the three original sample opportunities. Sales holds Test
+// Team Basic B (no viewTeam) and Test Team Viewer B (viewTeam) and gives
+// Team Grant; its opportunities are owned by the viewer, by the basic user,
+// and unassigned. Support has no members and gives Team High, above Test
+// Team Manager B (Teams only, rank 5).
+
+const TEAM_WRITE = "manage teams"
+
+interface SidebarJson {
+  total: number
+  teams: { id: string; count: number; unassigned: number; members: { id: string; count: number }[] }[]
+}
+
+// The sidebar counts as one user sees them: exactly these teams, and in
+// the team checked, exactly these members and counts
+function sidebarShows(expect: (c: AttemptContext) => { teamIds: string[]; team: string; members: string[]; count: number; unassigned: number }) {
+  return (json: unknown, c: AttemptContext): string | null => {
+    const counts = json as SidebarJson
+    const e = expect(c)
+    if (!Array.isArray(counts.teams)) return "no teams in the response"
+    const ids = counts.teams.map((t) => t.id)
+    if (ids.length !== e.teamIds.length || e.teamIds.some((id) => !ids.includes(id))) return `listed ${ids.length} teams, expected ${e.teamIds.length}`
+    const team = counts.teams.find((t) => t.id === e.team)
+    if (!team) return "the team checked is missing"
+    const members = team.members.map((m) => m.id)
+    if (members.length !== e.members.length || e.members.some((id) => !members.includes(id))) return `listed ${members.length} members, expected ${e.members.length}`
+    if (team.count !== e.count) return `the team count is ${team.count}, expected ${e.count}`
+    if (team.unassigned !== e.unassigned) return `the unassigned count is ${team.unassigned}, expected ${e.unassigned}`
+    return null
+  }
+}
+
+const TEAM_ATTEMPTS: Attempt[] = [
+  // Visibility, basic: own anywhere, plus unassigned ones in its teams
+  { name: "List opportunities: own and the team's unassigned", actor: "teamBasic", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.fx.salesBasicOpportunityId, c.fx.salesUnassignedOpportunityId], notContains: (c) => [c.fx.salesViewerOpportunityId, c.fx.unassignedOpportunityId, c.b.opportunityId] },
+  { name: "Open a teammate's opportunity", actor: "teamBasic", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.salesViewerOpportunityId}`, expect: 404, expectError: "Not found" },
+  { name: "Open the team's unassigned opportunity", actor: "teamBasic", kind: "allowed", method: "GET", path: (c) => `/api/opportunities/${c.fx.salesUnassignedOpportunityId}`, expect: 200, contains: (c) => [c.b.salesTeamId] },
+  { name: "Open another team's unassigned opportunity", actor: "teamBasic", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 404, expectError: "Not found" },
+  { name: "Timeline of a teammate's opportunity", actor: "teamBasic", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.salesViewerOpportunityId}/timeline`, expect: 404, expectError: "Not found" },
+  { name: "Timeline of own opportunity", actor: "teamBasic", kind: "allowed", method: "GET", path: (c) => `/api/opportunities/${c.fx.salesBasicOpportunityId}/timeline`, expect: 200, contains: () => ["entries"] },
+  { name: "Related records of a teammate's opportunity", actor: "teamBasic", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.salesViewerOpportunityId}/related`, expect: 404, expectError: "Not found" },
+  { name: "Related records of the team's unassigned opportunity", actor: "teamBasic", kind: "allowed", method: "GET", path: (c) => `/api/opportunities/${c.fx.salesUnassignedOpportunityId}/related`, expect: 200, contains: () => ["quotes"] },
+  // Visibility, viewTeam: every one in its teams, nothing outside them
+  { name: "List opportunities: every one in its team", actor: "teamViewer", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.fx.salesViewerOpportunityId, c.fx.salesBasicOpportunityId, c.fx.salesUnassignedOpportunityId], notContains: (c) => [c.fx.unassignedOpportunityId, c.b.opportunityId, c.fx.repOpportunityId] },
+  { name: "Open a teammate's opportunity", actor: "teamViewer", kind: "allowed", method: "GET", path: (c) => `/api/opportunities/${c.fx.salesBasicOpportunityId}`, expect: 200, contains: (c) => [c.fx.salesBasicOpportunityId] },
+  { name: "Timeline of a teammate's opportunity", actor: "teamViewer", kind: "allowed", method: "GET", path: (c) => `/api/opportunities/${c.fx.salesBasicOpportunityId}/timeline`, expect: 200, contains: () => ["entries"] },
+  { name: "Related records of a teammate's opportunity", actor: "teamViewer", kind: "allowed", method: "GET", path: (c) => `/api/opportunities/${c.fx.salesBasicOpportunityId}/related`, expect: 200, contains: () => ["quotes"] },
+  { name: "Open another team's unassigned opportunity", actor: "teamViewer", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 404, expectError: "Not found" },
+  { name: "Timeline of another team's opportunity", actor: "teamViewer", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}/timeline`, expect: 404, expectError: "Not found" },
+  // Visibility, viewAll (Global Admin): every team's
+  { name: "List opportunities: every team's", actor: "admin", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.fx.salesViewerOpportunityId, c.fx.salesBasicOpportunityId, c.fx.salesUnassignedOpportunityId, c.fx.unassignedOpportunityId, c.b.opportunityId] },
+  { name: "List filtered to a team", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/opportunities?teamId=${c.b.salesTeamId}&ownerId=unassigned`, expect: 200, contains: (c) => [c.fx.salesUnassignedOpportunityId], notContains: (c) => [c.fx.salesViewerOpportunityId, c.fx.unassignedOpportunityId] },
+  // Sidebar counts: only what each user can see
+  { name: "Sidebar counts: own team, only itself", actor: "teamBasic", kind: "allowed", method: "GET", path: () => "/api/opportunities/sidebar-counts", expect: 200, check: sidebarShows((c) => ({ teamIds: [c.b.salesTeamId], team: c.b.salesTeamId, members: [c.fx.teamBasicUserId], count: 2, unassigned: 1 })) },
+  { name: "Sidebar counts: own team, every member", actor: "teamViewer", kind: "allowed", method: "GET", path: () => "/api/opportunities/sidebar-counts", expect: 200, check: sidebarShows((c) => ({ teamIds: [c.b.salesTeamId], team: c.b.salesTeamId, members: [c.fx.teamBasicUserId, c.fx.teamViewerUserId], count: 3, unassigned: 1 })) },
+  { name: "Sidebar counts: every team", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/opportunities/sidebar-counts", expect: 200, check: sidebarShows((c) => ({ teamIds: c.fx.teamIds, team: c.b.salesTeamId, members: [c.fx.teamBasicUserId, c.fx.teamViewerUserId], count: 3, unassigned: 1 })) },
+  { name: "Sidebar counts", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/opportunities/sidebar-counts", expect: 403, expectError: "view opportunities" },
+  { name: "Sidebar counts", actor: "oppSettings", kind: "refused", method: "GET", path: () => "/api/opportunities/sidebar-counts", expect: 403, expectError: "view opportunities" },
+  // Owner rules
+  { name: "Create for a teammate", actor: "teamBasic", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, teamId: c.b.salesTeamId, ownerId: c.fx.teamViewerUserId }), expect: 403, expectError: "yourself or leave them unassigned" },
+  { name: "Create for itself in its team", actor: "teamBasic", kind: "allowed", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId, teamId: c.b.salesTeamId, ownerId: c.fx.teamBasicUserId }), expect: 200, check: createdOpportunityOwnedBy((c) => c.fx.teamBasicUserId) },
+  { name: "Create for itself in General, which it isn't in", actor: "teamBasic", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.fx.teamBasicUserId }), expect: 400, expectError: "Owner is not in this team" },
+  { name: "Create in a team it isn't in", actor: "teamBasic", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, teamId: c.fx.supportTeamId }), expect: 403, expectError: "teams you belong to" },
+  { name: "Create unassigned in General", actor: "teamBasic", kind: "allowed", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 200, check: createdOpportunityOwnedBy(() => null) },
+  { name: "Create for a teammate", actor: "teamViewer", kind: "allowed", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId, teamId: c.b.salesTeamId, ownerId: c.fx.teamBasicUserId }), expect: 200, check: createdOpportunityOwnedBy((c) => c.fx.teamBasicUserId) },
+  { name: "Create for someone in a team it isn't in", actor: "teamViewer", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.repUserId }), expect: 403, expectError: "yourself or leave them unassigned" },
+  { name: "Create for someone outside the team", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, teamId: c.b.salesTeamId, ownerId: c.repUserId }), expect: 400, expectError: "Owner is not in this team" },
+  { name: "Assign to someone outside the team", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.salesUnassignedOpportunityId}`, body: (c) => ({ ownerId: c.repUserId }), expect: 400, expectError: "Owner is not in this team" },
+  { name: "Assign a teammate's opportunity to a teammate", actor: "teamBasic", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.salesUnassignedOpportunityId}`, body: (c) => ({ ownerId: c.fx.teamViewerUserId }), expect: 403, expectError: "yourself or leave them unassigned" },
+  // Team changes
+  { name: "Move to a team it isn't in", actor: "teamBasic", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.salesBasicOpportunityId}`, body: (c) => ({ teamId: c.b.generalTeamId, ownerId: null }), expect: 403, expectError: "teams you belong to" },
+  { name: "Move to a team it isn't in", actor: "teamViewer", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.salesBasicOpportunityId}`, body: (c) => ({ teamId: c.fx.supportTeamId, ownerId: null }), expect: 403, expectError: "teams you belong to" },
+  { name: "Move away from its owner's team, keeping the owner", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.salesViewerOpportunityId}`, body: (c) => ({ teamId: c.b.generalTeamId }), expect: 400, expectError: "not in the new team" },
+  { name: "Clear the team", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.salesViewerOpportunityId}`, body: () => ({ teamId: null }), expect: 400, expectError: "A team is required" },
+  // Teams routes: the new keys gate them
+  { name: "List teams", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/teams", expect: 403, expectError: "view teams" },
+  { name: "List teams without members", actor: "rep", kind: "allowed", method: "GET", path: () => "/api/teams", expect: 200, contains: (c) => [c.b.salesTeamId, "assignableOwnerIds"], notContains: () => ['"members"'] },
+  { name: "List teams with members", actor: "teamManager", kind: "allowed", method: "GET", path: () => "/api/teams", expect: 200, contains: (c) => [c.b.salesTeamId, '"members"', c.fx.teamBasicUserId] },
+  { name: "Reorder teams, same order", actor: "teamManager", kind: "allowed", method: "POST", path: () => "/api/teams/reorder", body: (c) => ({ teamIds: c.fx.teamIds }), expect: 200, contains: (c) => [c.b.salesTeamId] },
+  { name: "Create a team", actor: "rep", kind: "refused", method: "POST", path: () => "/api/teams", body: () => ({ name: "Should Not Exist" }), expect: 403, expectError: TEAM_WRITE },
+  { name: "Rename a team", actor: "rep", kind: "refused", method: "PATCH", path: (c) => `/api/teams/${c.b.salesTeamId}`, body: () => ({ name: "Changed" }), expect: 403, expectError: TEAM_WRITE },
+  { name: "Delete a team", actor: "rep", kind: "refused", method: "DELETE", path: (c) => `/api/teams/${c.fx.supportTeamId}`, expect: 403, expectError: TEAM_WRITE },
+  { name: "Reorder teams", actor: "rep", kind: "refused", method: "POST", path: () => "/api/teams/reorder", body: (c) => ({ teamIds: [...c.fx.teamIds].reverse() }), expect: 403, expectError: TEAM_WRITE },
+  { name: "Replace team members", actor: "rep", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.b.salesTeamId}/members`, body: (c) => ({ userIds: [c.repUserId] }), expect: 403, expectError: TEAM_WRITE },
+  { name: "Replace team default roles", actor: "rep", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.b.salesTeamId}/default-roles`, body: () => ({ roleIds: [] }), expect: 403, expectError: TEAM_WRITE },
+  { name: "Change a user's teams", actor: "manager", kind: "refused", method: "PATCH", path: (c) => `/api/users/${c.fx.everyoneUserId}`, body: (c) => ({ teamIds: [c.b.salesTeamId] }), expect: 403, expectError: TEAM_WRITE },
+  // The grant rule: a role out of Test Team Manager B's reach, directly or by adding a member
+  { name: "Give a team a role above its rank", actor: "teamManager", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.b.salesTeamId}/default-roles`, body: (c) => ({ roleIds: [c.b.teamGrantRoleId, c.fx.teamHighRoleId] }), expect: 403, expectError: "at or above your own rank" },
+  { name: "Add a member to a team with a role above its rank", actor: "teamManager", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.fx.supportTeamId}/members`, body: (c) => ({ userIds: [c.fx.teamBasicUserId] }), expect: 403, expectError: "at or above your own rank" },
+  { name: "Create a team with a role above its rank", actor: "teamManager", kind: "refused", method: "POST", path: () => "/api/teams", body: (c) => ({ name: "Should Not Exist", defaultRoleIds: [c.fx.teamHighRoleId] }), expect: 403, expectError: "at or above your own rank" },
+  { name: "Give a team Global Admin", actor: "admin", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.b.salesTeamId}/default-roles`, body: (c) => ({ roleIds: [c.b.globalAdminRoleId] }), expect: 400, expectError: "Global Admin" },
+  { name: "Give a team the Everyone role", actor: "admin", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.b.salesTeamId}/default-roles`, body: (c) => ({ roleIds: [c.b.everyoneRoleId] }), expect: 400, expectError: "Everyone" },
+  // Deletes that are blocked
+  { name: "Delete General", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/teams/${c.b.generalTeamId}`, expect: 409, expectError: "can't be deleted" },
+  { name: "Delete a team in use", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/teams/${c.b.salesTeamId}`, expect: 409, expectError: "This team has 3 opportunities" },
+  { name: "Rename to another team's name", actor: "teamManager", kind: "refused", method: "PATCH", path: (c) => `/api/teams/${c.fx.supportTeamId}`, body: (c) => ({ name: c.names.salesTeam }), expect: 400, expectError: "already exists" },
+]
 
 const ATTEMPTS: Attempt[] = [
   // ── Positive controls: Global Admin B ──
@@ -1188,6 +1325,8 @@ const ATTEMPTS: Attempt[] = [
   { name: "Opportunity related records", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 403, expectError: "view opportunities" },
   { name: "Create an opportunity", actor: "oppSettings", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
 
+  ...TEAM_ATTEMPTS,
+
   { name: "Disconnect someone else's shared mailbox", actor: "sender", kind: "refused", sharedMode: "admin", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
   // Even one's own mailbox needs Integrations access while it is the shared sender
   { name: "Disconnect own mailbox while it is the shared sender", actor: "sender", kind: "refused", sharedMode: "sender", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.senderMailboxId}`, expect: 403, expectError: "shared quote sender" },
@@ -1237,6 +1376,7 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
     }),
     dashboards: prisma.dashboard.findMany({ where: { companyId: b }, ...byId, include: { widgets: byId } }),
     roles: prisma.role.findMany({ where: { companyId: b }, ...byId }),
+    teams: prisma.team.findMany({ where: { companyId: b }, ...byId, include: { members: byId, defaultRoles: byId } }),
     clients: prisma.client.findMany({
       where: { companyId: b },
       ...byId,
@@ -1674,9 +1814,13 @@ async function checkSalesOrderLinkedPurchaseOrders(prisma: PrismaClient, admin: 
 // in the browser, so the server's HTML shows the first listed section.)
 const NO_ACCESS_PAGE = "You do not have access to this page"
 const OPP_SETTINGS_ENTRY = "Opportunity Settings"
+// The Teams entry's text right after its icon, so the word elsewhere on the page doesn't count
+const TEAMS_ENTRY = ">Teams<"
 
 async function checkOpportunityPages(sessions: Record<Actor, Session>, labels: Record<Actor, string>, ctx: AttemptContext, rows: Row[]) {
-  const pages: { name: string; path: string; allowed: Actor[]; refused: Actor[]; settings?: true }[] = [
+  // settings: the text of the section's entry in the Settings list, which
+  // must be listed for the section to count as open
+  const pages: { name: string; path: string; allowed: Actor[]; refused: Actor[]; settings?: string }[] = [
     { name: "Opportunities page", path: "/dashboard/opportunities?view=list", allowed: ["admin", "rep", "oppViewer"], refused: ["everyone", "oppSettings", "clerk"] },
     {
       name: "Opportunity page",
@@ -1685,20 +1829,22 @@ async function checkOpportunityPages(sessions: Record<Actor, Session>, labels: R
       refused: ["everyone", "oppSettings", "clerk"],
     },
     // Test Manager B opens Settings without Opportunity Settings
-    { name: "Settings > Opportunity Settings", path: "/dashboard/settings?panel=opportunities", allowed: ["admin", "oppSettings"], refused: ["everyone", "manager", "oppViewer"], settings: true },
+    { name: "Settings > Opportunity Settings", path: "/dashboard/settings?panel=opportunities", allowed: ["admin", "oppSettings"], refused: ["everyone", "manager", "oppViewer"], settings: OPP_SETTINGS_ENTRY },
+    // Test Manager B (Users) and Test Opp Settings B open Settings without Teams
+    { name: "Settings > Teams", path: "/dashboard/settings?panel=teams", allowed: ["admin", "teamManager"], refused: ["everyone", "manager", "oppSettings"], settings: TEAMS_ENTRY },
   ]
   for (const page of pages) {
     for (const [actor, allowed] of [...page.allowed.map((a) => [a, true] as const), ...page.refused.map((a) => [a, false] as const)]) {
       const res = await sessions[actor].request("GET", page.path)
       const pageRefused = res.text.includes(NO_ACCESS_PAGE)
-      const opens = !pageRefused && (!page.settings || res.text.includes(OPP_SETTINGS_ENTRY))
+      const opens = !pageRefused && (!page.settings || res.text.includes(page.settings))
       const problem =
         res.status !== 200
           ? `got ${res.status}${res.location ? ` to ${res.location}` : ""}`
           : allowed && !opens
             ? pageRefused
               ? "the page shows no access"
-              : "the Opportunity Settings section is not listed"
+              : "the section is not listed in Settings"
             : !allowed && opens
               ? "the page opened"
               : null
@@ -1983,6 +2129,87 @@ async function checkOpportunityLocation(prisma: PrismaClient, admin: Session, ct
   }
 }
 
+// Team default roles apply on the next request, with nothing copied into
+// the user's own roles. Test Everyone B (no permissions) is added to Sales
+// through the members route and can then open the sample catalog item
+// (Team Grant gives the Catalog page), loses it when removed, and keeps it
+// when Team Grant is also given directly. Test Admin B makes the changes;
+// Test Everyone B's roles and Sales' members are put back afterwards.
+async function checkTeamDefaultRoles(prisma: PrismaClient, admin: Session, everyone: Session, ctx: AttemptContext, rows: Row[]) {
+  const salesId = ctx.b.salesTeamId
+  const userId = ctx.fx.everyoneUserId
+  const catalogPath = `/api/catalog/${ctx.b.catalogItemId}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[Everyone B] Team default roles: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const originalMembers = (await prisma.teamMember.findMany({ where: { teamId: salesId }, select: { userId: true } })).map((m) => m.userId)
+  const originalRoles = (await prisma.userRole.findMany({ where: { userId }, select: { roleId: true } })).map((r) => r.roleId)
+  const opens = async () => (await everyone.request("GET", catalogPath)).status
+  const setMembers = (userIds: string[]) => admin.request("PUT", `/api/teams/${salesId}/members`, { json: { userIds } })
+  try {
+    const before = await opens()
+    push("without the team", "403", String(before), before !== 403 ? `got ${before}` : null)
+
+    const joined = await setMembers([...originalMembers, userId])
+    const afterJoin = await opens()
+    push("gains the role on joining", "200", String(afterJoin), joined.status !== 200 ? `adding the member got ${joined.status}: ${errorText(joined.text)}` : afterJoin !== 200 ? `got ${afterJoin}` : null)
+    const directRows = await prisma.userRole.count({ where: { userId, roleId: ctx.b.teamGrantRoleId } })
+    push("nothing is copied into the user's roles", "0 rows", `${directRows} rows`, directRows !== 0 ? "the team role was copied into UserRole" : null)
+
+    const left = await setMembers(originalMembers)
+    const afterLeave = await opens()
+    push("loses the role on leaving", "403", String(afterLeave), left.status !== 200 ? `removing the member got ${left.status}: ${errorText(left.text)}` : afterLeave !== 403 ? `got ${afterLeave}` : null)
+
+    const direct = await admin.request("PATCH", `/api/users/${userId}`, { json: { roleIds: [ctx.b.teamGrantRoleId] } })
+    await setMembers([...originalMembers, userId])
+    await setMembers(originalMembers)
+    const afterBoth = await opens()
+    push("keeps a role also given directly", "200", String(afterBoth), direct.status !== 200 ? `giving the role got ${direct.status}: ${errorText(direct.text)}` : afterBoth !== 200 ? `got ${afterBoth}` : null)
+  } finally {
+    await prisma.teamMember.deleteMany({ where: { teamId: salesId, userId: { notIn: originalMembers } } })
+    await setUserRoles(prisma, userId, originalRoles)
+  }
+}
+
+// Moving an opportunity to another team: Test Admin B (viewAll) moves the
+// Sales unassigned opportunity to Support (one team_changed entry with the
+// names and ids), and the Sales viewer's opportunity to General with a new
+// owner from General (Test Rep B) in the same request. Both are put back,
+// and the entries removed.
+async function checkTeamChange(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[Admin B] Team change: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const unassignedId = ctx.fx.salesUnassignedOpportunityId
+  const ownedId = ctx.fx.salesViewerOpportunityId
+  const startedAt = new Date()
+  const original = await prisma.opportunity.findMany({ where: { id: { in: [unassignedId, ownedId] } }, select: { id: true, teamId: true, ownerId: true } })
+  try {
+    const before = await prisma.timelineEntry.count({ where: { opportunityId: unassignedId } })
+    const moved = await admin.request("PATCH", `/api/opportunities/${unassignedId}`, { json: { teamId: ctx.fx.supportTeamId } })
+    const entries = await prisma.timelineEntry.findMany({ where: { opportunityId: unassignedId, createdAt: { gte: startedAt } }, select: { action: true, data: true } })
+    const data = entries[0]?.data as { from?: { id?: string; name?: string }; to?: { id?: string; name?: string } } | undefined
+    push("records one team_changed entry", "200, 1 team_changed", `${moved.status}, ${entries.length} added`,
+      moved.status !== 200
+        ? `got ${moved.status}: ${errorText(moved.text)}`
+        : (await prisma.timelineEntry.count({ where: { opportunityId: unassignedId } })) - before !== 1 || entries[0]?.action !== "team_changed"
+          ? `added ${entries.map((e) => e.action).join(", ") || "nothing"}`
+          : data?.from?.id !== ctx.b.salesTeamId || data?.to?.id !== ctx.fx.supportTeamId || data?.to?.name !== ctx.names.supportTeam
+            ? "the entry doesn't hold both teams' ids and names"
+            : null)
+
+    const withOwner = await admin.request("PATCH", `/api/opportunities/${ownedId}`, { json: { teamId: ctx.b.generalTeamId, ownerId: ctx.repUserId } })
+    const saved = await prisma.opportunity.findUniqueOrThrow({ where: { id: ownedId }, select: { teamId: true, ownerId: true } })
+    push("a new team with a new owner from it", "200, moved", String(withOwner.status),
+      withOwner.status !== 200
+        ? `got ${withOwner.status}: ${errorText(withOwner.text)}`
+        : saved.teamId !== ctx.b.generalTeamId || saved.ownerId !== ctx.repUserId
+          ? "the team or owner did not change"
+          : null)
+  } finally {
+    for (const o of original) await prisma.opportunity.update({ where: { id: o.id }, data: { teamId: o.teamId, ownerId: o.ownerId } })
+    await prisma.timelineEntry.deleteMany({ where: { opportunityId: { in: [unassignedId, ownedId] }, createdAt: { gte: startedAt } } })
+  }
+}
+
 // Every line field a copy carries over (all but id, quoteId, createdAt)
 const COPIED_LINE_FIELDS = [
   "catalogItemId", "section", "sortOrder", "name", "description", "sku", "quantity", "unitPrice", "cost", "discount", "taxable",
@@ -2196,6 +2423,9 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
       manager: new Session("Test Manager B", baseUrl),
       oppViewer: new Session("Test Opp Viewer B", baseUrl),
       oppSettings: new Session("Test Opp Settings B", baseUrl),
+      teamBasic: new Session("Test Team Basic B", baseUrl),
+      teamViewer: new Session("Test Team Viewer B", baseUrl),
+      teamManager: new Session("Test Team Manager B", baseUrl),
     }
     await run.credentials.signIn(sessions.admin, names.adminEmail)
     await run.credentials.signIn(sessions.rep, names.repEmail)
@@ -2208,8 +2438,11 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await run.credentials.signIn(sessions.manager, manager.email)
     await run.credentials.signIn(sessions.oppViewer, names.oppViewerEmail)
     await run.credentials.signIn(sessions.oppSettings, names.oppSettingsEmail)
+    await run.credentials.signIn(sessions.teamBasic, names.teamBasicEmail)
+    await run.credentials.signIn(sessions.teamViewer, names.teamViewerEmail)
+    await run.credentials.signIn(sessions.teamManager, names.teamManagerEmail)
     console.log(
-      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, Test Manager B, Test Opp Viewer B, and Test Opp Settings B.`
+      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, Test Manager B, Test Opp Viewer B, Test Opp Settings B, Test Team Basic B, Test Team Viewer B, and Test Team Manager B.`
     )
 
     const ACTOR_LABEL: Record<Actor, string> = {
@@ -2224,6 +2457,9 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
       manager: "Manager B",
       oppViewer: "Opp Viewer B",
       oppSettings: "Opp Settings B",
+      teamBasic: "Team Basic B",
+      teamViewer: "Team Viewer B",
+      teamManager: "Team Manager B",
     }
     const label = (a: Attempt) => `[${a.kind === "control" ? "control " : ""}${ACTOR_LABEL[a.actor]}] ${a.name}`
 
@@ -2302,6 +2538,10 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await checkTimeline(prisma, sessions.admin, ctx, rows)
     await checkNoteStageChange(prisma, sessions.admin, ctx, rows)
     await checkOpportunityLocation(prisma, sessions.admin, ctx, rows)
+
+    // Teams: default roles applied on the next request, and team changes
+    await checkTeamDefaultRoles(prisma, sessions.admin, sessions.everyone, ctx, rows)
+    await checkTeamChange(prisma, sessions.admin, ctx, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length

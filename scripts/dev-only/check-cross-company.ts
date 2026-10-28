@@ -13,8 +13,10 @@
 //
 // Order of work: guard, sign in, positive controls on each user's OWN
 // records (if any fails the harness itself is broken and nothing else
-// runs), then every attempt below in both directions, then the
-// deactivated user check. Any FAIL or UNEXPECTED exits non zero.
+// runs), then every attempt below in both directions, then the team
+// lists (the sidebar counts and GET /api/teams must hold the caller's own
+// teams and nothing of the other company's), then the deactivated user
+// check. Any FAIL or UNEXPECTED exits non zero.
 
 import type { PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -35,9 +37,9 @@ enforceDevGuard("check-cross-company")
 //   expect          404 for an id in the URL from another company (or another
 //                   parent), 400 for a foreign id sent in the body or query,
 //                   403 only where a refusal is the point (role escalation),
-//                   409 for a stage or type reorder list holding another
-//                   company's stage or type (the list no longer matches the
-//                   caller's own).
+//                   409 for a stage, type, or team reorder list holding
+//                   another company's stage, type, or team (the list no
+//                   longer matches the caller's own).
 //   expectError     text the refusal must contain, so a 400 for some other
 //                   reason (a malformed test body) can't pass as a refusal.
 //   multipart       sends a form with no file, so an attachment upload that
@@ -52,7 +54,7 @@ interface AttemptContext {
   targetRoleId: string
 }
 
-type Method = "GET" | "POST" | "PATCH" | "DELETE"
+type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 interface Attempt {
   name: string
@@ -246,6 +248,21 @@ const ATTEMPTS: Attempt[] = [
   { name: "Opportunity list filtered by other company's client", directions: "both", method: "GET", path: (c) => `/api/opportunities?clientId=${c.other.clientId}`, expect: 400, expectError: "Invalid client" },
   { name: "Opportunity list filtered by other company's type", directions: "both", method: "GET", path: (c) => `/api/opportunities?typeId=${c.other.opportunityTypeId}`, expect: 400, expectError: "Invalid opportunity type" },
   { name: "Opportunity list filtered by other company's user", directions: "both", method: "GET", path: (c) => `/api/opportunities?ownerId=${c.other.adminId}`, expect: 400, expectError: "Invalid user" },
+  { name: "Opportunity list filtered by other company's team", directions: "both", method: "GET", path: (c) => `/api/opportunities?teamId=${c.other.salesTeamId}`, expect: 400, expectError: "Invalid team" },
+  { name: "Opportunity POST teamId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, teamId: c.other.salesTeamId }), expect: 400, expectError: "Invalid team" },
+  { name: "Opportunity PATCH teamId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ teamId: c.other.generalTeamId, ownerId: null }), expect: 400, expectError: "Invalid team" },
+
+  // ── Teams ──
+  { name: "PATCH other company's team", directions: "both", method: "PATCH", path: (c) => `/api/teams/${c.other.salesTeamId}`, body: () => ({ name: "Changed" }), expect: 404 },
+  { name: "DELETE other company's team", directions: "both", method: "DELETE", path: (c) => `/api/teams/${c.other.salesTeamId}`, expect: 404 },
+  { name: "PUT other company's team members", directions: "both", method: "PUT", path: (c) => `/api/teams/${c.other.salesTeamId}/members`, body: (c) => ({ userIds: [c.own.adminId] }), expect: 404 },
+  { name: "PUT other company's team default roles", directions: "both", method: "PUT", path: (c) => `/api/teams/${c.other.salesTeamId}/default-roles`, body: () => ({ roleIds: [] }), expect: 404 },
+  { name: "Reorder with other company's team", directions: "both", method: "POST", path: () => "/api/teams/reorder", body: (c) => ({ teamIds: [c.other.generalTeamId] }), expect: 409, expectError: "The team list changed" },
+  { name: "Team members PUT userIds", directions: "both", method: "PUT", path: (c) => `/api/teams/${c.own.salesTeamId}/members`, body: (c) => ({ userIds: [c.other.adminId] }), expect: 400, expectError: "Invalid user" },
+  { name: "Team default roles PUT roleIds", directions: "both", method: "PUT", path: (c) => `/api/teams/${c.own.salesTeamId}/default-roles`, body: (c) => ({ roleIds: [c.own.teamGrantRoleId, c.other.teamGrantRoleId] }), expect: 400, expectError: "Invalid role" },
+  { name: "Team POST memberIds", directions: "both", method: "POST", path: () => "/api/teams", body: (c) => ({ name: "Should Not Exist", memberIds: [c.other.adminId] }), expect: 400, expectError: "Invalid user" },
+  { name: "Team POST defaultRoleIds", directions: "both", method: "POST", path: () => "/api/teams", body: (c) => ({ name: "Should Not Exist", defaultRoleIds: [c.other.teamGrantRoleId] }), expect: 400, expectError: "Invalid role" },
+  { name: "User PATCH teamIds", directions: "both", method: "PATCH", path: (c) => `/api/users/${c.own.adminId}`, body: (c) => ({ teamIds: [c.own.generalTeamId, c.other.salesTeamId] }), expect: 400, expectError: "Invalid team" },
 
   // ── Permission escalation inside one company ──
   { name: "Limited role grants a permission it doesn't hold", directions: "once", sameCompany: true, actor: "limited", method: "PATCH", path: (c) => `/api/roles/${c.targetRoleId}`, body: () => ({ permissions: { quotes: { delete: true } } }), expect: 403, expectError: "You can't grant permissions you don't have yourself" },
@@ -424,6 +441,7 @@ async function snapshot(prisma: PrismaClient, companyId: string): Promise<Record
     opportunityStages: prisma.opportunityStage.findMany({ where: { companyId }, ...byId }),
     opportunityTypes: prisma.opportunityType.findMany({ where: { companyId }, ...byId }),
     opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId } }),
+    teams: prisma.team.findMany({ where: { companyId }, ...byId, include: { members: byId, defaultRoles: byId } }),
     roles: prisma.role.findMany({ where: { companyId }, ...byId }),
     settings: prisma.companySettings.findUnique({ where: { companyId } }),
     users: prisma.user.findMany({ where: { companyId }, ...byId, select: { id: true, active: true, roleId: true } }),
@@ -510,6 +528,7 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       { name: "GET own opportunity related records", method: "GET", path: `/api/opportunities/${own.opportunityId}/related`, mustContain: '"purchaseOrders"' },
       { name: "GET own opportunity timeline", method: "GET", path: `/api/opportunities/${own.opportunityId}/timeline`, mustContain: own.timelineNoteId },
       { name: "GET own opportunity stages", method: "GET", path: "/api/opportunity-stages", mustContain: own.opportunityStageId },
+      { name: "GET own teams", method: "GET", path: "/api/teams", mustContain: own.salesTeamId },
       // Writes the values already stored, so nothing visible changes
       { name: "PATCH own vendor contact", method: "PATCH", path: `/api/vendors/${own.vendorId}/contacts/${own.vendorContactId}`, json: { lastName: n.vendorContactLastName }, mustContain: own.vendorContactId },
       { name: "PATCH own PO line item", method: "PATCH", path: `/api/purchase-orders/${own.purchaseOrderId}/line-items/${own.poLineId}`, json: { name: n.poLine }, mustContain: own.poLineId },
@@ -607,6 +626,26 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
         row.note = `wrong refusal: ${message}`
       }
       rows.push(row)
+    }
+  }
+
+  // The team lists: each admin's sidebar counts and team list hold its own
+  // teams and nothing of the other company's (no team id, company id, or name)
+  for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+    const own = ids[ownLetter]
+    const other = ids[otherLetter]
+    for (const path of ["/api/opportunities/sidebar-counts", "/api/teams"]) {
+      const res = await admins[ownLetter].request("GET", path)
+      const leaked = [other.generalTeamId, other.salesTeamId, ...markersFor(other, names[otherLetter])].filter((m) => res.text.includes(m))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : !res.text.includes(own.salesTeamId)
+            ? "its own team is missing"
+            : leaked.length > 0
+              ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
+              : null
+      rows.push({ attempt: `${ownLetter} ${path} holds only its own teams`, expected: "200, own teams only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
     }
   }
 
