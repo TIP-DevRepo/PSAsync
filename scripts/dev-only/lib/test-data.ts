@@ -170,6 +170,10 @@ export function testNames(letter: TestLetter, marker: string) {
     // owned by Test Team Viewer, one by Test Team Basic, and one unassigned.
     salesTeam: `${marker} Sales Team ${letter}`,
     supportTeam: `${marker} Support Team ${letter}`,
+    // Ops holds Test Admin and Test Team Manager and gives Team Lite, a role
+    // Test Team Manager may give (rank 1, only a permission it holds)
+    opsTeam: `${marker} Ops Team ${letter}`,
+    teamLiteRole: `${marker} Team Lite ${letter}`,
     teamGrantRole: `${marker} Team Grant ${letter}`,
     teamHighRole: `${marker} Team High ${letter}`,
     teamBasicName: `${marker} Test Team Basic ${letter}`,
@@ -251,6 +255,12 @@ export const TEAM_GRANT_RANK = 1
 // Support's default role, out of Test Team Manager's reach
 export const TEAM_HIGH_PERMISSIONS = { pages: { clients: true } }
 export const TEAM_HIGH_RANK = 50
+
+// Ops' default role: below Test Team Manager's rank and only a permission
+// it holds, so it passes the grant rule. Team Grant (rank 1, the Catalog
+// page, which Test Team Manager doesn't hold) fails it on permissions.
+export const TEAM_LITE_PERMISSIONS = { pages: { settings: true } }
+export const TEAM_LITE_RANK = 1
 
 const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
 
@@ -364,6 +374,8 @@ export interface PermissionFixtureIds {
   teamIds: string[]
   supportTeamId: string
   teamHighRoleId: string
+  opsTeamId: string
+  teamLiteRoleId: string
   teamBasicUserId: string
   teamViewerUserId: string
   teamManagerUserId: string

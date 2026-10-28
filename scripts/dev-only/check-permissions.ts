@@ -127,6 +127,18 @@
 // leaving, and keep it when the role is also given directly.
 // checkTeamChange moves opportunities between teams (one team_changed
 // entry) and puts them back.
+//
+// The grant rule (src/lib/role-grants.ts): giving a role, directly or
+// through a team, needs the giver to rank above it and hold every
+// permission it grants. Team Grant (rank 1, the Catalog page) is below Test
+// Team Manager B and Test Manager B but grants a permission neither holds,
+// so attaching it, adding anyone (themselves included) to Sales, and giving
+// it directly in Manage Users are all refused (403). The membership rank
+// rule: Test Team Manager B can't add Test Rep B (rank 5, its own rank) to
+// Ops or remove Test Admin B from it (403). checkGrantRules then shows the
+// legitimate cases go through (Ops' Team Lite removed and attached again,
+// Test Team Basic B added, Test Team Manager B removing itself, and Test
+// Manager B giving Team Lite directly) and puts everything back.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -651,6 +663,16 @@ const TEAM_ATTEMPTS: Attempt[] = [
   // Deletes that are blocked
   { name: "Delete General", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/teams/${c.b.generalTeamId}`, expect: 409, expectError: "can't be deleted" },
   { name: "Delete a team in use", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/teams/${c.b.salesTeamId}`, expect: 409, expectError: "This team has 3 opportunities" },
+  // The grant rule: a role below its rank that grants a permission it lacks
+  { name: "Attach a role with a permission it lacks", actor: "teamManager", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.fx.opsTeamId}/default-roles`, body: (c) => ({ roleIds: [c.fx.teamLiteRoleId, c.b.teamGrantRoleId] }), expect: 403, expectError: "includes permissions you don't have" },
+  { name: "Create a team with a role with a permission it lacks", actor: "teamManager", kind: "refused", method: "POST", path: () => "/api/teams", body: (c) => ({ name: "Should Not Exist", defaultRoleIds: [c.b.teamGrantRoleId] }), expect: 403, expectError: "includes permissions you don't have" },
+  { name: "Add itself to a team giving a role with a permission it lacks", actor: "teamManager", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.b.salesTeamId}/members`, body: (c) => ({ userIds: [c.fx.teamBasicUserId, c.fx.teamViewerUserId, c.fx.teamManagerUserId] }), expect: 403, expectError: "includes permissions you don't have" },
+  { name: "Add anyone to a team giving a role with a permission it lacks", actor: "teamManager", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.b.salesTeamId}/members`, body: (c) => ({ userIds: [c.fx.teamBasicUserId, c.fx.teamViewerUserId, c.fx.oppViewerUserId] }), expect: 403, expectError: "includes permissions you don't have" },
+  { name: "Give a role with a permission it lacks", actor: "manager", kind: "refused", method: "PATCH", path: (c) => `/api/users/${c.fx.everyoneUserId}`, body: (c) => ({ roleIds: [c.b.teamGrantRoleId] }), expect: 403, expectError: "includes permissions you don't have" },
+  { name: "Invite into a role with a permission it lacks", actor: "manager", kind: "refused", method: "POST", path: () => "/api/users", body: (c) => ({ name: "Should Not Exist", email: "should-not-exist-grant@example.test", tempPassword: "ShouldNotExist123", roleIds: [c.b.teamGrantRoleId] }), expect: 403, expectError: "includes permissions you don't have" },
+  // The membership rank rule
+  { name: "Add a member at its own rank", actor: "teamManager", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.fx.opsTeamId}/members`, body: (c) => ({ userIds: [c.b.adminId, c.fx.teamManagerUserId, c.repUserId] }), expect: 403, expectError: "ranked below you" },
+  { name: "Remove a member ranked above it", actor: "teamManager", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.fx.opsTeamId}/members`, body: (c) => ({ userIds: [c.fx.teamManagerUserId] }), expect: 403, expectError: "ranked below you" },
   { name: "Rename to another team's name", actor: "teamManager", kind: "refused", method: "PATCH", path: (c) => `/api/teams/${c.fx.supportTeamId}`, body: (c) => ({ name: c.names.salesTeam }), expect: 400, expectError: "already exists" },
 ]
 
@@ -2175,6 +2197,35 @@ async function checkTeamDefaultRoles(prisma: PrismaClient, admin: Session, every
 // names and ids), and the Sales viewer's opportunity to General with a new
 // owner from General (Test Rep B) in the same request. Both are put back,
 // and the entries removed.
+// The legitimate side of the grant and membership rank rules. Test Team
+// Manager B removes Team Lite from Ops and attaches it again (it ranks
+// above it and holds its only permission), adds Test Team Basic B (ranked
+// below it), and removes itself; Test Manager B gives Team Lite to Test
+// Everyone B directly. Ops' members and default roles and Test Everyone
+// B's roles are put back afterwards.
+async function checkGrantRules(prisma: PrismaClient, teamManager: Session, manager: Session, ctx: AttemptContext, rows: Row[]) {
+  const opsId = ctx.fx.opsTeamId
+  const everyoneId = ctx.fx.everyoneUserId
+  const push = (who: string, name: string, res: { status: number; text: string }) =>
+    rows.push({ attempt: `[${who}] Grant rules: ${name}`, expected: "200", actual: String(res.status), result: res.status === 200 ? "PASS" : "FAIL", note: res.status === 200 ? undefined : errorText(res.text) })
+  const originalMembers = (await prisma.teamMember.findMany({ where: { teamId: opsId }, select: { userId: true } })).map((m) => m.userId)
+  const originalRoles = (await prisma.teamDefaultRole.findMany({ where: { teamId: opsId }, select: { roleId: true } })).map((r) => r.roleId)
+  const everyoneRoles = (await prisma.userRole.findMany({ where: { userId: everyoneId }, select: { roleId: true } })).map((r) => r.roleId)
+  try {
+    push("Team Manager B", "remove a team's default role", await teamManager.request("PUT", `/api/teams/${opsId}/default-roles`, { json: { roleIds: [] } }))
+    push("Team Manager B", "attach a role it may give", await teamManager.request("PUT", `/api/teams/${opsId}/default-roles`, { json: { roleIds: [ctx.fx.teamLiteRoleId] } }))
+    push("Team Manager B", "add a member ranked below it", await teamManager.request("PUT", `/api/teams/${opsId}/members`, { json: { userIds: [...originalMembers, ctx.fx.teamBasicUserId] } }))
+    push("Team Manager B", "remove itself", await teamManager.request("PUT", `/api/teams/${opsId}/members`, { json: { userIds: [...originalMembers, ctx.fx.teamBasicUserId].filter((id) => id !== ctx.fx.teamManagerUserId) } }))
+    push("Manager B", "give a role it may give", await manager.request("PATCH", `/api/users/${everyoneId}`, { json: { roleIds: [ctx.fx.teamLiteRoleId] } }))
+  } finally {
+    await prisma.teamMember.deleteMany({ where: { teamId: opsId, userId: { notIn: originalMembers } } })
+    await prisma.teamMember.createMany({ data: originalMembers.map((userId) => ({ teamId: opsId, userId })), skipDuplicates: true })
+    await prisma.teamDefaultRole.deleteMany({ where: { teamId: opsId, roleId: { notIn: originalRoles } } })
+    await prisma.teamDefaultRole.createMany({ data: originalRoles.map((roleId) => ({ teamId: opsId, roleId })), skipDuplicates: true })
+    await setUserRoles(prisma, everyoneId, everyoneRoles)
+  }
+}
+
 async function checkTeamChange(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
   const push = (name: string, expected: string, actual: string, problem: string | null) =>
     rows.push({ attempt: `[Admin B] Team change: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
@@ -2542,6 +2593,7 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // Teams: default roles applied on the next request, and team changes
     await checkTeamDefaultRoles(prisma, sessions.admin, sessions.everyone, ctx, rows)
     await checkTeamChange(prisma, sessions.admin, ctx, rows)
+    await checkGrantRules(prisma, sessions.teamManager, sessions.manager, ctx, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length

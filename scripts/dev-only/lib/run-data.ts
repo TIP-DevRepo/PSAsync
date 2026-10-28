@@ -52,6 +52,8 @@ import {
   TEAM_GRANT_RANK,
   TEAM_HIGH_PERMISSIONS,
   TEAM_HIGH_RANK,
+  TEAM_LITE_PERMISSIONS,
+  TEAM_LITE_RANK,
   TEAM_MANAGER_PERMISSIONS,
   TEAM_MANAGER_RANK,
   TEAM_VIEWER_PERMISSIONS,
@@ -643,6 +645,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
     const generalTeam = rec("team", await prisma.team.findFirstOrThrow({ where: { companyId, isDefault: true }, select: { id: true } }))
     const teamGrantRoleId = await addRunRole(prisma, run, { companyId, name: n.teamGrantRole, rank: TEAM_GRANT_RANK, permissions: TEAM_GRANT_PERMISSIONS })
     const teamHighRoleId = await addRunRole(prisma, run, { companyId, name: n.teamHighRole, rank: TEAM_HIGH_RANK, permissions: TEAM_HIGH_PERMISSIONS })
+    const teamLiteRoleId = await addRunRole(prisma, run, { companyId, name: n.teamLiteRole, rank: TEAM_LITE_RANK, permissions: TEAM_LITE_PERMISSIONS })
     const teamBasicRoleId = await addRunRole(prisma, run, { companyId, name: n.teamBasicRole, rank: 1, permissions: TEAM_BASIC_PERMISSIONS })
     const teamViewerRoleId = await addRunRole(prisma, run, { companyId, name: n.teamViewerRole, rank: 1, permissions: TEAM_VIEWER_PERMISSIONS })
     const teamManagerRoleId = await addRunRole(prisma, run, { companyId, name: n.teamManagerRole, rank: TEAM_MANAGER_RANK, permissions: TEAM_MANAGER_PERMISSIONS })
@@ -666,6 +669,19 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
       "team",
       await prisma.team.create({
         data: { companyId, name: n.supportTeam, sortOrder: 2, defaultRoles: { create: [{ roleId: teamHighRoleId }] } },
+        select: { id: true },
+      })
+    )
+    const opsTeam = rec(
+      "team",
+      await prisma.team.create({
+        data: {
+          companyId,
+          name: n.opsTeam,
+          sortOrder: 3,
+          members: { create: [{ userId: adminId }, { userId: teamManagerUserId }] },
+          defaultRoles: { create: [{ roleId: teamLiteRoleId }] },
+        },
         select: { id: true },
       })
     )
@@ -822,9 +838,11 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         unassignedActionId: unassignedOpportunity.actionId,
         unassignedAdminNoteId: unassignedOpportunity.adminNoteId,
         unassignedRepNoteId: unassignedOpportunity.repNoteId,
-        teamIds: [generalTeam.id, salesTeam.id, supportTeam.id],
+        teamIds: [generalTeam.id, salesTeam.id, supportTeam.id, opsTeam.id],
         supportTeamId: supportTeam.id,
         teamHighRoleId,
+        opsTeamId: opsTeam.id,
+        teamLiteRoleId,
         teamBasicUserId,
         teamViewerUserId,
         teamManagerUserId,
