@@ -35,8 +35,9 @@ enforceDevGuard("check-cross-company")
 //   expect          404 for an id in the URL from another company (or another
 //                   parent), 400 for a foreign id sent in the body or query,
 //                   403 only where a refusal is the point (role escalation),
-//                   409 for a stage reorder list holding another company's
-//                   stage (the list no longer matches the caller's stages).
+//                   409 for a stage or type reorder list holding another
+//                   company's stage or type (the list no longer matches the
+//                   caller's own).
 //   expectError     text the refusal must contain, so a 400 for some other
 //                   reason (a malformed test body) can't pass as a refusal.
 //   multipart       sends a form with no file, so an attachment upload that
@@ -68,6 +69,10 @@ interface Attempt {
 }
 
 const FAR_FUTURE = "2030-01-01"
+
+// Creating an opportunity needs an initial note, so each create attempt
+// sends one and is still refused only for the id under test
+const OPP_NOTE = "<p>Dev check initial note</p>"
 
 const ATTEMPTS: Attempt[] = [
   // ── Nested records, other company's ids in the URL ──
@@ -203,6 +208,16 @@ const ATTEMPTS: Attempt[] = [
   { name: "PATCH other company's opportunity", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.other.opportunityId}`, body: () => ({ title: "Changed" }), expect: 404 },
   { name: "DELETE other company's opportunity", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.other.opportunityId}`, expect: 404 },
   { name: "GET other opportunity's attachments", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}/attachments`, expect: 404 },
+  { name: "GET other opportunity's related records", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}/related`, expect: 404 },
+  { name: "GET other opportunity's timeline", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}/timeline`, expect: 404 },
+  { name: "POST note on other opportunity", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.other.opportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expect: 404 },
+  { name: "PATCH other opportunity's note", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.other.opportunityId}/timeline/${c.other.timelineNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 404 },
+  { name: "DELETE other opportunity's note", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.other.opportunityId}/timeline/${c.other.timelineNoteId}`, expect: 404 },
+  { name: "PATCH other company's note under own opportunity", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline/${c.other.timelineNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 404 },
+  { name: "DELETE other company's note under own opportunity", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline/${c.other.timelineNoteId}`, expect: 404 },
+  { name: "DELETE other company's action under own opportunity", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline/${c.other.timelineActionId}`, expect: 404 },
+  { name: "Note on own opportunity with other company's stage", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", stageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Own timeline paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline?cursor=${c.other.timelineNoteId}`, expect: 400, expectError: "Invalid cursor" },
   { name: "POST attachment to other opportunity", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.other.opportunityId}/attachments`, multipart: true, expect: 404 },
   { name: "DELETE other opportunity's attachment", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.other.opportunityId}/attachments/${c.other.opportunityAttachmentId}`, expect: 404 },
   { name: "DELETE other attachment under own opportunity", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.own.opportunityId}/attachments/${c.other.opportunityAttachmentId}`, expect: 404 },
@@ -213,11 +228,14 @@ const ATTEMPTS: Attempt[] = [
   // The reorder list must be exactly the caller's own stages, so another
   // company's stage makes it the stale list answer
   { name: "Reorder with other company's stage", directions: "both", method: "POST", path: () => "/api/opportunity-stages/reorder", body: (c) => ({ stageIds: [c.other.opportunityStageId] }), expect: 409, expectError: "The stage list changed" },
-  { name: "Opportunity POST clientId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.other.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid client" },
-  { name: "Opportunity POST contactId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.own.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },
-  { name: "Opportunity POST ownerId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, ownerId: c.other.adminId }), expect: 400, expectError: "Invalid user" },
-  { name: "Opportunity POST stageId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, stageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
-  { name: "Opportunity POST typeId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, typeId: c.other.opportunityTypeId }), expect: 400, expectError: "Invalid opportunity type" },
+  { name: "Reorder with other company's type", directions: "both", method: "POST", path: () => "/api/opportunity-types/reorder", body: (c) => ({ typeIds: [c.other.opportunityTypeId] }), expect: 409, expectError: "The type list changed" },
+  { name: "Opportunity POST clientId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.other.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid client" },
+  { name: "Opportunity POST contactId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },
+  { name: "Opportunity POST ownerId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, ownerId: c.other.adminId }), expect: 400, expectError: "Invalid user" },
+  { name: "Opportunity POST stageId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, stageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Opportunity POST typeId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, typeId: c.other.opportunityTypeId }), expect: 400, expectError: "Invalid opportunity type" },
+  { name: "Opportunity POST clientLocationId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, clientLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Opportunity PATCH clientLocationId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ clientLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
   { name: "Opportunity PATCH clientId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ clientId: c.other.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid client" },
   { name: "Opportunity PATCH contactId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },
   { name: "Opportunity PATCH ownerId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ ownerId: c.other.adminId }), expect: 400, expectError: "Invalid user" },
@@ -402,7 +420,7 @@ async function snapshot(prisma: PrismaClient, companyId: string): Promise<Record
       },
     }),
     approvalWorkflows: prisma.approvalWorkflow.findMany({ where: { companyId }, ...byId }),
-    opportunities: prisma.opportunity.findMany({ where: { companyId }, ...byId, include: { attachments: byId } }),
+    opportunities: prisma.opportunity.findMany({ where: { companyId }, ...byId, include: { attachments: byId, timeline: byId } }),
     opportunityStages: prisma.opportunityStage.findMany({ where: { companyId }, ...byId }),
     opportunityTypes: prisma.opportunityType.findMany({ where: { companyId }, ...byId }),
     opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId } }),
@@ -489,6 +507,8 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       { name: "GET own catalog change log", method: "GET", path: `/api/catalog/${own.catalogItemId}/change-log`, mustContain: "[" },
       { name: "GET own opportunity", method: "GET", path: `/api/opportunities/${own.opportunityId}`, mustContain: own.opportunityId },
       { name: "GET own opportunity attachments", method: "GET", path: `/api/opportunities/${own.opportunityId}/attachments`, mustContain: own.opportunityAttachmentId },
+      { name: "GET own opportunity related records", method: "GET", path: `/api/opportunities/${own.opportunityId}/related`, mustContain: '"purchaseOrders"' },
+      { name: "GET own opportunity timeline", method: "GET", path: `/api/opportunities/${own.opportunityId}/timeline`, mustContain: own.timelineNoteId },
       { name: "GET own opportunity stages", method: "GET", path: "/api/opportunity-stages", mustContain: own.opportunityStageId },
       // Writes the values already stored, so nothing visible changes
       { name: "PATCH own vendor contact", method: "PATCH", path: `/api/vendors/${own.vendorId}/contacts/${own.vendorContactId}`, json: { lastName: n.vendorContactLastName }, mustContain: own.vendorContactId },

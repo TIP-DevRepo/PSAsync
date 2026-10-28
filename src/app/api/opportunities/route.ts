@@ -3,18 +3,16 @@ import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
 import {
   assertRefs,
+  loadClientMainLocationId,
   mayAssignOpportunityTo,
   opportunityListWhere,
   opportunityStageWhere,
   OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE,
 } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
-import { takeOpportunityNumber } from "@/lib/opportunity-number"
-import { opportunityDetailSelect, opportunityListSelect, STAGE_ORDER } from "@/lib/opportunity-selects"
+import { opportunityListSelect, STAGE_ORDER } from "@/lib/opportunity-selects"
 import {
-  closedAtFor,
   INVALID_BODY_MESSAGE,
-  OPPORTUNITY_NOTES_MAX,
   OPPORTUNITY_SEARCH_MAX,
   OPPORTUNITY_TITLE_MAX,
   readDate,
@@ -24,6 +22,7 @@ import {
   readText,
 } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
+import { createOpportunity, initialNoteHtml, INITIAL_NOTE_REQUIRED_MESSAGE } from "@/lib/opportunity-create"
 import type { Prisma } from "@/generated/prisma"
 
 const DAY = 24 * 60 * 60 * 1000
@@ -109,12 +108,20 @@ export async function POST(req: NextRequest) {
 
   const title = readText(body.title, { label: "Title", max: OPPORTUNITY_TITLE_MAX, required: true })
   if (title.error !== undefined) return apiError(400, title.error)
-  const notes = readText(body.notes, { label: "Notes", max: OPPORTUNITY_NOTES_MAX })
-  if (notes.error !== undefined) return apiError(400, notes.error)
   const expectedValue = readExpectedValue(body.expectedValue)
   if (expectedValue.error !== undefined) return apiError(400, expectedValue.error)
   const expectedCloseDate = readDate(body.expectedCloseDate)
   if (expectedCloseDate.error !== undefined) return apiError(400, expectedCloseDate.error)
+  // Required: the person's own first note, checked after sanitizing (one
+  // that sanitizes to nothing is empty)
+  if (typeof body.initialNote !== "string") return apiError(400, INITIAL_NOTE_REQUIRED_MESSAGE)
+  const initialNote = { by: "person" as const, userId: ctx.userId, html: body.initialNote }
+  try {
+    initialNoteHtml(initialNote)
+  } catch (err) {
+    const { message, status } = userFacingError(err, "Checking an initial note")
+    return apiError(status, message)
+  }
 
   if (body.clientId === undefined || body.clientId === null || body.clientId === "") {
     return apiError(400, "A client is required")
@@ -123,10 +130,10 @@ export async function POST(req: NextRequest) {
     return apiError(400, "A contact is required")
   }
 
-  // The owner is the creator unless the body names someone, and null or
-  // blank leaves it unassigned. Without opportunities.viewAll only the
-  // creator or unassigned, the two owners they can still see.
-  const owner = "ownerId" in body ? readOptionalId(body.ownerId) : { value: ctx.userId }
+  // New records start unassigned: left out, null, or blank is unassigned. A
+  // named owner follows the owner rule: without opportunities.viewAll only
+  // the creator, the one owner besides unassigned they can still see.
+  const owner = readOptionalId(body.ownerId)
   if (owner.error !== undefined) return apiError(400, "Invalid user", "INVALID_REFERENCE")
   const ownerId = owner.value
   if (!mayAssignOpportunityTo(ctx, ownerId)) {
@@ -137,6 +144,10 @@ export async function POST(req: NextRequest) {
   if (stage.error !== undefined) return apiError(400, "Invalid stage", "INVALID_REFERENCE")
   const type = readOptionalId(body.typeId)
   if (type.error !== undefined) return apiError(400, "Invalid opportunity type", "INVALID_REFERENCE")
+  // Left out, the client's main location; null or blank, no location
+  const hasLocation = "clientLocationId" in body
+  const location = readOptionalId(body.clientLocationId)
+  if (location.error !== undefined) return apiError(400, "Invalid location", "INVALID_REFERENCE")
 
   // The contact must belong to the client, the owner must be an active user
   // here, and the stage and type this company's
@@ -144,12 +155,15 @@ export async function POST(req: NextRequest) {
     clientId: body.clientId,
     contactId: body.contactId,
     userId: ownerId,
+    // A location of this client
+    clientLocationId: location.value,
     opportunityStageId: stage.value,
     opportunityTypeId: type.value,
   })
   if (invalid) return invalid
   const clientId = body.clientId as string
   const contactId = body.contactId as string
+  const clientLocationId = hasLocation ? location.value : await loadClientMainLocationId(ctx, clientId)
 
   // The named stage, else the first OPEN stage in the company's order
   const chosenStage = await prisma.opportunityStage.findFirst({
@@ -159,30 +173,21 @@ export async function POST(req: NextRequest) {
   })
   if (!chosenStage) return apiError(400, "Add an open stage in Opportunity Settings first")
 
-  const now = new Date()
   try {
-    const opportunity = await prisma.$transaction(async (tx) => {
-      const number = await takeOpportunityNumber(tx, ctx.companyId, now)
-      return tx.opportunity.create({
-        data: {
-          companyId: ctx.companyId,
-          number,
-          title: title.value as string,
-          clientId,
-          contactId,
-          ownerId,
-          stageId: chosenStage.id,
-          typeId: type.value,
-          source: "MANUAL",
-          expectedValue: expectedValue.value,
-          expectedCloseDate: expectedCloseDate.value,
-          notes: notes.value,
-          stageChangedAt: now,
-          closedAt: closedAtFor(chosenStage.category, now),
-          createdById: ctx.userId,
-        },
-        select: opportunityDetailSelect,
-      })
+    const opportunity = await createOpportunity(prisma, {
+      companyId: ctx.companyId,
+      createdById: ctx.userId,
+      title: title.value as string,
+      clientId,
+      contactId,
+      clientLocationId,
+      ownerId,
+      stage: chosenStage,
+      typeId: type.value,
+      source: "MANUAL",
+      expectedValue: expectedValue.value,
+      expectedCloseDate: expectedCloseDate.value,
+      initialNote,
     })
     return NextResponse.json(opportunity)
   } catch (err) {

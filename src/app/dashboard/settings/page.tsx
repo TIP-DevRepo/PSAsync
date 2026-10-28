@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
-import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin } from "lucide-react"
+import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
@@ -17,6 +17,7 @@ import { NotificationSettingsPanel } from "@/components/settings/NotificationSet
 import { DistributorSettingsPanel } from "@/components/settings/DistributorSettingsPanel"
 import { MicrosoftSettingsPanel } from "@/components/settings/MicrosoftSettingsPanel"
 import { SalesOrderSettingsPanel } from "@/components/settings/SalesOrderSettingsPanel"
+import { OpportunitySettingsPanel } from "@/components/settings/OpportunitySettingsPanel"
 import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
 import { NoAccess } from "@/components/NoAccess"
 import { useAccess } from "@/components/AccessProvider"
@@ -29,6 +30,7 @@ type PanelKey =
   | "contactTags"
   | "categories"
   | "salesOrders"
+  | "opportunities"
   | "quotes"
   | "approval-workflows"
   | "notifications"
@@ -77,6 +79,10 @@ const settingsCategories: SettingsCategory[] = [
     ],
   },
   {
+    label: "Opportunities",
+    items: [{ key: "opportunities", label: "Opportunity Settings", icon: Target }],
+  },
+  {
     label: "Sales Orders",
     items: [{ key: "salesOrders", label: "Sales Order Settings", icon: ClipboardList }],
   },
@@ -105,6 +111,7 @@ const PANEL_PERMISSION: Record<PanelKey, string | null> = {
   contactTags: "settingsSections.company",
   categories: "settingsSections.company",
   salesOrders: "settingsSections.salesOrders",
+  opportunities: "settingsSections.opportunities",
   quotes: "settingsSections.quotes",
   "approval-workflows": "settingsSections.approvalWorkflows",
   notifications: "settingsSections.notifications",
@@ -139,6 +146,8 @@ function renderPanel(key: PanelKey | null) {
       return <ContactTagsSettingsPanel />
     case "salesOrders":
       return <SalesOrderSettingsPanel />
+    case "opportunities":
+      return <OpportunitySettingsPanel />
     case "quotes":
       return <QuoteSettingsPanel />
     case "approval-workflows":

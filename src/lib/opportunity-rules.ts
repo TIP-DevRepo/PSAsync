@@ -4,7 +4,6 @@ import type { OpportunityStageCategory } from "@/generated/prisma"
 // database imports, so every rule here can be checked on its own.
 
 export const OPPORTUNITY_TITLE_MAX = 200
-export const OPPORTUNITY_NOTES_MAX = 10000
 // Stage and type names
 export const OPPORTUNITY_NAME_MAX = 100
 // The list's text search
@@ -18,6 +17,8 @@ export const CLOSE_DATE_MESSAGE = "Expected close date must be a valid date"
 export const QUOTE_SENT_STAGE_OPEN_MESSAGE = "The stage a sent quote moves to must be an open stage"
 export const STAGE_ORDER_MESSAGE = "Invalid stage order"
 export const STAGE_ORDER_STALE_MESSAGE = "The stage list changed since you loaded it. Refresh and try again."
+export const TYPE_ORDER_MESSAGE = "Invalid type order"
+export const TYPE_ORDER_STALE_MESSAGE = "The type list changed since you loaded it. Refresh and try again."
 
 // ─── Stage changes ──────────────────────────────────────────────────────────
 
@@ -40,6 +41,19 @@ export function stageChangeData(
 ): { stageId: string; stageChangedAt: Date; closedAt: Date | null } | Record<string, never> {
   if (from.id === to.id) return {}
   return { stageId: to.id, stageChangedAt: now, closedAt: closedAtFor(to.category, now) }
+}
+
+// What a stage's category change writes to every opportunity in that stage,
+// in the same transaction as the change: moving into WON or LOST sets
+// closedAt to now where it is still empty, and moving into OPEN clears it.
+// Null when the category stays the same.
+export function stageCategoryClosedAtUpdate(
+  from: OpportunityStageCategory,
+  to: OpportunityStageCategory,
+  now: Date
+): { onlyWithoutClosedAt: boolean; closedAt: Date | null } | null {
+  if (from === to) return null
+  return isClosedCategory(to) ? { onlyWithoutClosedAt: true, closedAt: now } : { onlyWithoutClosedAt: false, closedAt: null }
 }
 
 // ─── Body values ────────────────────────────────────────────────────────────

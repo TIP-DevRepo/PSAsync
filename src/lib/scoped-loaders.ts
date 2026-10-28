@@ -1,4 +1,5 @@
 import type { Prisma } from "@/generated/prisma"
+import { mainClientLocation } from "@/lib/client-main-location"
 import { prisma } from "@/lib/prisma"
 import { apiError, type AccessContext } from "@/lib/api-access"
 
@@ -404,6 +405,33 @@ export function loadOpportunityAttachment(ctx: OpportunityViewer, opportunityId:
     where: { id: attachmentId, opportunityId, opportunity: viewableOpportunityWhere(ctx, opportunityId) },
     select: { id: true },
   })
+}
+
+// A timeline entry of one opportunity, company scoped, for writes after
+// loadOpportunityTimelineEntry has passed
+export const opportunityTimelineEntryWhere = (ctx: Scope, opportunityId: string, entryId: string) =>
+  ({ id: entryId, companyId: ctx.companyId, opportunityId }) satisfies Prisma.TimelineEntryWhereUniqueInput
+
+// A timeline entry by its URL id (or a paging cursor), only under the
+// opportunity it belongs to, with the VOP check on that opportunity
+export function loadOpportunityTimelineEntry(ctx: OpportunityViewer, opportunityId: string, entryId: string) {
+  if (!ctx.can("pages.opportunities")) return Promise.resolve(null)
+  return prisma.timelineEntry.findFirst({
+    where: { id: entryId, companyId: ctx.companyId, opportunityId, opportunity: viewableOpportunityWhere(ctx, opportunityId) },
+    select: { id: true, kind: true, authorId: true },
+  })
+}
+
+// The id of a client's main location (mainClientLocation: its primary
+// location, else its main billing location), or null when it has none or
+// the client isn't this company's. The default location of an opportunity.
+export async function loadClientMainLocationId(ctx: Scope, clientId: string): Promise<string | null> {
+  const location = { select: { id: true, name: true, isPrimary: true } }
+  const client = await prisma.client.findFirst({
+    where: clientWhere(ctx, clientId),
+    select: { locations: { where: { isPrimary: true }, ...location }, mainBillingLocation: location },
+  })
+  return client ? (mainClientLocation(client)?.id ?? null) : null
 }
 
 export const opportunityStageWhere = (ctx: Scope, stageId: string) =>

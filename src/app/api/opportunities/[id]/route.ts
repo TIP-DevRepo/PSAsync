@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import {
   assertRefs,
+  loadClientMainLocationId,
   mayAssignOpportunityTo,
   opportunityStageWhere,
   opportunityWhere,
@@ -16,7 +17,6 @@ import {
   INVALID_BODY_MESSAGE,
   isPrismaError,
   linkedRecordsMessage,
-  OPPORTUNITY_NOTES_MAX,
   OPPORTUNITY_TITLE_MAX,
   readDate,
   readExpectedValue,
@@ -26,6 +26,8 @@ import {
   stageChangeData,
 } from "@/lib/opportunity-rules"
 import { deleteStoredObjects } from "@/lib/uploads"
+import { recordTimelineActions } from "@/lib/timeline"
+import { opportunityChangeActions, opportunityTimelineSnapshotSelect } from "@/lib/opportunity-timeline"
 import { userFacingError } from "@/lib/user-error"
 import type { Prisma } from "@/generated/prisma"
 
@@ -53,7 +55,8 @@ export async function GET(
   return NextResponse.json(opportunity)
 }
 
-// Changes only the fields the body includes
+// Changes only the fields the body includes, and records a timeline ACTION
+// entry for each field that actually changed
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -83,11 +86,6 @@ export async function PATCH(
     const title = readText(body.title, { label: "Title", max: OPPORTUNITY_TITLE_MAX, required: true })
     if (title.error !== undefined) return apiError(400, title.error)
     data.title = title.value as string
-  }
-  if ("notes" in body) {
-    const notes = readText(body.notes, { label: "Notes", max: OPPORTUNITY_NOTES_MAX })
-    if (notes.error !== undefined) return apiError(400, notes.error)
-    data.notes = notes.value
   }
   if ("expectedValue" in body) {
     const expectedValue = readExpectedValue(body.expectedValue)
@@ -127,6 +125,16 @@ export async function PATCH(
     if (isBlank(body.stageId)) return apiError(400, "A stage is required")
     refs.opportunityStageId = body.stageId
   }
+  // A location of the opportunity's client (new or kept). Null or blank
+  // clears it.
+  if ("clientLocationId" in body) {
+    const location = readOptionalId(body.clientLocationId)
+    if (location.error !== undefined) return apiError(400, "Invalid location", "INVALID_REFERENCE")
+    data.clientLocationId = location.value
+    refs.clientLocationId = location.value
+    refs.clientId = "clientId" in body ? body.clientId : existing.clientId
+  }
+
   if ("typeId" in body) {
     const type = readOptionalId(body.typeId)
     if (type.error !== undefined) return apiError(400, "Invalid opportunity type", "INVALID_REFERENCE")
@@ -136,6 +144,11 @@ export async function PATCH(
 
   const invalid = await assertRefs(ctx, refs)
   if (invalid) return invalid
+
+  // A new client without a location takes the new client's main location
+  if ("clientId" in body && body.clientId !== existing.clientId && !("clientLocationId" in body)) {
+    data.clientLocationId = await loadClientMainLocationId(ctx, body.clientId as string)
+  }
 
   // Moving to another stage stamps stageChangedAt and sets or clears closedAt
   if ("stageId" in body) {
@@ -148,10 +161,26 @@ export async function PATCH(
   }
 
   try {
-    const opportunity = await prisma.opportunity.update({
-      where: opportunityWhere(ctx, existing.id),
-      data,
-      select: opportunityDetailSelect,
+    // The change and its timeline entries are saved together. The before
+    // values are read again inside the transaction, right before the write.
+    const opportunity = await prisma.$transaction(async (tx) => {
+      const before = await tx.opportunity.findFirstOrThrow({
+        where: opportunityWhere(ctx, existing.id),
+        select: opportunityTimelineSnapshotSelect,
+      })
+      const saved = await tx.opportunity.update({
+        where: opportunityWhere(ctx, existing.id),
+        data,
+        select: opportunityDetailSelect,
+      })
+      // Nothing when the PATCH changed nothing
+      await recordTimelineActions(tx, {
+        companyId: ctx.companyId,
+        authorId: ctx.userId,
+        subject: { opportunityId: existing.id },
+        actions: opportunityChangeActions(before, saved),
+      })
+      return saved
     })
     return NextResponse.json(opportunity)
   } catch (err) {

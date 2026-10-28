@@ -72,6 +72,44 @@
 // reads but can't create, edit, or delete, and Test Opp Settings B (only
 // Opportunity Settings) is the only one besides Global Admin whose stage,
 // type, and settings writes go through.
+//
+// Opportunities screens: checkOpportunityPages reads the Opportunities
+// page, an opportunity's page, and Settings > Opportunity Settings as HTML
+// with each user's session (Test Everyone B, Test Clerk B, and Test Opp
+// Settings B get no access to the opportunity pages; Test Everyone B, Test
+// Opp Viewer B, and Test Manager B, who opens Settings, to the section).
+// checkRelatedVisibility links the admin's sample quote and Test Rep B's
+// quote to the unassigned sample opportunity and checks the Related panel
+// lists only the ones each user may open, then unlinks them.
+// checkStageCategoryClosedAt has Test Opp Settings B move the first stage
+// to WON and back, checking closedAt is set and then cleared on the sample
+// opportunities in it, and puts the stage and dates back.
+//
+// Timeline: every timeline route is refused for Test Everyone B, reading
+// needs the Opportunities page and the opportunity view check, and adding a
+// note needs opportunities.edit (Test Rep B and Test Opp Viewer B are
+// refused). Test Admin B, a Global Admin, still can't edit or delete Test
+// Rep B's sample note, and nobody can edit or delete an action entry.
+// checkTimeline has Test Admin B add a note holding a script tag (stored
+// and returned without it), edit and delete it, and checks that a stage
+// change through PATCH adds exactly one stage_changed entry and a PATCH
+// that changes nothing adds none, then puts everything back.
+// checkNoteStageChange posts notes with a stageId (to a WON stage, then an
+// OPEN one), checking the stage moves, closedAt is set and cleared, and each
+// adds exactly one entry, the note holding the move. A note with a stageId
+// is refused without opportunities.edit, and with another company's, a made
+// up, or a non text stageId. The opportunity GET's client details reach
+// only users who may open it, and the list never carries them.
+// checkOpportunityLocation checks a create without a location saves the
+// client's main location, another of the client's locations saves with one
+// location_changed entry (none when saved again), and a client change resets
+// the location to the new client's main one. A location of another client
+// of the same company is refused (400). The contact's mobile comes only with
+// an opportunity the user may open.
+//
+// Creating an opportunity needs an initial note (OPP_NOTE on every create
+// attempt); one left out, empty, or script only (empty after sanitizing) is
+// refused with 400, and a create without an owner is unassigned.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -383,13 +421,22 @@ const SETTINGS_GUARDED: Guarded[] = [
 // The ids are the unassigned sample opportunity's and the company's first
 // stage and type.
 const OPP_SETTINGS_WRITE = "manage opportunity settings"
+
+// Creating an opportunity needs an initial note, so each create attempt
+// sends one and is still refused (or allowed) for the reason under test
+const OPP_NOTE = "<p>Dev check initial note</p>"
 const OPP_GUARDED: Guarded[] = [
   { name: "List opportunities", method: "GET", path: () => "/api/opportunities", expectError: "view opportunities" },
-  { name: "Create an opportunity", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expectError: "create opportunities" },
+  { name: "Create an opportunity", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expectError: "create opportunities" },
   { name: "Open an opportunity", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expectError: "view opportunities" },
   { name: "Edit an opportunity", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: () => ({ title: "Changed" }), expectError: "edit opportunities" },
   { name: "Delete an opportunity", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expectError: "delete opportunities" },
   { name: "Opportunity attachments", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expectError: "view opportunities" },
+  { name: "Opportunity related records", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expectError: "view opportunities" },
+  { name: "Opportunity timeline", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, expectError: "view opportunities" },
+  { name: "Add an opportunity note", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expectError: "edit opportunities" },
+  { name: "Edit an opportunity note", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedAdminNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expectError: "edit opportunities" },
+  { name: "Delete an opportunity note", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedAdminNoteId}`, expectError: "edit opportunities" },
   { name: "Upload an opportunity attachment", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expectError: "edit opportunities" },
   { name: "Delete an opportunity attachment", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments/${c.fx.unassignedOpportunityAttachmentId}`, expectError: "edit opportunities" },
   { name: "Opportunity stages", method: "GET", path: () => "/api/opportunity-stages", expectError: "view opportunity stages" },
@@ -401,6 +448,7 @@ const OPP_GUARDED: Guarded[] = [
   { name: "Add an opportunity type", method: "POST", path: () => "/api/opportunity-types", body: () => ({ name: "Should Not Exist" }), expectError: OPP_SETTINGS_WRITE },
   { name: "Edit an opportunity type", method: "PATCH", path: (c) => `/api/opportunity-types/${c.b.opportunityTypeId}`, body: () => ({ name: "Changed" }), expectError: OPP_SETTINGS_WRITE },
   { name: "Delete an opportunity type", method: "DELETE", path: (c) => `/api/opportunity-types/${c.b.opportunityTypeId}`, expectError: OPP_SETTINGS_WRITE },
+  { name: "Reorder opportunity types", method: "POST", path: () => "/api/opportunity-types/reorder", body: (c) => ({ typeIds: [...c.fx.opportunityTypeIds].reverse() }), expectError: OPP_SETTINGS_WRITE },
   { name: "Opportunity settings", method: "GET", path: () => "/api/opportunity-settings", expectError: "view opportunity settings" },
   { name: "Edit opportunity settings", method: "PATCH", path: () => "/api/opportunity-settings", body: () => ({ prefix: "NOPE" }), expectError: OPP_SETTINGS_WRITE },
 ]
@@ -733,6 +781,15 @@ const ATTEMPTS: Attempt[] = [
   { name: "Rename a stage to its own name", actor: "oppSettings", kind: "control", method: "PATCH", path: (c) => `/api/opportunity-stages/${c.b.opportunityStageId}`, body: () => ({ name: "New" }), expect: 200, contains: (c) => [c.b.opportunityStageId] },
   { name: "Rename a type to its own name", actor: "oppSettings", kind: "control", method: "PATCH", path: (c) => `/api/opportunity-types/${c.b.opportunityTypeId}`, body: () => ({ name: "New Business" }), expect: 200, contains: (c) => [c.b.opportunityTypeId] },
   { name: "Reorder stages in their current order", actor: "oppSettings", kind: "control", method: "POST", path: () => "/api/opportunity-stages/reorder", body: (c) => ({ stageIds: c.fx.opportunityStageIds }), expect: 200, contains: (c) => [c.b.opportunityStageId] },
+  { name: "Reorder types in their current order", actor: "oppSettings", kind: "control", method: "POST", path: () => "/api/opportunity-types/reorder", body: (c) => ({ typeIds: c.fx.opportunityTypeIds }), expect: 200, contains: (c) => [c.b.opportunityTypeId] },
+  { name: "Own opportunity related records", actor: "rep", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}/related`, expect: 200, contains: () => ['"quotes"', '"salesOrders"', '"purchaseOrders"'] },
+  // Client details come with an opportunity the user may open, and never with the list
+  { name: "Unassigned opportunity with client details", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 200, contains: (c) => [c.b.clientId, '"mainBillingLocation"', '"locations"', '"title"', '"email"'] },
+  { name: "Unassigned opportunity with the contact's mobile", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 200, contains: (c) => [c.names.contactMobile, '"clientLocation"'] },
+  { name: "List opportunities without the contact's mobile", actor: "admin", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.fx.unassignedOpportunityId], notContains: (c) => [c.names.contactMobile] },
+  { name: "List opportunities without client details", actor: "admin", kind: "control", method: "GET", path: () => "/api/opportunities", expect: 200, contains: (c) => [c.fx.unassignedOpportunityId], notContains: () => ['"mainBillingLocation"', '"locations"'] },
+  { name: "Unassigned opportunity timeline", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, expect: 200, contains: (c) => [c.fx.unassignedRepNoteId, c.fx.unassignedAdminNoteId, c.fx.unassignedActionId] },
+  { name: "Unassigned opportunity related records", actor: "oppViewer", kind: "control", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 200, contains: () => ['"quotes"'] },
 
   // ── Test Everyone B: no permissions, refused everywhere ──
   { name: "List quotes", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/quotes", expect: 403, expectError: "permission" },
@@ -1051,7 +1108,10 @@ const ATTEMPTS: Attempt[] = [
   // nobody as owner, and no settings writes
   { name: "Open the admin's opportunity", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}`, expect: 404, expectError: "Not found" },
   { name: "The admin's opportunity attachments", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/attachments`, expect: 404, expectError: "Not found" },
-  { name: "Create an opportunity owned by the admin", actor: "rep", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.b.adminId }), expect: 403, expectError: "You can only assign opportunities to yourself or leave them unassigned" },
+  { name: "The admin's opportunity timeline", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/timeline`, expect: 404, expectError: "Not found" },
+  { name: "Add a note to own opportunity (no edit)", actor: "rep", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expect: 403, expectError: "edit opportunities" },
+  { name: "The admin's opportunity related records", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/related`, expect: 404, expectError: "Not found" },
+  { name: "Create an opportunity owned by the admin", actor: "rep", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.b.adminId }), expect: 403, expectError: "You can only assign opportunities to yourself or leave them unassigned" },
   { name: "Edit own opportunity", actor: "rep", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, body: () => ({ title: "Changed" }), expect: 403, expectError: "edit opportunities" },
   { name: "Delete own opportunity", actor: "rep", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.repOpportunityId}`, expect: 403, expectError: "delete opportunities" },
   ...OPP_GUARDED.filter((g) => g.expectError === OPP_SETTINGS_WRITE).map(refusedFor("rep")),
@@ -1061,7 +1121,7 @@ const ATTEMPTS: Attempt[] = [
     kind: "allowed",
     method: "POST",
     path: () => "/api/opportunities",
-    body: (c) => ({ title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId }),
+    body: (c) => ({ initialNote: OPP_NOTE, title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: c.repUserId }),
     expect: 200,
     check: createdOpportunityOwnedBy((c) => c.repUserId),
   },
@@ -1071,13 +1131,29 @@ const ATTEMPTS: Attempt[] = [
     kind: "allowed",
     method: "POST",
     path: () => "/api/opportunities",
-    body: (c) => ({ title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: null }),
+    body: (c) => ({ initialNote: OPP_NOTE, title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId, ownerId: null }),
     expect: 200,
     check: createdOpportunityOwnedBy(() => null),
   },
+  {
+    // New records start unassigned when no owner is named
+    name: "Create an opportunity without an owner (then removed)",
+    actor: "rep",
+    kind: "allowed",
+    method: "POST",
+    path: () => "/api/opportunities",
+    body: (c) => ({ initialNote: OPP_NOTE, title: "Dev check opportunity", clientId: c.b.clientId, contactId: c.b.contactId }),
+    expect: 200,
+    check: createdOpportunityOwnedBy(() => null),
+  },
+  // A person creating an opportunity must write an initial note, judged
+  // after sanitizing
+  { name: "Create an opportunity without an initial note", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 400, expectError: "An initial note is required" },
+  { name: "Create an opportunity with an empty initial note", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: "<p>   </p>", title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 400, expectError: "An initial note is required" },
+  { name: "Create an opportunity with a script only initial note", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: "<script>alert(1)</script>", title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 400, expectError: "An initial note is required" },
   // Test Opp Viewer B (only the Opportunities page): reads, never writes
   { name: "Open the admin's opportunity", actor: "oppViewer", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}`, expect: 404, expectError: "Not found" },
-  { name: "Create an opportunity", actor: "oppViewer", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
+  { name: "Create an opportunity", actor: "oppViewer", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
   { name: "Edit an opportunity", actor: "oppViewer", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: () => ({ title: "Changed" }), expect: 403, expectError: "edit opportunities" },
   { name: "Delete an opportunity", actor: "oppViewer", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 403, expectError: "delete opportunities" },
   { name: "Upload an opportunity attachment", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/attachments`, expect: 403, expectError: "edit opportunities" },
@@ -1085,7 +1161,32 @@ const ATTEMPTS: Attempt[] = [
   ...OPP_GUARDED.filter((g) => g.expectError === OPP_SETTINGS_WRITE).map(refusedFor("oppViewer")),
   // Test Opp Settings B (only Opportunity Settings): no opportunities themselves
   { name: "List opportunities", actor: "oppSettings", kind: "refused", method: "GET", path: () => "/api/opportunities", expect: 403, expectError: "view opportunities" },
-  { name: "Create an opportunity", actor: "oppSettings", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
+  { name: "Opportunity timeline", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, expect: 403, expectError: "view opportunities" },
+  { name: "Add an opportunity note", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expect: 403, expectError: "edit opportunities" },
+  { name: "Add a note that changes the stage", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", stageId: c.fx.opportunityStageIds[1] }), expect: 403, expectError: "edit opportunities" },
+  // Opportunity details: the client's phone and locations and the contact's
+  // details only reach users who may open the opportunity
+  { name: "Client details of the admin's opportunity", actor: "rep", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}`, expect: 404, expectError: "Not found" },
+  { name: "Client details without the Opportunities page", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, expect: 403, expectError: "view opportunities" },
+  // An opportunity's location must belong to its own client
+  { name: "Opportunity location of another client", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: (c) => ({ clientLocationId: c.fx.copyClientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Create with a location of another client", actor: "admin", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId, clientLocationId: c.fx.copyClientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Change the client with the old client's location", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}`, body: (c) => ({ clientId: c.fx.copyClientId, contactId: c.fx.copyContactId, clientLocationId: c.b.clientLocationId }), expect: 400, expectError: "Invalid location" },
+  // A note's stageId is checked like any body id
+  { name: "Note with another company's stage", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", stageId: c.c.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Note with a made up stage", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", stageId: c.fakeId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Note with a stage that isn't text", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>", stageId: 42 }), expect: 400, expectError: "Invalid stage" },
+  // Timeline notes: only their author edits or deletes them (Global Admin
+  // included), and recorded actions never change
+  { name: "Edit another user's note", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedRepNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 403, expectError: "your own notes" },
+  { name: "Delete another user's note", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedRepNoteId}`, expect: 403, expectError: "your own notes" },
+  { name: "Edit an action entry", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedActionId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 403, expectError: "Only notes" },
+  { name: "Delete an action entry", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedActionId}`, expect: 403, expectError: "Only notes" },
+  { name: "Save own note empty", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/timeline/${c.fx.unassignedAdminNoteId}`, body: () => ({ body: "<p></p>" }), expect: 400, expectError: "can't be empty" },
+  { name: "Note under another opportunity", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/opportunities/${c.b.opportunityId}/timeline/${c.fx.unassignedAdminNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 404, expectError: "Not found" },
+  { name: "Timeline page with another opportunity's cursor", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/timeline?cursor=${c.fx.unassignedAdminNoteId}`, expect: 400, expectError: "Invalid cursor" },
+  { name: "Opportunity related records", actor: "oppSettings", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/related`, expect: 403, expectError: "view opportunities" },
+  { name: "Create an opportunity", actor: "oppSettings", kind: "refused", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.b.clientId, contactId: c.b.contactId }), expect: 403, expectError: "create opportunities" },
 
   { name: "Disconnect someone else's shared mailbox", actor: "sender", kind: "refused", sharedMode: "admin", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
   // Even one's own mailbox needs Integrations access while it is the shared sender
@@ -1165,7 +1266,7 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
       select: { id: true, name: true, active: true, roleId: true, loginLockedUntil: true },
     }),
     notifications: prisma.notification.count({ where: { companyId: b } }),
-    opportunities: prisma.opportunity.findMany({ where: { companyId: b }, ...byId, include: { attachments: byId } }),
+    opportunities: prisma.opportunity.findMany({ where: { companyId: b }, ...byId, include: { attachments: byId, timeline: byId } }),
     opportunityStages: prisma.opportunityStage.findMany({ where: { companyId: b }, ...byId }),
     opportunityTypes: prisma.opportunityType.findMany({ where: { companyId: b }, ...byId }),
     opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId: b } }),
@@ -1213,12 +1314,14 @@ async function ensureViewerFixture(prisma: PrismaClient, run: RunData) {
 }
 
 // Test Manager B inside Test Company B: manages users (Manage Users) but
-// is not a Global Admin, for the invite rank rule. Made for this run,
+// is not a Global Admin, for the invite rank rule. It also opens the
+// Settings page (no API route reads pages.settings), so the page checks
+// see a Settings user without Opportunity Settings. Made for this run,
 // password in memory only.
 async function ensureManagerFixture(prisma: PrismaClient, run: RunData) {
   const n = run.companies.B.names
   const companyId = run.companies.B.ids.companyId
-  const managerPermissions = { settingsSections: { users: true } }
+  const managerPermissions = { pages: { settings: true }, settingsSections: { users: true } }
 
   const roleId = await addRunRole(prisma, run, { companyId, name: n.managerRole, rank: 5, permissions: managerPermissions })
   await addRunUser(prisma, run, { companyId, name: n.managerName, email: n.managerEmail, roleIds: [roleId] })
@@ -1563,6 +1666,323 @@ async function checkSalesOrderLinkedPurchaseOrders(prisma: PrismaClient, admin: 
   }
 }
 
+// Page guards for the Opportunities screens. Pages answer 200 either way,
+// so each one is read as HTML with the user's session: a refused page holds
+// the NoAccess text (rendered on the server), an allowed one doesn't. The
+// Settings page lists only the sections a user may use, so Opportunity
+// Settings is allowed when its entry is listed. (Its ?panel= link is applied
+// in the browser, so the server's HTML shows the first listed section.)
+const NO_ACCESS_PAGE = "You do not have access to this page"
+const OPP_SETTINGS_ENTRY = "Opportunity Settings"
+
+async function checkOpportunityPages(sessions: Record<Actor, Session>, labels: Record<Actor, string>, ctx: AttemptContext, rows: Row[]) {
+  const pages: { name: string; path: string; allowed: Actor[]; refused: Actor[]; settings?: true }[] = [
+    { name: "Opportunities page", path: "/dashboard/opportunities?view=list", allowed: ["admin", "rep", "oppViewer"], refused: ["everyone", "oppSettings", "clerk"] },
+    {
+      name: "Opportunity page",
+      path: `/dashboard/opportunities/${ctx.fx.unassignedOpportunityId}`,
+      allowed: ["admin", "rep", "oppViewer"],
+      refused: ["everyone", "oppSettings", "clerk"],
+    },
+    // Test Manager B opens Settings without Opportunity Settings
+    { name: "Settings > Opportunity Settings", path: "/dashboard/settings?panel=opportunities", allowed: ["admin", "oppSettings"], refused: ["everyone", "manager", "oppViewer"], settings: true },
+  ]
+  for (const page of pages) {
+    for (const [actor, allowed] of [...page.allowed.map((a) => [a, true] as const), ...page.refused.map((a) => [a, false] as const)]) {
+      const res = await sessions[actor].request("GET", page.path)
+      const pageRefused = res.text.includes(NO_ACCESS_PAGE)
+      const opens = !pageRefused && (!page.settings || res.text.includes(OPP_SETTINGS_ENTRY))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}${res.location ? ` to ${res.location}` : ""}`
+          : allowed && !opens
+            ? pageRefused
+              ? "the page shows no access"
+              : "the Opportunity Settings section is not listed"
+            : !allowed && opens
+              ? "the page opened"
+              : null
+      rows.push({
+        attempt: `[${labels[actor]}] ${page.name}`,
+        expected: allowed ? "200, opens" : "200, no access",
+        actual: res.status === 200 ? (opens ? "200, opens" : "200, no access") : String(res.status),
+        result: problem ? "FAIL" : "PASS",
+        note: problem ?? undefined,
+      })
+    }
+  }
+}
+
+// The Related panel lists only what the user may open. The admin's sample
+// quote and Test Rep B's quote are linked to the unassigned sample
+// opportunity for the step and unlinked afterwards. Test Admin B (Global
+// Admin) sees both, Test Rep B (own quotes only) only its own, and Test
+// Opp Viewer B (no Quotes page) neither.
+async function checkRelatedVisibility(prisma: PrismaClient, sessions: Record<Actor, Session>, labels: Record<Actor, string>, ctx: AttemptContext, rows: Row[]) {
+  const opportunityId = ctx.fx.unassignedOpportunityId
+  const adminQuoteId = ctx.b.quoteId
+  const repQuoteId = ctx.fx.repQuoteId
+  const original = await prisma.quote.findMany({ where: { id: { in: [adminQuoteId, repQuoteId] } }, select: { id: true, opportunityId: true } })
+  try {
+    await prisma.quote.updateMany({ where: { id: { in: [adminQuoteId, repQuoteId] } }, data: { opportunityId } })
+
+    const cases: { actor: Actor; sees: string[]; hidden: string[] }[] = [
+      { actor: "admin", sees: [adminQuoteId, repQuoteId], hidden: [] },
+      { actor: "rep", sees: [repQuoteId], hidden: [adminQuoteId] },
+      { actor: "oppViewer", sees: [], hidden: [adminQuoteId, repQuoteId] },
+    ]
+    for (const c of cases) {
+      const res = await sessions[c.actor].request("GET", `/api/opportunities/${opportunityId}/related`)
+      let quoteIds: string[] | null = null
+      try {
+        quoteIds = ((JSON.parse(res.text) as { quotes?: { id: string }[] }).quotes ?? []).map((q) => q.id)
+      } catch {
+        // reported below
+      }
+      const missing = c.sees.filter((id) => !quoteIds?.includes(id))
+      const leaked = c.hidden.filter((id) => res.text.includes(id))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : quoteIds === null
+            ? "no quotes list in the response"
+            : leaked.length > 0
+              ? `shows a quote the user may not open (${leaked.join(", ")})`
+              : missing.length > 0
+                ? `missing a linked quote the user may open (${missing.join(", ")})`
+                : null
+      rows.push({
+        attempt: `[${labels[c.actor]}] Related panel lists only quotes it may open`,
+        expected: `200 with ${c.sees.length} linked quote${c.sees.length === 1 ? "" : "s"}`,
+        actual: String(res.status),
+        result: problem ? "FAIL" : "PASS",
+        note: problem ?? undefined,
+      })
+    }
+  } finally {
+    for (const q of original) await prisma.quote.update({ where: { id: q.id }, data: { opportunityId: q.opportunityId } })
+  }
+}
+
+// A stage's category change sets or clears closedAt on its opportunities.
+// Test Opp Settings B moves the company's first stage (New, OPEN, where
+// all three sample opportunities sit, and not the quote sent stage) to WON
+// and back. The stage and every closedAt are put back afterwards.
+async function checkStageCategoryClosedAt(prisma: PrismaClient, oppSettings: Session, ctx: AttemptContext, rows: Row[]) {
+  const stageId = ctx.fx.opportunityStageIds[0]
+  const label = (name: string) => `[Opp Settings B] Stage category change: ${name}`
+  const stage = await prisma.opportunityStage.findUniqueOrThrow({ where: { id: stageId }, select: { category: true } })
+  const settings = await prisma.opportunitySettings.findUniqueOrThrow({ where: { companyId: ctx.b.companyId }, select: { quoteSentStageId: true } })
+  const original = await prisma.opportunity.findMany({ where: { companyId: ctx.b.companyId, stageId }, select: { id: true, closedAt: true } })
+  if (stage.category !== "OPEN" || settings.quoteSentStageId === stageId || original.length === 0) {
+    rows.push({ attempt: label("fixture"), expected: "an OPEN stage with opportunities", actual: stage.category, result: "UNEXPECTED", note: "the first stage isn't as the run data set it up" })
+    return
+  }
+  const ids = original.map((o) => o.id)
+  try {
+    const toWon = await oppSettings.request("PATCH", `/api/opportunity-stages/${stageId}`, { json: { category: "WON" } })
+    const closed = await prisma.opportunity.findMany({ where: { id: { in: ids } }, select: { closedAt: true } })
+    const wonProblem =
+      toWon.status !== 200 ? `got ${toWon.status}: ${errorText(toWon.text)}` : closed.some((o) => o.closedAt === null) ? "an opportunity in the stage has no closedAt" : null
+    rows.push({ attempt: label("OPEN to WON sets closedAt"), expected: `200, ${ids.length} closed`, actual: String(toWon.status), result: wonProblem ? "FAIL" : "PASS", note: wonProblem ?? undefined })
+
+    const toOpen = await oppSettings.request("PATCH", `/api/opportunity-stages/${stageId}`, { json: { category: "OPEN" } })
+    const reopened = await prisma.opportunity.findMany({ where: { id: { in: ids } }, select: { closedAt: true } })
+    const openProblem =
+      toOpen.status !== 200 ? `got ${toOpen.status}: ${errorText(toOpen.text)}` : reopened.some((o) => o.closedAt !== null) ? "an opportunity in the stage still has a closedAt" : null
+    rows.push({ attempt: label("WON back to OPEN clears closedAt"), expected: `200, ${ids.length} open`, actual: String(toOpen.status), result: openProblem ? "FAIL" : "PASS", note: openProblem ?? undefined })
+  } finally {
+    await prisma.opportunityStage.update({ where: { id: stageId }, data: { category: "OPEN" } })
+    for (const o of original) await prisma.opportunity.update({ where: { id: o.id }, data: { closedAt: o.closedAt } })
+  }
+}
+
+// The opportunity timeline, on the unassigned sample opportunity as Test
+// Admin B: a note holding a script tag is stored and returned without it,
+// its author edits it (editedAt set) and deletes it, a stage change through
+// PATCH adds exactly one stage_changed entry, and a PATCH that changes
+// nothing adds none. The stage, its dates, and every entry the step added
+// are put back afterwards.
+async function checkTimeline(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const opportunityId = ctx.fx.unassignedOpportunityId
+  const base = `/api/opportunities/${opportunityId}`
+  const label = (name: string) => `[Admin B] Timeline: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const startedAt = new Date()
+  const original = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { stageId: true, stageChangedAt: true, closedAt: true, title: true } })
+  const otherStageId = ctx.fx.opportunityStageIds.find((s) => s !== original.stageId)
+  const count = (where: Prisma.TimelineEntryWhereInput = {}) => prisma.timelineEntry.count({ where: { opportunityId, ...where } })
+  let noteId: string | null = null
+  try {
+    // A script tag is stripped on save and on the way out, the text kept
+    const add = await admin.request("POST", `${base}/timeline`, { json: { body: "<p>Dev check note</p><script>window.devCheck = 1</script>" } })
+    noteId = add.status === 200 ? ((JSON.parse(add.text) as { id?: string }).id ?? null) : null
+    const stored = noteId ? await prisma.timelineEntry.findUnique({ where: { id: noteId }, select: { body: true, kind: true, authorId: true } }) : null
+    push(
+      "a note with a script tag is saved without it",
+      "200, no script stored or returned",
+      String(add.status),
+      add.status !== 200 || !stored
+        ? `got ${add.status}: ${errorText(add.text)}`
+        : /<script/i.test(stored.body ?? "") || /<script/i.test(add.text)
+          ? "the script tag was kept"
+          : !(stored.body ?? "").includes("Dev check note")
+            ? "the note text was lost"
+            : stored.kind !== "NOTE" || stored.authorId !== ctx.b.adminId
+              ? "not saved as the admin's note"
+              : null
+    )
+    if (!noteId) return
+
+    const listed = await admin.request("GET", `${base}/timeline`)
+    push("the timeline returns it first, without the script", "200, the new note first", String(listed.status),
+      listed.status !== 200 ? `got ${listed.status}` : /<script/i.test(listed.text) ? "a script tag was returned" : (JSON.parse(listed.text) as { entries: { id: string }[] }).entries[0]?.id !== noteId ? "the new note is not first" : null)
+
+    const edit = await admin.request("PATCH", `${base}/timeline/${noteId}`, { json: { body: "<p>Dev check note, edited</p>" } })
+    const edited = await prisma.timelineEntry.findUnique({ where: { id: noteId }, select: { body: true, editedAt: true } })
+    push("its author edits it", "200, editedAt set", String(edit.status),
+      edit.status !== 200 ? `got ${edit.status}: ${errorText(edit.text)}` : !edited?.editedAt || !edited.body?.includes("edited") ? "the edit was not saved" : null)
+
+    const del = await admin.request("DELETE", `${base}/timeline/${noteId}`)
+    const gone = (await prisma.timelineEntry.count({ where: { id: noteId } })) === 0
+    push("its author deletes it", "200, gone", String(del.status), del.status !== 200 ? `got ${del.status}: ${errorText(del.text)}` : !gone ? "the note is still there" : null)
+    if (gone) noteId = null
+
+    if (otherStageId) {
+      const beforeAll = await count()
+      const beforeStage = await count({ action: "stage_changed" })
+      const move = await admin.request("PATCH", base, { json: { stageId: otherStageId } })
+      const addedAll = (await count()) - beforeAll
+      const addedStage = (await count({ action: "stage_changed" })) - beforeStage
+      push("a stage change adds one stage_changed entry", "200, exactly 1 entry", `${move.status}, ${addedAll} added`,
+        move.status !== 200 ? `got ${move.status}: ${errorText(move.text)}` : addedAll !== 1 || addedStage !== 1 ? `added ${addedAll} entries, ${addedStage} stage_changed` : null)
+    }
+
+    const beforeSame = await count()
+    const same = await admin.request("PATCH", base, { json: { title: original.title } })
+    const addedSame = (await count()) - beforeSame
+    push("a PATCH that changes nothing adds none", "200, 0 entries", `${same.status}, ${addedSame} added`,
+      same.status !== 200 ? `got ${same.status}: ${errorText(same.text)}` : addedSame !== 0 ? `added ${addedSame} entries` : null)
+  } finally {
+    if (noteId) await prisma.timelineEntry.deleteMany({ where: { id: noteId } })
+    await prisma.timelineEntry.deleteMany({ where: { opportunityId, kind: "ACTION", createdAt: { gte: startedAt } } })
+    await prisma.opportunity.update({ where: { id: opportunityId }, data: { stageId: original.stageId, stageChangedAt: original.stageChangedAt, closedAt: original.closedAt } })
+  }
+}
+
+// A note posted with a stageId moves the unassigned sample opportunity:
+// to a WON stage (closedAt set), then back to an OPEN one (closedAt
+// cleared), each adding exactly one entry, the NOTE, which holds the move.
+// The stage, its dates, and the notes are put back afterwards.
+async function checkNoteStageChange(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const opportunityId = ctx.fx.unassignedOpportunityId
+  const label = (name: string) => `[Admin B] Note with a stage change: ${name}`
+  const startedAt = new Date()
+  const original = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { stageId: true, stageChangedAt: true, closedAt: true } })
+  const won = await prisma.opportunityStage.findFirst({ where: { companyId: ctx.b.companyId, category: "WON" }, select: { id: true } })
+  const open = await prisma.opportunityStage.findFirst({ where: { companyId: ctx.b.companyId, category: "OPEN", id: { not: original.stageId } }, select: { id: true } })
+  if (!won || !open) {
+    rows.push({ attempt: label("fixture"), expected: "a WON and another OPEN stage", actual: "missing", result: "UNEXPECTED", note: "the run data's stages aren't as set up" })
+    return
+  }
+  try {
+    for (const step of [
+      { name: "to WON sets closedAt", stageId: won.id, closed: true },
+      { name: "back to OPEN clears closedAt", stageId: open.id, closed: false },
+    ]) {
+      const before = await prisma.timelineEntry.count({ where: { opportunityId } })
+      const res = await admin.request("POST", `/api/opportunities/${opportunityId}/timeline`, { json: { body: `<p>Dev check stage note</p>`, stageId: step.stageId } })
+      const after = await prisma.timelineEntry.findMany({ where: { opportunityId, createdAt: { gte: startedAt } }, orderBy: { createdAt: "desc" }, select: { kind: true, data: true } })
+      const added = (await prisma.timelineEntry.count({ where: { opportunityId } })) - before
+      const opp = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { stageId: true, closedAt: true } })
+      const change = (after[0]?.data as { stageChange?: { to?: { id?: string } } } | null)?.stageChange
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : opp.stageId !== step.stageId
+            ? "the stage did not change"
+            : step.closed !== (opp.closedAt !== null)
+              ? step.closed
+                ? "closedAt was not set"
+                : "closedAt was not cleared"
+              : added !== 1
+                ? `added ${added} entries, expected 1`
+                : after[0]?.kind !== "NOTE" || change?.to?.id !== step.stageId
+                  ? "the note doesn't hold the stage change"
+                  : null
+      rows.push({ attempt: label(step.name), expected: "200, stage moved, 1 entry", actual: `${res.status}, ${added} added`, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+    }
+  } finally {
+    await prisma.timelineEntry.deleteMany({ where: { opportunityId, createdAt: { gte: startedAt } } })
+    await prisma.opportunity.update({ where: { id: opportunityId }, data: { stageId: original.stageId, stageChangedAt: original.stageChangedAt, closedAt: original.closedAt } })
+  }
+}
+
+// Opportunity locations, as Test Admin B: a create without a location saves
+// the client's main location (the created row is removed right after), a
+// PATCH to the client's second location adds exactly one location_changed
+// entry and saving it again adds none, and changing the client (no location
+// given) resets it to the new client's main location. The unassigned sample
+// opportunity's client, contact, location, and the entries the step added
+// are put back afterwards.
+async function checkOpportunityLocation(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const opportunityId = ctx.fx.unassignedOpportunityId
+  const base = `/api/opportunities/${opportunityId}`
+  const label = (name: string) => `[Admin B] Opportunity location: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const locationOf = (text: string) => {
+    try {
+      return (JSON.parse(text) as { clientLocation?: { id?: string } | null }).clientLocation?.id ?? null
+    } catch {
+      return null
+    }
+  }
+  const startedAt = new Date()
+  const original = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { clientId: true, contactId: true, clientLocationId: true } })
+  const count = (action?: string) => prisma.timelineEntry.count({ where: { opportunityId, ...(action ? { action } : {}) } })
+  let createdId: string | null = null
+  try {
+    const create = await admin.request("POST", "/api/opportunities", { json: { initialNote: OPP_NOTE, title: "Dev check location", clientId: ctx.b.clientId, contactId: ctx.b.contactId } })
+    try {
+      createdId = (JSON.parse(create.text) as { id?: string }).id ?? null
+    } catch {
+      // reported below
+    }
+    push("a create without one saves the main location", "200, the main location", String(create.status),
+      create.status !== 200 ? `got ${create.status}: ${errorText(create.text)}` : locationOf(create.text) !== ctx.b.clientLocationId ? `saved ${locationOf(create.text) ?? "none"}` : null)
+
+    const beforeAll = await count()
+    const beforeLocation = await count("location_changed")
+    const second = await admin.request("PATCH", base, { json: { clientLocationId: ctx.fx.clientLocation2Id } })
+    const addedAll = (await count()) - beforeAll
+    const addedLocation = (await count("location_changed")) - beforeLocation
+    push("another of the client's locations saves with one entry", "200, 1 location_changed", `${second.status}, ${addedAll} added`,
+      second.status !== 200
+        ? `got ${second.status}: ${errorText(second.text)}`
+        : locationOf(second.text) !== ctx.fx.clientLocation2Id
+          ? "the location did not change"
+          : addedAll !== 1 || addedLocation !== 1
+            ? `added ${addedAll} entries, ${addedLocation} location_changed`
+            : null)
+
+    const beforeSame = await count()
+    const same = await admin.request("PATCH", base, { json: { clientLocationId: ctx.fx.clientLocation2Id } })
+    const addedSame = (await count()) - beforeSame
+    push("the same location again adds no entry", "200, 0 entries", `${same.status}, ${addedSame} added`,
+      same.status !== 200 ? `got ${same.status}: ${errorText(same.text)}` : addedSame !== 0 ? `added ${addedSame} entries` : null)
+
+    const move = await admin.request("PATCH", base, { json: { clientId: ctx.fx.copyClientId, contactId: ctx.fx.copyContactId } })
+    push("a new client resets it to that client's main location", "200, the new client's main location", String(move.status),
+      move.status !== 200 ? `got ${move.status}: ${errorText(move.text)}` : locationOf(move.text) !== ctx.fx.copyClientLocationId ? `saved ${locationOf(move.text) ?? "none"}` : null)
+  } finally {
+    if (createdId) await prisma.opportunity.deleteMany({ where: { id: createdId } })
+    await prisma.opportunity.update({ where: { id: opportunityId }, data: { clientId: original.clientId, contactId: original.contactId, clientLocationId: original.clientLocationId } })
+    await prisma.timelineEntry.deleteMany({ where: { opportunityId, createdAt: { gte: startedAt } } })
+  }
+}
+
 // Every line field a copy carries over (all but id, quoteId, createdAt)
 const COPIED_LINE_FIELDS = [
   "catalogItemId", "section", "sortOrder", "name", "description", "sku", "quantity", "unitPrice", "cost", "discount", "taxable",
@@ -1873,6 +2293,15 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
 
     // Quote correctness: copies reproduce every line and get the chosen client
     await checkQuoteCopy(prisma, sessions.admin, sessions.rep, ctx, rows)
+
+    // Opportunities screens: page guards, the Related panel's visibility,
+    // and closedAt following a stage's category
+    await checkOpportunityPages(sessions, ACTOR_LABEL, ctx, rows)
+    await checkRelatedVisibility(prisma, sessions, ACTOR_LABEL, ctx, rows)
+    await checkStageCategoryClosedAt(prisma, sessions.oppSettings, ctx, rows)
+    await checkTimeline(prisma, sessions.admin, ctx, rows)
+    await checkNoteStageChange(prisma, sessions.admin, ctx, rows)
+    await checkOpportunityLocation(prisma, sessions.admin, ctx, rows)
 
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length

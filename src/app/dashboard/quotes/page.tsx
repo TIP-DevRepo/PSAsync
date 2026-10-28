@@ -15,6 +15,7 @@ import { formatValidUntil } from "@/lib/quote-expiry"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
+import { sortUsersByName } from "@/lib/user-picker"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Quote {
@@ -927,7 +928,9 @@ function QuoteActionsMenu({
         .then((res) => res.json())
         .then((data) =>
           setUsers(
-            data.filter((u: { id: string; active: boolean }) => u.active && (canAssignOthers || u.id === access?.userId))
+            sortUsersByName(
+              data.filter((u: { id: string; name: string; active: boolean }) => u.active && (canAssignOthers || u.id === access?.userId))
+            )
           )
         )
     }

@@ -5,6 +5,8 @@ import { requireAccess, notFound } from "@/lib/api-access"
 import { loadViewableOpportunity } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { opportunityAttachmentSelect } from "@/lib/opportunity-selects"
+import { recordTimelineActions } from "@/lib/timeline"
+import { attachmentAction } from "@/lib/opportunity-timeline"
 
 export async function GET(
   req: NextRequest,
@@ -54,15 +56,25 @@ export async function POST(
 
   const fileUrl = await storeUpload(file, { folder: `opportunities/${opportunity.id}`, profile: "ATTACHMENT" })
 
-  const attachment = await prisma.opportunityAttachment.create({
-    data: {
-      opportunityId: opportunity.id,
-      fileName: file.displayName,
-      fileUrl,
-      fileSize: file.size,
-      uploadedByUserId: ctx.userId,
-    },
-    select: opportunityAttachmentSelect,
+  // The row and its timeline entry are saved together
+  const attachment = await prisma.$transaction(async (tx) => {
+    const created = await tx.opportunityAttachment.create({
+      data: {
+        opportunityId: opportunity.id,
+        fileName: file.displayName,
+        fileUrl,
+        fileSize: file.size,
+        uploadedByUserId: ctx.userId,
+      },
+      select: opportunityAttachmentSelect,
+    })
+    await recordTimelineActions(tx, {
+      companyId: ctx.companyId,
+      authorId: ctx.userId,
+      subject: { opportunityId: opportunity.id },
+      actions: [attachmentAction("added", created)],
+    })
+    return created
   })
 
   return NextResponse.json(attachment)

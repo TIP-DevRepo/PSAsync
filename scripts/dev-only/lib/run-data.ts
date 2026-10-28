@@ -243,6 +243,11 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         data: { clientId: client.id, name: n.clientLocation, address: n.clientLocationAddress, city: n.clientLocationCity, isPrimary: true },
       })
     )
+    // A second location, not primary, for the opportunity location checks
+    const clientLocation2 = rec(
+      "clientLocation",
+      await prisma.clientLocation.create({ data: { clientId: client.id, name: n.clientLocation2, address: "9 Second Street", city: n.clientLocationCity } })
+    )
     const contact = rec(
       "contact",
       await prisma.contact.create({
@@ -251,6 +256,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
           firstName: n.contactFirstName,
           lastName: n.contactLastName,
           email: n.contactEmail,
+          mobile: n.contactMobile,
           locationId: clientLocation.id,
           isPrimary: true,
         },
@@ -485,6 +491,10 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
       where: { id: copyClient.id },
       data: { mainShippingLocationId: copyLocation.id, mainBillingLocationId: copyLocation.id },
     })
+    const copyLocation2 = rec(
+      "clientLocation",
+      await prisma.clientLocation.create({ data: { clientId: copyClient.id, name: n.copyClientLocation2, address: "4 Copy Lane", city: "Copyton" } })
+    )
     const copyContact = rec(
       "contact",
       await prisma.contact.create({
@@ -601,6 +611,9 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
       orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
     })
     for (const stage of opportunityStages) rec("opportunityStage", stage)
+    const opportunityStageNames = (
+      await prisma.opportunityStage.findMany({ where: { companyId }, select: { name: true }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] })
+    ).map((s) => s.name)
     const opportunityTypes = await prisma.opportunityType.findMany({
       where: { companyId },
       select: { id: true },
@@ -625,12 +638,14 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
               title,
               clientId: client.id,
               contactId: contact.id,
+              // The client's main location, as a create without one saves
+              clientLocationId: clientLocation.id,
               ownerId,
               stageId: opportunityStages[0].id,
               typeId: opportunityTypes[0].id,
               createdById: adminId,
             },
-            select: { id: true },
+            select: { id: true, number: true },
           })
         )
       )
@@ -642,7 +657,21 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
           select: { id: true },
         })
       )
-      return { id: opportunity.id, attachmentId: attachment.id }
+      // Its timeline: the created action (by the admin), a stage change
+      // action, a note by the admin, and a note by Test Rep, in that order.
+      // Written directly, the way the app writes them.
+      const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000)
+      const stageRef = (i: number) => ({ id: opportunityStages[i].id, name: opportunityStageNames[i] })
+      const entry = (data: Omit<Prisma.TimelineEntryUncheckedCreateInput, "companyId" | "opportunityId">) =>
+        prisma.timelineEntry.create({ data: { companyId, opportunityId: opportunity.id, ...data }, select: { id: true } })
+      const createdAction = rec(
+        "timelineEntry",
+        await entry({ kind: "ACTION", authorId: adminId, action: "created", data: { label: "Opportunity", number: opportunity.number, title, stage: stageRef(1) }, createdAt: at(40) })
+      )
+      rec("timelineEntry", await entry({ kind: "ACTION", authorId: adminId, action: "stage_changed", data: { from: stageRef(1), to: stageRef(0) }, createdAt: at(30) }))
+      const adminNote = rec("timelineEntry", await entry({ kind: "NOTE", authorId: adminId, body: `<p>${n.timelineNotePrefix} by the admin</p>`, createdAt: at(20) }))
+      const repNote = rec("timelineEntry", await entry({ kind: "NOTE", authorId: repUserId, body: `<p>${n.timelineNotePrefix} by Test Rep</p>`, createdAt: at(10) }))
+      return { id: opportunity.id, attachmentId: attachment.id, actionId: createdAction.id, adminNoteId: adminNote.id, repNoteId: repNote.id }
     }
     const adminOpportunity = await createOpportunity(n.adminOpportunity, adminId, "admin")
     const repOpportunity = await createOpportunity(n.repOpportunity, repUserId, "rep")
@@ -695,6 +724,8 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         opportunityAttachmentId: adminOpportunity.attachmentId,
         opportunityStageId: opportunityStages[0].id,
         opportunityTypeId: opportunityTypes[0].id,
+        timelineActionId: adminOpportunity.actionId,
+        timelineNoteId: adminOpportunity.adminNoteId,
       },
       fixtures: {
         everyoneUserId,
@@ -722,6 +753,9 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         costTemplateLineId: costTemplateLine.id,
         copyClientId: copyClient.id,
         copyContactId: copyContact.id,
+        clientLocation2Id: clientLocation2.id,
+        copyClientLocationId: copyLocation.id,
+        copyClientLocation2Id: copyLocation2.id,
         copyQuoteId: copyQuote.id,
         oppRepRoleId,
         repOpportunityId: repOpportunity.id,
@@ -731,6 +765,10 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         oppViewerUserId,
         oppSettingsUserId,
         opportunityStageIds: opportunityStages.map((stage) => stage.id),
+        opportunityTypeIds: opportunityTypes.map((type) => type.id),
+        unassignedActionId: unassignedOpportunity.actionId,
+        unassignedAdminNoteId: unassignedOpportunity.adminNoteId,
+        unassignedRepNoteId: unassignedOpportunity.repNoteId,
       },
     }
   }
@@ -792,6 +830,9 @@ const DELETE_STEPS: {
   // cascade), before the clients, contacts, users, stages, and types they
   // point at. Settings go before the stages, for the stage a sent quote
   // moves to.
+  // Entries of an opportunity also go with it (cascade); this takes any
+  // that belong to no opportunity
+  { table: "TimelineEntry", count: (db, ids) => db.timelineEntry.count({ where: { companyId: ids } }), remove: (db, ids) => db.timelineEntry.deleteMany({ where: { companyId: ids } }) },
   { table: "Opportunity", count: (db, ids) => db.opportunity.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunity.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunitySettings", count: (db, ids) => db.opportunitySettings.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunitySettings.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunityStage", count: (db, ids) => db.opportunityStage.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunityStage.deleteMany({ where: { companyId: ids } }) },

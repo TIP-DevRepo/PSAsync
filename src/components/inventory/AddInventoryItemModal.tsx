@@ -7,6 +7,7 @@ import { buildLocationPathOptions, type LocationPathOption } from "@/lib/invento
 import { plainStatusLabel } from "@/lib/inventory/statusLabel"
 import { CatalogItemPicker, type CatalogItemOption } from "@/components/inventory/CatalogItemPicker"
 import { AssetAdditionalDetailsFields, additionalDetailsToBody, EMPTY_ADDITIONAL_DETAILS, type AdditionalDetailsValue } from "@/components/inventory/AssetAdditionalDetailsFields"
+import { sortUsersByName } from "@/lib/user-picker"
 
 interface ClientOption {
   id: string
@@ -110,7 +111,7 @@ export function AddInventoryItemModal({
       .then((data: ClientOption[]) => Array.isArray(data) && setClients(data))
     fetch("/api/users")
       .then((res) => res.json())
-      .then((data: UserOption[]) => Array.isArray(data) && setUsers(data))
+      .then((data: UserOption[]) => Array.isArray(data) && setUsers(sortUsersByName(data)))
   }, [])
 
   useEffect(() => {
