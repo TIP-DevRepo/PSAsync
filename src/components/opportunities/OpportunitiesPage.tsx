@@ -214,7 +214,6 @@ export function OpportunitiesPage() {
           clients={clients}
           teams={teams}
           users={users}
-          initialTeamId={filters.team}
           onClose={() => setShowNew(false)}
           onCreated={(id) => {
             notifyOpportunitiesChanged()

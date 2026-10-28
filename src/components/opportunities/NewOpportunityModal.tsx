@@ -7,7 +7,7 @@ import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
 import { OPPORTUNITY_TITLE_MAX, readExpectedValue } from "@/lib/opportunity-rules"
 import { ownerFieldChoices, teamChoices, type StageOption, type TypeOption } from "@/lib/opportunity-view"
-import type { TeamSummary } from "@/lib/team-rules"
+import { canSeeOpportunity, defaultNewOpportunityTeamId, INVISIBLE_AFTER_SAVE_MESSAGE, type TeamSummary } from "@/lib/team-rules"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { isBlankHtml } from "@/lib/timeline-actions"
 import { ClientContactPicker } from "@/components/ClientContactPicker"
@@ -24,7 +24,6 @@ export function NewOpportunityModal({
   clients,
   teams,
   users,
-  initialTeamId,
   onClose,
   onCreated,
 }: {
@@ -34,13 +33,14 @@ export function NewOpportunityModal({
   // GET /api/teams and GET /api/users, loaded by the page
   teams: TeamSummary[]
   users: { id: string; name: string; active: boolean }[]
-  // The team the page is filtered to, chosen first when the user may use it
-  initialTeamId?: string
   onClose: () => void
   onCreated: (id: string) => void
 }) {
-  const { can } = useAccess()
+  const { access, can } = useAccess()
   const canViewAll = can("opportunities.viewAll")
+  // Shown when the chosen team and owner would hide the new opportunity
+  // from its creator; Save anyway goes ahead
+  const [invisibleWarning, setInvisibleWarning] = useState(false)
 
   const [form, setForm] = useState({
     title: "",
@@ -67,22 +67,24 @@ export function NewOpportunityModal({
   const locationValue = locationTouched ? locationPick!.value : (mainId ?? "")
 
   // The teams the user may put it in: their own teams, every team with
-  // viewAll, and General always. Owners are Unassigned and the chosen
+  // viewAll, and General always. It starts on General when the user is in
+  // it (or sees every team), else their first team, else General
+  // (defaultNewOpportunityTeamId). Owners are Unassigned and the chosen
   // team's members the user may assign (ownerFieldChoices).
   const teamOptions = teamChoices(teams, canViewAll, { includeDefault: true })
-  const defaultTeamId =
-    teamOptions.find((t) => t.id === initialTeamId)?.id ?? teamOptions.find((t) => t.isDefault)?.id ?? teamOptions[0]?.id ?? ""
-  const teamId = form.teamId || defaultTeamId
+  const teamId = form.teamId || defaultNewOpportunityTeamId(teams, canViewAll)
   const team = teams.find((t) => t.id === teamId) ?? null
 
   // Changing the team clears an owner who isn't one of its members
   function changeTeam(nextId: string) {
     const next = teams.find((t) => t.id === nextId)
     setForm((prev) => ({ ...prev, teamId: nextId, ownerId: prev.ownerId && next?.assignableOwnerIds.includes(prev.ownerId) ? prev.ownerId : "" }))
+    setInvisibleWarning(false)
   }
 
   const update = (field: keyof typeof form, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }))
+    if (field === "ownerId") setInvisibleWarning(false)
     setErrors((prev) => ({ ...prev, [field]: undefined }))
   }
 
@@ -99,8 +101,24 @@ export function NewOpportunityModal({
     return Object.keys(next).length === 0
   }
 
-  async function handleSave() {
+  // The same rule as the server's opportunityVisibilityWhere (canSeeOpportunity)
+  const visibleAfterSave = canSeeOpportunity(
+    {
+      userId: access?.userId ?? "",
+      canOpenPage: can("pages.opportunities"),
+      canViewAll,
+      canViewTeam: can("opportunities.viewTeam"),
+    },
+    { ownerId: form.ownerId || null, viewerInTeam: !!team?.isMember }
+  )
+
+  async function handleSave(confirmedInvisible = false) {
     if (!validate()) return
+    if (!visibleAfterSave && !confirmedInvisible) {
+      setInvisibleWarning(true)
+      return
+    }
+    setInvisibleWarning(false)
     setSaving(true)
     const res = await fetch("/api/opportunities", {
       method: "POST",
@@ -317,14 +335,28 @@ export function NewOpportunityModal({
           )}
         </div>
 
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
-            Cancel
-          </Button>
-          <Button type="submit" disabled={saving}>
-            {saving ? "Creating..." : "Create opportunity"}
-          </Button>
-        </div>
+        {invisibleWarning && !visibleAfterSave ? (
+          <div role="alert" className="space-y-3 rounded-md bg-warning/10 px-3 py-3 text-sm text-foreground">
+            <p>{INVISIBLE_AFTER_SAVE_MESSAGE}</p>
+            <div className="flex justify-end gap-2">
+              <Button type="button" variant="outline" onClick={() => setInvisibleWarning(false)} disabled={saving} autoFocus>
+                Go back
+              </Button>
+              <Button type="button" onClick={() => handleSave(true)} disabled={saving}>
+                {saving ? "Creating..." : "Save anyway"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={saving}>
+              {saving ? "Creating..." : "Create opportunity"}
+            </Button>
+          </div>
+        )}
       </form>
     </Modal>
   )

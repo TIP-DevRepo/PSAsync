@@ -156,3 +156,37 @@ export function memberChangeBlockReason(
   if (change === "remove" && user.id === myUserId) return null
   return user.teamChangeRefusal ?? null
 }
+
+// ─── New opportunities ──────────────────────────────────────────────────────
+
+// Whether a user can open an opportunity with this owner in a team they are
+// (or aren't) in. The same three levels as opportunityVisibilityWhere in
+// src/lib/scoped-loaders.ts, which applies them in the database; this is
+// the in memory form for the New opportunity dialog's warning, and the two
+// must stay in step (the scratch tests compare them).
+export function canSeeOpportunity(
+  viewer: OpportunityTeamViewer & { canOpenPage: boolean },
+  opportunity: { ownerId: string | null; viewerInTeam: boolean }
+): boolean {
+  if (!viewer.canOpenPage) return false
+  if (viewer.canViewAll) return true
+  if (opportunity.ownerId === viewer.userId) return true
+  if (!opportunity.viewerInTeam) return false
+  return viewer.canViewTeam || opportunity.ownerId === null
+}
+
+export const INVISIBLE_AFTER_SAVE_MESSAGE =
+  "You won't be able to see this opportunity after saving because you're not in this team. Assign it to yourself or choose one of your teams."
+
+// The New opportunity dialog's starting team: General when the user is in
+// it or sees every team (opportunities.viewAll), otherwise the first team
+// they are in (by sortOrder), otherwise General. "" until the teams load.
+export function defaultNewOpportunityTeamId(
+  teams: readonly { id: string; isDefault: boolean; isMember: boolean; sortOrder: number }[],
+  canViewAll: boolean
+): string {
+  const general = teams.find((t) => t.isDefault)
+  if (general && (general.isMember || canViewAll)) return general.id
+  const own = [...teams].filter((t) => t.isMember).sort((a, b) => a.sortOrder - b.sortOrder)[0]
+  return own?.id ?? general?.id ?? ""
+}
