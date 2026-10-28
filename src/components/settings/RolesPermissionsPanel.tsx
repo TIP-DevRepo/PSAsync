@@ -66,6 +66,7 @@ interface RolePermissions {
     salesOrders: boolean
     opportunities: boolean
     teams: boolean
+    actionButtons: boolean
   }
   dashboards: { manage: boolean }
 }
@@ -156,6 +157,7 @@ const SETTINGS_LABELS: [keyof RolePermissions["settingsSections"], string][] = [
   ["salesOrders", "Sales & Purchase Order Settings"],
   ["opportunities", "Opportunity Settings"],
   ["teams", "Teams"],
+  ["actionButtons", "Action Buttons"],
 ]
 
 const DASHBOARD_LABELS: [keyof RolePermissions["dashboards"], string][] = [
