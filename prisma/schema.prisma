@@ -51,6 +51,7 @@ model Company {
   opportunitySettings     OpportunitySettings?
   timelineEntries         TimelineEntry[]
   teams                   Team[]
+  actionButtons           ActionButton[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -1594,6 +1595,7 @@ model OpportunityStage {
 
   opportunities        Opportunity[]
   quoteSentForSettings OpportunitySettings[] @relation("OpportunitySettingsQuoteSentStage")
+  actionButtons        ActionButton[]
 
   @@index([companyId])
 }
@@ -1765,4 +1767,59 @@ model RateLimit {
   @@unique([key, hashedIp, windowStart])
   @@index([windowStart])
   @@map("rate_limits")
+}
+
+// ─── ACTION BUTTONS ──────────────────────────────────────────────────────────
+// What an action button does. Only the kinds in AVAILABLE_ACTION_KINDS
+// (src/lib/timeline-buttons.ts) show on records; the rest can be set up
+// now and appear once their feature exists.
+enum ActionButtonKind {
+  NOTE
+  EMAIL
+  RAISE_QUOTE
+  APPOINTMENT
+  CHILD_TICKET
+}
+
+// Whether a NOTE or EMAIL button changes the record's stage: never, a
+// stage the user picks, or one fixed stage
+enum ActionStageMode {
+  NONE
+  CHOOSE
+  FIXED
+}
+
+enum ActionNoteMode {
+  OPTIONAL
+  REQUIRED
+}
+
+// The admin defined buttons above a record's timeline (the HaloPSA style
+// "actions"), shared by opportunities and tickets. Defaults are created by
+// ensureActionButtonDefaults (src/lib/action-buttons.ts). Tickets add a
+// fixed ticket status field later, next to fixedStageId.
+model ActionButton {
+  id               String            @id @default(cuid())
+  companyId        String
+  company          Company           @relation(fields: [companyId], references: [id])
+  label            String
+  // A name from ACTION_BUTTON_ICONS (src/lib/timeline-buttons.ts)
+  icon             String
+  // #RRGGBB
+  color            String
+  forOpportunities Boolean           @default(true)
+  forTickets       Boolean           @default(false)
+  kind             ActionButtonKind
+  stageMode        ActionStageMode   @default(NONE)
+  // The stage a FIXED button moves an opportunity to. A stage a button
+  // points at can't be deleted.
+  fixedStageId     String?
+  fixedStage       OpportunityStage? @relation(fields: [fixedStageId], references: [id], onDelete: Restrict)
+  noteMode         ActionNoteMode    @default(REQUIRED)
+  isHidden         Boolean           @default(false)
+  sortOrder        Int               @default(0)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  @@index([companyId])
 }
