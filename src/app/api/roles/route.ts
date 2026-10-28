@@ -4,6 +4,7 @@ import { requireAccess } from "@/lib/api-access"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
 import { readRoleColor } from "@/lib/role-colors"
 import { getRegularRolesInOrder, applyRegularRoleOrder } from "@/lib/role-order"
+import { roleGrantProblem } from "@/lib/role-grants"
 
 const DEFAULT_PERMISSIONS = {
   pages: { clients: false, catalog: false, vendors: false, inventory: false, quotes: false, settings: false, salesOrders: false, purchaseOrders: false, opportunities: false },
@@ -39,11 +40,15 @@ export async function GET() {
     include: { _count: { select: { userRoles: true } } },
   })
 
+  // grantRefusal says why the caller can't give the role to anyone (the
+  // grant rule, src/lib/role-grants.ts), or null, so pickers can show it
+  // disabled without sending the role's permissions
   return NextResponse.json(
     roles.map(({ _count, permissions, ...role }) => ({
       ...role,
       ...(showPermissions ? { permissions } : {}),
       userCount: _count.userRoles,
+      grantRefusal: roleGrantProblem(ctx.access, [{ name: role.name, rank: role.rank, permissions }], "user"),
     }))
   )
 }

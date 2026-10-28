@@ -102,6 +102,9 @@ export interface TeamRole {
   rank: number
   color: string | null
   isGlobalAdmin: boolean
+  // GET /api/roles only: why the signed in user can't give this role (the
+  // grant rule, src/lib/role-grants.ts), or null
+  grantRefusal?: string | null
 }
 
 // One team as GET /api/teams returns it (toTeamResponse in src/lib/teams.ts)
@@ -120,24 +123,36 @@ export interface TeamSummary {
   assignableOwnerIds: string[]
   // Only for users who manage teams
   members?: { id: string; name: string; active: boolean }[]
+  // Only for users who manage teams: why they can't add members (one of its
+  // default roles fails the grant rule), or null
+  memberGrantRefusal?: string | null
 }
 
-// The signed in user's rank as the server compares it (Global Admin highest)
-export function actorRank(access: { isGlobalAdmin: boolean; rank: number } | null | undefined): number {
-  if (!access) return 0
-  return access.isGlobalAdmin ? Number.MAX_SAFE_INTEGER : access.rank
-}
-
-// Why a role can't be added as a team's default role, or null when it can.
-// A role already on the team can always be kept or removed.
-export function defaultRoleBlockReason(role: Pick<TeamRole, "rank" | "isGlobalAdmin">, myRank: number, alreadyOnTeam: boolean): string | null {
+// Why a role can't be added as a team's default role, or null when it can:
+// Global Admin never, and otherwise the grant rule's reason from GET
+// /api/roles. A role already on the team can always be kept or removed.
+export function defaultRoleBlockReason(role: Pick<TeamRole, "isGlobalAdmin" | "grantRefusal">, alreadyOnTeam: boolean): string | null {
   if (role.isGlobalAdmin) return "Global Admin can't be a team's default role"
-  if (!alreadyOnTeam && role.rank >= myRank) return "At or above your rank"
+  if (!alreadyOnTeam && role.grantRefusal) return role.grantRefusal
   return null
 }
 
 // Why new members can't be added to a team with these default roles, or
-// null when they can (adding a member grants the team's roles)
-export function addMemberBlockReason(roles: readonly Pick<TeamRole, "rank">[], myRank: number): string | null {
-  return roles.some((r) => r.rank >= myRank) ? "This team gives a role at or above your rank" : null
+// null when they can (adding a member gives them the team's roles, so each
+// must pass the grant rule)
+export function addMemberBlockReason(roles: readonly Pick<TeamRole, "name" | "grantRefusal">[]): string | null {
+  const blocked = roles.find((r) => r.grantRefusal)
+  return blocked ? `This team gives the ${blocked.name} role, which you can't give` : null
+}
+
+// Why a user can't be added to or removed from a team by the signed in user
+// (the membership rank rule, teamChangeRefusal from GET /api/users), or
+// null. Anyone may remove themselves.
+export function memberChangeBlockReason(
+  user: { id: string; teamChangeRefusal?: string | null },
+  myUserId: string | null,
+  change: "add" | "remove"
+): string | null {
+  if (change === "remove" && user.id === myUserId) return null
+  return user.teamChangeRefusal ?? null
 }

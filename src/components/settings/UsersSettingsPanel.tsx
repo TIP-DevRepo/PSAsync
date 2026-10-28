@@ -17,12 +17,14 @@ import { RoleAssignControl, RoleChecklist, type AssignableRole, type TeamGranted
 import { Modal } from "@/components/Modal"
 import { SearchableChecklist } from "@/components/teams/SearchableChecklist"
 import { useAccess } from "@/components/AccessProvider"
-import { addMemberBlockReason, type TeamSummary } from "@/lib/team-rules"
+import { memberChangeBlockReason, type TeamSummary } from "@/lib/team-rules"
 import type { MenuAnchor } from "@/lib/useFixedMenu"
 import { sortUsersByName } from "@/lib/user-picker"
 
 interface RoleOption extends AssignableRole {
   isEveryone?: boolean
+  // Why you can't give this role to anyone (the grant rule), or null
+  grantRefusal?: string | null
 }
 
 // Excludes }{[]|\/><;:'"~`+=,.^ since those tend to cause trouble when a
@@ -47,6 +49,8 @@ interface User {
   // The teams the user is in, and the roles those teams give them
   teams?: { id: string; name: string }[]
   teamRoles?: TeamGrantedRole[]
+  // With the Teams permission: why you can't add or remove this user from a team
+  teamChangeRefusal?: string | null
   // Only sent to Global Admins, and only set while the login is locked
   loginLockedUntil?: string | null
 }
@@ -108,15 +112,19 @@ export function UsersSettingsPanel() {
   }, [canManageTeams])
 
   // Same rules the users API enforces. Changing an existing user's roles
-  // needs the user AND every role involved strictly below your own rank.
-  // Inviting allows roles at or below your rank.
-  function existingUserRoleReason(role: AssignableRole) {
+  // needs the user AND every role involved strictly below your own rank,
+  // and a role the user doesn't hold yet must pass the grant rule (its
+  // grantRefusal from GET /api/roles: you hold every permission it grants).
+  // Removing a role needs no more than the rank.
+  const grantRefusalOf = (role: AssignableRole) => roles.find((r) => r.id === role.id)?.grantRefusal ?? null
+  function existingUserRoleReason(role: AssignableRole, user: User) {
     if (myRank === null || role.rank >= myRank) return "At or above your rank"
+    if (!user.roles.some((r) => r.id === role.id)) return grantRefusalOf(role)
     return null
   }
   function inviteRoleReason(role: AssignableRole) {
     if (myRank === null || role.rank > myRank) return "Above your rank"
-    return null
+    return grantRefusalOf(role)
   }
   function userLockedReason(user: User) {
     // Roles from teams count toward the user's rank too
@@ -333,7 +341,7 @@ export function UsersSettingsPanel() {
                       roles={roles}
                       selectedIds={user.roles.map((r) => r.id)}
                       onChange={(nextIds) => setUserRoles(user, nextIds)}
-                      disabledReason={existingUserRoleReason}
+                      disabledReason={(role) => existingUserRoleReason(role, user)}
                       lockedReason={lockedReason}
                       busy={savingUserId === user.id}
                       label={`Edit roles for ${user.name}`}
@@ -374,7 +382,7 @@ export function UsersSettingsPanel() {
                       onUnlock={() => unlockUser(user)}
                       roles={roles}
                       onRolesChange={(nextIds) => setUserRoles(user, nextIds)}
-                      roleDisabledReason={existingUserRoleReason}
+                      roleDisabledReason={(role) => existingUserRoleReason(role, user)}
                       rolesBusy={savingUserId === user.id}
                       onEditTeams={canManageTeams ? () => setTeamsUser(user) : undefined}
                     />
@@ -390,7 +398,7 @@ export function UsersSettingsPanel() {
         <UserTeamsDialog
           user={teamsUser}
           teams={teams}
-          myRank={myRank}
+          myUserId={myId}
           onClose={() => setTeamsUser(null)}
           onSaved={() => {
             setTeamsUser(null)
@@ -402,20 +410,21 @@ export function UsersSettingsPanel() {
   )
 }
 
-// Adds or removes a user's teams (PATCH /api/users/[id] teamIds). Joining a
-// team grants its default roles, so a team giving a role at or above your
-// rank can't be added, the same rule as the Teams screen; it can still be
-// left.
+// Adds or removes a user's teams (PATCH /api/users/[id] teamIds), with the
+// Teams screen's rules: joining a team gives its default roles, so a team
+// giving a role you couldn't give (memberGrantRefusal) can't be added, and
+// a user ranked at or above you can't be added to or removed from any team
+// (teamChangeRefusal), though you may always take yourself out of one.
 function UserTeamsDialog({
   user,
   teams,
-  myRank,
+  myUserId,
   onClose,
   onSaved,
 }: {
   user: User
   teams: TeamSummary[]
-  myRank: number | null
+  myUserId: string | null
   onClose: () => void
   onSaved: () => void
 }) {
@@ -450,7 +459,13 @@ function UserTeamsDialog({
           value: team.id,
           label: team.name,
           searchText: team.name,
-          disabledReason: savedIds.includes(team.id) ? null : addMemberBlockReason(team.defaultRoles, myRank ?? 0),
+          // Unticking a saved team is a removal, ticking another an addition
+          disabledReason:
+            savedIds.includes(team.id) && teamIds.includes(team.id)
+              ? memberChangeBlockReason(user, myUserId, "remove")
+              : !savedIds.includes(team.id) && !teamIds.includes(team.id)
+                ? (team.memberGrantRefusal ?? memberChangeBlockReason(user, myUserId, "add"))
+                : null,
         }))}
         selected={teamIds}
         onChange={setTeamIds}

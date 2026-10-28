@@ -8,6 +8,7 @@ import {
   setUserRoles,
 } from "@/lib/user-roles"
 import { roleGrantProblem } from "@/lib/role-grants"
+import { effectiveRoles, membershipChangeRefusal, rankOf } from "@/lib/team-roles"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
 import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
 import { usesMicrosoftSso } from "@/lib/sso-account"
@@ -46,6 +47,8 @@ export async function GET() {
   if (response) return response
 
   const showContact = ctx.can("settingsSections.users")
+  // Users who manage teams are told who they can't add to or remove from a team
+  const showTeamChanges = ctx.can("settingsSections.teams")
 
   const users = await prisma.user.findMany({
     where: { companyId: ctx.companyId },
@@ -60,10 +63,10 @@ export async function GET() {
         where: { role: { isEveryone: false } },
         select: { role: { select: roleFields } },
       },
-      // Teams and the roles they give, for Manage Users only (nothing is
-      // read for anyone else)
+      // Teams and the roles they give, for Manage Users and the team rank
+      // rule only (nothing is read for anyone else)
       teamMemberships: {
-        where: showContact ? { team: { companyId: ctx.companyId } } : { id: { in: [] } },
+        where: showContact || showTeamChanges ? { team: { companyId: ctx.companyId } } : { id: { in: [] } },
         select: {
           team: {
             select: { id: true, name: true, defaultRoles: { where: { role: { isEveryone: false, isGlobalAdmin: false } }, select: { role: { select: roleFields } } } },
@@ -84,11 +87,25 @@ export async function GET() {
   // with the rank and color Manage Users needs for its pills and hierarchy
   // locks. role is the highest of them. For users who manage users, teams
   // is the teams they are in and teamRoles every role a team gives them,
-  // each with the teams it comes from (a role can also be in roles).
+  // each with the teams it comes from (a role can also be in roles). For
+  // users who manage teams, teamChangeRefusal says why they can't add the
+  // user to a team or remove them from one (membershipChangeRefusal: the
+  // user must rank below them, by effective rank), or null; anyone may still
+  // remove themselves.
+  const actor = { userId: ctx.userId, rank: ctx.access.rank, isGlobalAdmin: ctx.access.isGlobalAdmin }
   return NextResponse.json(
     users.map(({ userRoles, loginLockedUntil, teamMemberships, ...user }) => {
       const roles = userRoles.map((ur) => ur.role).sort((a, b) => b.rank - a.rank)
-      const teamInfo = showContact ? teamRolesOf(teamMemberships) : {}
+      const rank = rankOf(
+        effectiveRoles(
+          roles.map((r) => ({ ...r, isEveryone: false })),
+          teamMemberships.map(({ team }) => ({ team: { id: team.id, defaultRoles: team.defaultRoles.map(({ role }) => ({ role: { ...role, isEveryone: false } })) } }))
+        )
+      )
+      const teamInfo = {
+        ...(showContact ? teamRolesOf(teamMemberships) : {}),
+        ...(showTeamChanges ? { teamChangeRefusal: membershipChangeRefusal(actor, { id: user.id, rank }, "add") } : {}),
+      }
       if (!showLocks) return { ...user, role: roles[0] ?? null, roles, ...teamInfo }
       const lockedUntil = loginLockedUntil && loginLockedUntil.getTime() > now ? loginLockedUntil : null
       return { ...user, role: roles[0] ?? null, roles, ...teamInfo, loginLockedUntil: lockedUntil }

@@ -17,9 +17,9 @@ import { confirmDialog } from "@/lib/confirm-dialog"
 import { sortUsersByName } from "@/lib/user-picker"
 import { cn } from "@/lib/utils"
 import {
-  actorRank,
   addMemberBlockReason,
   defaultRoleBlockReason,
+  memberChangeBlockReason,
   TEAM_DESCRIPTION_MAX,
   TEAM_NAME_MAX,
   type TeamRole,
@@ -34,6 +34,8 @@ interface UserOption {
   id: string
   name: string
   active: boolean
+  // Why the signed in user can't add or remove this user (GET /api/users)
+  teamChangeRefusal?: string | null
 }
 
 // Settings > Teams (settingsSections.teams): the company's teams in order,
@@ -52,7 +54,7 @@ export function TeamsSettingsPanel() {
   // null closed, "new", or the team being edited
   const [editing, setEditing] = useState<TeamSummary | "new" | null>(null)
   const sensors = useReorderSensors()
-  const myRank = actorRank(access)
+  const myUserId = access?.userId ?? null
   const allowed = can("settingsSections.teams")
 
   useEffect(() => {
@@ -156,7 +158,7 @@ export function TeamsSettingsPanel() {
           team={editing === "new" ? null : editing}
           users={users}
           roles={roles}
-          myRank={myRank}
+          myUserId={myUserId}
           onClose={() => setEditing(null)}
           onSaved={() => {
             setEditing(null)
@@ -213,22 +215,24 @@ function TeamRow({ team, busy, onEdit, onDelete }: { team: TeamSummary; busy: bo
 }
 
 // Create or edit one team: name, description, members, and default roles.
-// Roles the editor couldn't grant directly are listed disabled with the
-// reason, and so are new members of a team that gives such a role. Saving
+// Roles the editor couldn't give directly (the grant rule) are listed
+// disabled with the reason, and so are new members of a team that gives
+// such a role, and users ranked at or above the editor (who can't be added
+// or removed, though the editor may remove themselves). Saving
 // an existing team sends only what changed, default roles before members
 // (so removing a role out of reach first lets members be added).
 function TeamDialog({
   team,
   users,
   roles,
-  myRank,
+  myUserId,
   onClose,
   onSaved,
 }: {
   team: TeamSummary | null
   users: UserOption[]
   roles: TeamRole[]
-  myRank: number
+  myUserId: string | null
   onClose: () => void
   onSaved: () => void
 }) {
@@ -247,7 +251,16 @@ function TeamDialog({
     ...(team?.members ?? []).filter((m) => !users.some((u) => u.id === m.id)),
   ])
   const chosenRoles = roles.filter((r) => roleIds.includes(r.id))
-  const addBlocked = addMemberBlockReason(chosenRoles, myRank)
+  const addBlocked = addMemberBlockReason(chosenRoles)
+  // Why a user's box can't change: unticking a saved member is a removal,
+  // ticking anyone else an addition (a saved member ticked again is neither)
+  const memberReason = (u: UserOption) => {
+    const saved = savedMemberIds.includes(u.id)
+    const ticked = memberIds.includes(u.id)
+    if (saved && ticked) return memberChangeBlockReason(u, myUserId, "remove")
+    if (!saved && !ticked) return addBlocked ?? memberChangeBlockReason(u, myUserId, "add")
+    return null
+  }
 
   async function handleSave() {
     if (!name.trim()) {
@@ -318,7 +331,7 @@ function TeamDialog({
               value: u.id,
               label: u.active === false ? `${u.name} (inactive)` : u.name,
               searchText: u.name,
-              disabledReason: !savedMemberIds.includes(u.id) && !memberIds.includes(u.id) ? addBlocked : null,
+              disabledReason: memberReason(u),
             }))}
             selected={memberIds}
             onChange={setMemberIds}
@@ -333,7 +346,7 @@ function TeamDialog({
               value: role.id,
               label: <RolePill role={role} />,
               searchText: role.name,
-              disabledReason: defaultRoleBlockReason(role, myRank, savedRoleIds.includes(role.id)),
+              disabledReason: defaultRoleBlockReason(role, savedRoleIds.includes(role.id)),
             }))}
             selected={roleIds}
             onChange={setRoleIds}
