@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { requireAccess, notFound } from "@/lib/api-access"
 import { loadOpportunityAttachment, opportunityAttachmentWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
+import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { deleteStoredObject } from "@/lib/uploads"
 import { recordTimelineActions } from "@/lib/timeline"
 import { attachmentAction } from "@/lib/opportunity-timeline"
@@ -18,6 +19,7 @@ export async function DELETE(
   if (response) return response
 
   await ensureOpportunityDefaults(ctx.companyId)
+  await ensureTeamDefaults(ctx.companyId)
 
   const { id, attachmentId } = await params
   const existing = await loadOpportunityAttachment(ctx, id, attachmentId)

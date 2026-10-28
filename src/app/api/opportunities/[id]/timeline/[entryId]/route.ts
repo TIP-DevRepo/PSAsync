@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { loadOpportunityTimelineEntry, opportunityTimelineEntryWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
+import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { readJsonObject, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
 import {
   ONLY_NOTES_EDITABLE_MESSAGE,
@@ -34,6 +35,7 @@ export async function PATCH(
   if (response) return response
 
   await ensureOpportunityDefaults(ctx.companyId)
+  await ensureTeamDefaults(ctx.companyId)
 
   const { id, entryId } = await params
   const entry = await loadOpportunityTimelineEntry(ctx, id, entryId)
@@ -66,6 +68,7 @@ export async function DELETE(
   if (response) return response
 
   await ensureOpportunityDefaults(ctx.companyId)
+  await ensureTeamDefaults(ctx.companyId)
 
   const { id, entryId } = await params
   const entry = await loadOpportunityTimelineEntry(ctx, id, entryId)
