@@ -16,6 +16,7 @@ export const opportunityTimelineSnapshotSelect = {
   contact: { select: { id: true, firstName: true, lastName: true } },
   clientLocation: { select: { id: true, name: true } },
   owner: { select: { id: true, name: true } },
+  team: { select: { id: true, name: true } },
   stage: { select: { id: true, name: true } },
   type: { select: { id: true, name: true } },
 } satisfies Prisma.OpportunitySelect
@@ -32,6 +33,8 @@ export interface OpportunitySnapshot {
   contact: { id: string; firstName: string; lastName: string }
   clientLocation: { id: string; name: string } | null
   owner: { id: string; name: string } | null
+  // Null only for an opportunity from before teams, until ensureTeamDefaults moves it to General
+  team: { id: string; name: string } | null
   stage: { id: string; name: string }
   type: { id: string; name: string } | null
 }
@@ -50,6 +53,7 @@ export function opportunityCreatedAction(o: OpportunitySnapshot): TimelineAction
 export function opportunityChangeActions(before: OpportunitySnapshot, after: OpportunitySnapshot): TimelineAction[] {
   const actions: TimelineAction[] = []
   if (before.stage.id !== after.stage.id) actions.push({ action: "stage_changed", data: { from: ref(before.stage), to: ref(after.stage) } })
+  if ((before.team?.id ?? null) !== (after.team?.id ?? null)) actions.push({ action: "team_changed", data: { from: ref(before.team), to: ref(after.team) } })
   if ((before.owner?.id ?? null) !== (after.owner?.id ?? null)) {
     actions.push({ action: "owner_changed", data: { from: ref(before.owner), to: ref(after.owner) } })
   }

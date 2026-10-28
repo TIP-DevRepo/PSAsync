@@ -28,7 +28,8 @@ const FIELD =
   "rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
 const CATEGORIES: StageCategory[] = ["OPEN", "WON", "LOST"]
 
-async function send(url: string, method: string, body?: unknown): Promise<{ ok: boolean; data: Record<string, unknown> | unknown[] }> {
+// The helpers below are shared with the Teams panel (TeamsSettingsPanel)
+export async function send(url: string, method: string, body?: unknown): Promise<{ ok: boolean; data: Record<string, unknown> | unknown[] }> {
   const res = await fetch(url, {
     method,
     headers: body === undefined ? undefined : { "Content-Type": "application/json" },
@@ -38,7 +39,7 @@ async function send(url: string, method: string, body?: unknown): Promise<{ ok: 
   return { ok: res.ok, data }
 }
 
-const errorOf = (data: unknown, fallback: string) =>
+export const errorOf = (data: unknown, fallback: string) =>
   data && typeof data === "object" && typeof (data as { error?: unknown }).error === "string" ? (data as { error: string }).error : fallback
 
 // A whole number from 0 to 100, or null when the text isn't one
@@ -50,7 +51,7 @@ function readWinProbability(text: string): number | null {
 
 // Shown under a section's heading, in plain words: the API's own message
 // for a refused change (a stage in use, the last Won stage, and so on)
-function SectionError({ message, onDismiss }: { message: string | null; onDismiss: () => void }) {
+export function SectionError({ message, onDismiss }: { message: string | null; onDismiss: () => void }) {
   if (!message) return null
   return (
     <div role="alert" className="flex items-start justify-between gap-3 rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">
@@ -62,7 +63,7 @@ function SectionError({ message, onDismiss }: { message: string | null; onDismis
   )
 }
 
-function DragHandle({ label, ...props }: { label: string } & React.ButtonHTMLAttributes<HTMLButtonElement> & { ref?: (el: HTMLElement | null) => void }) {
+export function DragHandle({ label, ...props }: { label: string } & React.ButtonHTMLAttributes<HTMLButtonElement> & { ref?: (el: HTMLElement | null) => void }) {
   return (
     <button
       type="button"
@@ -75,14 +76,14 @@ function DragHandle({ label, ...props }: { label: string } & React.ButtonHTMLAtt
   )
 }
 
-function useReorderSensors() {
+export function useReorderSensors() {
   return useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   )
 }
 
-function announcementsFor(name: (id: UniqueIdentifier) => string): Announcements {
+export function announcementsFor(name: (id: UniqueIdentifier) => string): Announcements {
   return {
     onDragStart: ({ active }) => `Picked up ${name(active.id)}.`,
     onDragOver: ({ active, over }) => (over ? `${name(active.id)} is over ${name(over.id)}.` : `${name(active.id)} is no longer over the list.`),

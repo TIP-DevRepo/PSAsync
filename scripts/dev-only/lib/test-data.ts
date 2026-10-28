@@ -162,6 +162,32 @@ export function testNames(letter: TestLetter, marker: string) {
     oppSettingsName: `${marker} Test Opp Settings ${letter}`,
     oppSettingsEmail: email("opp-settings"),
     oppSettingsRole: `${marker} Opp Settings ${letter}`,
+    // Teams: General (made by ensureTeamDefaults) holds Test Rep and Test
+    // Opp Viewer, and the three sample opportunities above stay in it. Sales
+    // holds Test Team Basic and Test Team Viewer and gives its members the
+    // Team Grant role; Support has no members and gives Team High, ranked
+    // above Test Team Manager. Sales has three opportunities of its own: one
+    // owned by Test Team Viewer, one by Test Team Basic, and one unassigned.
+    salesTeam: `${marker} Sales Team ${letter}`,
+    supportTeam: `${marker} Support Team ${letter}`,
+    // Ops holds Test Admin and Test Team Manager and gives Team Lite, a role
+    // Test Team Manager may give (rank 1, only a permission it holds)
+    opsTeam: `${marker} Ops Team ${letter}`,
+    teamLiteRole: `${marker} Team Lite ${letter}`,
+    teamGrantRole: `${marker} Team Grant ${letter}`,
+    teamHighRole: `${marker} Team High ${letter}`,
+    teamBasicName: `${marker} Test Team Basic ${letter}`,
+    teamBasicEmail: email("team-basic"),
+    teamBasicRole: `${marker} Team Basic ${letter}`,
+    teamViewerName: `${marker} Test Team Viewer ${letter}`,
+    teamViewerEmail: email("team-viewer"),
+    teamViewerRole: `${marker} Team Viewer ${letter}`,
+    teamManagerName: `${marker} Test Team Manager ${letter}`,
+    teamManagerEmail: email("team-manager"),
+    teamManagerRole: `${marker} Team Manager ${letter}`,
+    salesViewerOpportunity: `${marker} Sample Sales Viewer Opportunity ${letter}`,
+    salesBasicOpportunity: `${marker} Sample Sales Basic Opportunity ${letter}`,
+    salesUnassignedOpportunity: `${marker} Sample Sales Unassigned Opportunity ${letter}`,
   }
 }
 
@@ -208,6 +234,33 @@ export const OPP_VIEWER_PERMISSIONS = { pages: { opportunities: true } }
 // Opp Settings: only Opportunity Settings (stages, types, and settings),
 // and the Settings page that section sits on (no API route reads it)
 export const OPP_SETTINGS_PERMISSIONS = { pages: { settings: true }, settingsSections: { opportunities: true } }
+
+// Team Basic: the Opportunities page, creating and editing, without seeing
+// the team's or everyone's
+export const TEAM_BASIC_PERMISSIONS = { pages: { opportunities: true }, opportunities: { create: true, edit: true } }
+
+// Team Viewer: the same plus every opportunity in its teams
+export const TEAM_VIEWER_PERMISSIONS = { pages: { opportunities: true }, opportunities: { create: true, edit: true, viewTeam: true } }
+
+// Team Manager: only Teams (and the Settings page it sits on), ranked 5, so
+// it can grant Team Grant (rank 1) but not Team High (rank 50)
+export const TEAM_MANAGER_PERMISSIONS = { pages: { settings: true }, settingsSections: { teams: true } }
+export const TEAM_MANAGER_RANK = 5
+
+// Sales' default role: the Catalog page, which GET /api/catalog/[id] needs,
+// so gaining and losing it through a team can be seen
+export const TEAM_GRANT_PERMISSIONS = { pages: { catalog: true } }
+export const TEAM_GRANT_RANK = 1
+
+// Support's default role, out of Test Team Manager's reach
+export const TEAM_HIGH_PERMISSIONS = { pages: { clients: true } }
+export const TEAM_HIGH_RANK = 50
+
+// Ops' default role: below Test Team Manager's rank and only a permission
+// it holds, so it passes the grant rule. Team Grant (rank 1, the Catalog
+// page, which Test Team Manager doesn't hold) fails it on permissions.
+export const TEAM_LITE_PERMISSIONS = { pages: { settings: true } }
+export const TEAM_LITE_RANK = 1
 
 const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
 
@@ -262,6 +315,10 @@ export interface SampleIds {
   // On the admin's opportunity: its created action and the admin's note
   timelineActionId: string
   timelineNoteId: string
+  // The General team and the Sales team (which gives Team Grant)
+  generalTeamId: string
+  salesTeamId: string
+  teamGrantRoleId: string
 }
 
 export interface PermissionFixtureIds {
@@ -312,4 +369,17 @@ export interface PermissionFixtureIds {
   unassignedActionId: string
   unassignedAdminNoteId: string
   unassignedRepNoteId: string
+  // Teams (see testNames): every team id in the company's order, Support,
+  // Team High, the team test users, and the Sales opportunities
+  teamIds: string[]
+  supportTeamId: string
+  teamHighRoleId: string
+  opsTeamId: string
+  teamLiteRoleId: string
+  teamBasicUserId: string
+  teamViewerUserId: string
+  teamManagerUserId: string
+  salesViewerOpportunityId: string
+  salesBasicOpportunityId: string
+  salesUnassignedOpportunityId: string
 }

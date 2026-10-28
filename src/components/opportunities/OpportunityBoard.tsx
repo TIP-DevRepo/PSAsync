@@ -284,7 +284,14 @@ function CardBody({ card, link = false }: { card: OpportunityRow; link?: boolean
         </span>
         <span className="shrink-0 font-semibold tabular-nums text-foreground">{value}</span>
       </div>
-      <p className="text-xs text-muted-foreground">Close {formatDateOnly(card.expectedCloseDate)}</p>
+      <div className="flex items-center justify-between gap-2 text-xs">
+        <span className="shrink-0 text-muted-foreground">Close {formatDateOnly(card.expectedCloseDate)}</span>
+        {card.team && (
+          <span className="min-w-0 truncate rounded-full bg-brand-secondary-500/10 px-2 py-0.5 font-medium text-brand-secondary-500" title={`Team ${card.team.name}`}>
+            {card.team.name}
+          </span>
+        )}
+      </div>
     </article>
   )
 }

@@ -39,6 +39,8 @@ export interface OpportunityRow {
   client: { id: string; name: string }
   contact: { id: string; firstName: string; lastName: string }
   owner: { id: string; name: string } | null
+  // Null only for an opportunity from before teams, until it is moved to General
+  team: { id: string; name: string } | null
   stage: { id: string; name: string; category: StageCategory; winProbability: number }
   type: { id: string; name: string } | null
 }
@@ -47,45 +49,84 @@ export interface OpportunityRow {
 
 export type OpportunityView = "board" | "list"
 
-// The page's own parameters: the search box (both views). The list's column
-// filters (f_<column>, src/lib/column-filters.ts) are kept by the list
-// itself and only mean something on the list.
+// The page's own parameters, for both views: the search box, and the team
+// and owner the sidebar's Opportunities folder opens (team=<id>,
+// owner=<user id> or owner=unassigned), shown as removable chips. The
+// list's column filters (f_<column>, src/lib/column-filters.ts) are kept by
+// the list itself and only mean something on the list.
 export interface OpportunityFilters {
   q: string
+  // A team id, or "" for any team
+  team: string
+  // A user id, OWNER_UNASSIGNED, or "" for any owner
+  owner: string
 }
 
-export const EMPTY_FILTERS: OpportunityFilters = { q: "" }
+export const OWNER_UNASSIGNED = "unassigned"
+
+export const EMPTY_FILTERS: OpportunityFilters = { q: "", team: "", owner: "" }
+
+// An id from the URL: cuid like text only, so nothing odd reaches the API
+const URL_ID = /^[A-Za-z0-9_-]{1,64}$/
+const readUrlId = (value: string | null) => (value && URL_ID.test(value) ? value : "")
 
 // The same limit the list route has on its search text
 export const FILTER_SEARCH_MAX = 200
 
-// Reads the view and search from the URL. An unknown view falls back to the
-// board, and overlong search text is cut to the API's limit.
+// Reads the view, search, team, and owner from the URL. An unknown view
+// falls back to the board, overlong search text is cut to the API's limit,
+// and a team or owner that isn't an id is ignored.
 export function readOpportunityUrl(params: { get(name: string): string | null }): { view: OpportunityView; filters: OpportunityFilters } {
   const view: OpportunityView = params.get("view") === "list" ? "list" : "board"
   const q = (params.get("q") ?? "").trim()
-  return { view, filters: { q: q.length > FILTER_SEARCH_MAX ? q.slice(0, FILTER_SEARCH_MAX) : q } }
+  return {
+    view,
+    filters: { q: q.length > FILTER_SEARCH_MAX ? q.slice(0, FILTER_SEARCH_MAX) : q, team: readUrlId(params.get("team")), owner: readUrlId(params.get("owner")) },
+  }
 }
 
-// The page's query string for a view and its search ("" for the board with
-// no search), the inverse of readOpportunityUrl. Column filters are left
-// out, so changing view starts the list without them.
+// The page's query string for a view and its filters ("" for the board with
+// none), the inverse of readOpportunityUrl. Column filters are left out, so
+// changing view starts the list without them.
 export function opportunityUrlQuery(view: OpportunityView, filters: OpportunityFilters): string {
   const params = new URLSearchParams()
   if (view === "list") params.set("view", "list")
+  if (filters.team) params.set("team", filters.team)
+  if (filters.owner) params.set("owner", filters.owner)
   if (filters.q.trim()) params.set("q", filters.q.trim())
   const query = params.toString()
   return query ? `?${query}` : ""
 }
 
-// The query string for GET /api/opportunities: the search only. The API's
-// other filter parameters stay available to other callers.
+// The query string for GET /api/opportunities: the search, team (teamId),
+// and owner (ownerId, a user id or "unassigned"). The API's other filter
+// parameters stay available to other callers.
 export function opportunityApiQuery(filters: OpportunityFilters): string {
-  return filters.q ? `?${new URLSearchParams({ q: filters.q })}` : ""
+  const params = new URLSearchParams()
+  if (filters.q) params.set("q", filters.q)
+  if (filters.team) params.set("teamId", filters.team)
+  if (filters.owner) params.set("ownerId", filters.owner)
+  const query = params.toString()
+  return query ? `?${query}` : ""
 }
 
 export function hasActiveFilters(filters: OpportunityFilters): boolean {
-  return filters.q.trim() !== ""
+  return filters.q.trim() !== "" || filters.team !== "" || filters.owner !== ""
+}
+
+// The window event the sidebar's Opportunities folder listens for to reload
+// its counts. Pages send it after creating, moving, reassigning, moving to
+// another team, or deleting an opportunity.
+export const OPPORTUNITIES_CHANGED_EVENT = "psasync:opportunities-changed"
+
+export function notifyOpportunitiesChanged(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(OPPORTUNITIES_CHANGED_EVENT))
+}
+
+// Where the sidebar's Opportunities folder links: the board, filtered to a
+// team, and to an owner (a user id or OWNER_UNASSIGNED) within it
+export function opportunityFolderHref(team?: string, owner?: string): string {
+  return `/dashboard/opportunities${opportunityUrlQuery("board", { q: "", team: team ?? "", owner: owner ?? "" })}`
 }
 
 // A board column's "N older, view in list": the list with that stage in
@@ -108,26 +149,21 @@ interface UserOption {
   active: boolean
 }
 
-// Who the lists may show: every active user with opportunities.viewAll,
-// otherwise only the current user. Labels and order follow the shared user
-// picker rule (src/lib/user-picker.ts): names, never "Me", alphabetical,
-// Unassigned first. The current user needs the user list (GET /api/users)
-// for their name, so they are left out until it loads.
-function ownerCandidates(canViewAll: boolean, users: UserOption[], myUserId: string | null): UserOption[] {
-  return users.filter((u) => u.active && (canViewAll || u.id === myUserId))
-}
-
-// Who may be made the owner, following mayAssignOpportunityTo: without
-// opportunities.viewAll only the current user or unassigned (""). With it,
-// every active user. The current owner stays listed even when they can no
-// longer be chosen (deactivated), so the field shows them.
+// Who may be made the owner in a team: Unassigned ("") and the team's
+// members the current user may assign (the team's assignableOwnerIds from
+// GET /api/teams, which follows mayAssignOpportunityTo and the rule that an
+// owner is a member of the opportunity's team). Labels and order follow the
+// shared user picker rule (src/lib/user-picker.ts): names, never "Me",
+// alphabetical, Unassigned first; names come from the user list (GET
+// /api/users), so a member is left out until it loads. The current owner
+// stays listed even when they can no longer be chosen (deactivated, or not
+// in the team), so the field shows them.
 export function ownerFieldChoices(
-  canViewAll: boolean,
+  assignableOwnerIds: readonly string[],
   users: UserOption[],
-  myUserId: string | null,
   currentOwner?: { id: string; name: string } | null
 ): OwnerChoice[] {
-  const candidates: { id: string; name: string }[] = ownerCandidates(canViewAll, users, myUserId)
+  const candidates: { id: string; name: string }[] = users.filter((u) => u.active && assignableOwnerIds.includes(u.id))
   if (currentOwner && !candidates.some((u) => u.id === currentOwner.id)) candidates.push(currentOwner)
   return userChoices(candidates, { unassignedValue: "" })
 }
@@ -251,6 +287,18 @@ export function formatDateOnly(value: string | null): string {
 // A real time (closed, created, updated) shown as the user's local day
 export function formatDate(value: string | null): string {
   return value ? new Date(value).toLocaleDateString() : "-"
+}
+
+// The teams an opportunity may be put in by the current user (the server's
+// rule): the teams they are in, all of them with opportunities.viewAll, and
+// on create General (isDefault) always. keepId keeps the opportunity's
+// current team listed so the field shows it.
+export function teamChoices<T extends { id: string; isDefault: boolean; isMember: boolean }>(
+  teams: readonly T[],
+  canViewAll: boolean,
+  opts: { includeDefault?: boolean; keepId?: string | null } = {}
+): T[] {
+  return teams.filter((t) => canViewAll || t.isMember || (opts.includeDefault && t.isDefault) || t.id === opts.keepId)
 }
 
 export function contactName(contact: { firstName: string; lastName: string }): string {

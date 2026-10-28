@@ -47,6 +47,16 @@ import {
   PLACEHOLDER_TOKEN,
   REP_PERMISSIONS,
   SAMPLE_ITEM_COST,
+  TEAM_BASIC_PERMISSIONS,
+  TEAM_GRANT_PERMISSIONS,
+  TEAM_GRANT_RANK,
+  TEAM_HIGH_PERMISSIONS,
+  TEAM_HIGH_RANK,
+  TEAM_LITE_PERMISSIONS,
+  TEAM_LITE_RANK,
+  TEAM_MANAGER_PERMISSIONS,
+  TEAM_MANAGER_RANK,
+  TEAM_VIEWER_PERMISSIONS,
   TEMPLATER_PERMISSIONS,
   TEST_LETTERS,
   generatePassword,
@@ -208,6 +218,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
   const { generateAssetTag } = await import("@/lib/inventory/generateAssetTag")
   const { logAssetEvent } = await import("@/lib/inventory/logAssetEvent")
   const { ensureOpportunityDefaults } = await import("@/lib/opportunity-defaults")
+  const { ensureTeamDefaults } = await import("@/lib/team-defaults")
   const { takeOpportunityNumber } = await import("@/lib/opportunity-number")
   const year = new Date().getFullYear()
 
@@ -625,9 +636,60 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
     const oppViewerUserId = await addRunUser(prisma, run, { companyId, name: n.oppViewerName, email: n.oppViewerEmail, roleIds: [oppViewerRoleId] })
     const oppSettingsRoleId = await addRunRole(prisma, run, { companyId, name: n.oppSettingsRole, rank: 1, permissions: OPP_SETTINGS_PERMISSIONS })
     const oppSettingsUserId = await addRunUser(prisma, run, { companyId, name: n.oppSettingsName, email: n.oppSettingsEmail, roleIds: [oppSettingsRoleId] })
+
+    // ── Teams ──
+    // General, made the way the app makes it on first use, holds Test Rep
+    // and Test Opp Viewer, so they still see the unassigned sample
+    // opportunity. Sales and Support are made here (see testNames).
+    await ensureTeamDefaults(companyId, prisma)
+    const generalTeam = rec("team", await prisma.team.findFirstOrThrow({ where: { companyId, isDefault: true }, select: { id: true } }))
+    const teamGrantRoleId = await addRunRole(prisma, run, { companyId, name: n.teamGrantRole, rank: TEAM_GRANT_RANK, permissions: TEAM_GRANT_PERMISSIONS })
+    const teamHighRoleId = await addRunRole(prisma, run, { companyId, name: n.teamHighRole, rank: TEAM_HIGH_RANK, permissions: TEAM_HIGH_PERMISSIONS })
+    const teamLiteRoleId = await addRunRole(prisma, run, { companyId, name: n.teamLiteRole, rank: TEAM_LITE_RANK, permissions: TEAM_LITE_PERMISSIONS })
+    const teamBasicRoleId = await addRunRole(prisma, run, { companyId, name: n.teamBasicRole, rank: 1, permissions: TEAM_BASIC_PERMISSIONS })
+    const teamViewerRoleId = await addRunRole(prisma, run, { companyId, name: n.teamViewerRole, rank: 1, permissions: TEAM_VIEWER_PERMISSIONS })
+    const teamManagerRoleId = await addRunRole(prisma, run, { companyId, name: n.teamManagerRole, rank: TEAM_MANAGER_RANK, permissions: TEAM_MANAGER_PERMISSIONS })
+    const teamBasicUserId = await addRunUser(prisma, run, { companyId, name: n.teamBasicName, email: n.teamBasicEmail, roleIds: [teamBasicRoleId] })
+    const teamViewerUserId = await addRunUser(prisma, run, { companyId, name: n.teamViewerName, email: n.teamViewerEmail, roleIds: [teamViewerRoleId] })
+    const teamManagerUserId = await addRunUser(prisma, run, { companyId, name: n.teamManagerName, email: n.teamManagerEmail, roleIds: [teamManagerRoleId] })
+    const salesTeam = rec(
+      "team",
+      await prisma.team.create({
+        data: {
+          companyId,
+          name: n.salesTeam,
+          sortOrder: 1,
+          members: { create: [{ userId: teamBasicUserId }, { userId: teamViewerUserId }] },
+          defaultRoles: { create: [{ roleId: teamGrantRoleId }] },
+        },
+        select: { id: true },
+      })
+    )
+    const supportTeam = rec(
+      "team",
+      await prisma.team.create({
+        data: { companyId, name: n.supportTeam, sortOrder: 2, defaultRoles: { create: [{ roleId: teamHighRoleId }] } },
+        select: { id: true },
+      })
+    )
+    const opsTeam = rec(
+      "team",
+      await prisma.team.create({
+        data: {
+          companyId,
+          name: n.opsTeam,
+          sortOrder: 3,
+          members: { create: [{ userId: adminId }, { userId: teamManagerUserId }] },
+          defaultRoles: { create: [{ roleId: teamLiteRoleId }] },
+        },
+        select: { id: true },
+      })
+    )
+    await prisma.teamMember.createMany({ data: [{ teamId: generalTeam.id, userId: repUserId }, { teamId: generalTeam.id, userId: oppViewerUserId }] })
+
     // Numbered by the app's own counter, so an opportunity a check creates
     // takes the next number
-    const createOpportunity = async (title: string, ownerId: string | null, who: string) => {
+    const createOpportunity = async (title: string, ownerId: string | null, who: string, teamId = generalTeam.id) => {
       const opportunity = rec(
         "opportunity",
         await prisma.$transaction(async (tx) =>
@@ -641,6 +703,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
               // The client's main location, as a create without one saves
               clientLocationId: clientLocation.id,
               ownerId,
+              teamId,
               stageId: opportunityStages[0].id,
               typeId: opportunityTypes[0].id,
               createdById: adminId,
@@ -676,6 +739,9 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
     const adminOpportunity = await createOpportunity(n.adminOpportunity, adminId, "admin")
     const repOpportunity = await createOpportunity(n.repOpportunity, repUserId, "rep")
     const unassignedOpportunity = await createOpportunity(n.unassignedOpportunity, null, "unassigned")
+    const salesViewerOpportunity = await createOpportunity(n.salesViewerOpportunity, teamViewerUserId, "sales-viewer", salesTeam.id)
+    const salesBasicOpportunity = await createOpportunity(n.salesBasicOpportunity, teamBasicUserId, "sales-basic", salesTeam.id)
+    const salesUnassignedOpportunity = await createOpportunity(n.salesUnassignedOpportunity, null, "sales-unassigned", salesTeam.id)
 
     // The admin's mailbox row
     const adminMailboxId = await addRunMailbox(prisma, run, {
@@ -726,6 +792,9 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         opportunityTypeId: opportunityTypes[0].id,
         timelineActionId: adminOpportunity.actionId,
         timelineNoteId: adminOpportunity.adminNoteId,
+        generalTeamId: generalTeam.id,
+        salesTeamId: salesTeam.id,
+        teamGrantRoleId,
       },
       fixtures: {
         everyoneUserId,
@@ -769,6 +838,17 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         unassignedActionId: unassignedOpportunity.actionId,
         unassignedAdminNoteId: unassignedOpportunity.adminNoteId,
         unassignedRepNoteId: unassignedOpportunity.repNoteId,
+        teamIds: [generalTeam.id, salesTeam.id, supportTeam.id, opsTeam.id],
+        supportTeamId: supportTeam.id,
+        teamHighRoleId,
+        opsTeamId: opsTeam.id,
+        teamLiteRoleId,
+        teamBasicUserId,
+        teamViewerUserId,
+        teamManagerUserId,
+        salesViewerOpportunityId: salesViewerOpportunity.id,
+        salesBasicOpportunityId: salesBasicOpportunity.id,
+        salesUnassignedOpportunityId: salesUnassignedOpportunity.id,
       },
     }
   }
@@ -809,6 +889,8 @@ const CASCADED_TABLES: { table: string; count: (db: Db, ids: Ids) => Promise<num
   { table: "VendorAttachment", count: (db, ids) => db.vendorAttachment.count({ where: { vendor: { companyId: ids } } }) },
   { table: "DashboardWidget", count: (db, ids) => db.dashboardWidget.count({ where: { dashboard: { companyId: ids } } }) },
   { table: "UserRole", count: (db, ids) => db.userRole.count({ where: { user: { companyId: ids } } }) },
+  { table: "TeamMember", count: (db, ids) => db.teamMember.count({ where: { team: { companyId: ids } } }) },
+  { table: "TeamDefaultRole", count: (db, ids) => db.teamDefaultRole.count({ where: { team: { companyId: ids } } }) },
   { table: "Session", count: (db, ids) => db.session.count({ where: { user: { companyId: ids } } }) },
 ]
 
@@ -834,6 +916,9 @@ const DELETE_STEPS: {
   // that belong to no opportunity
   { table: "TimelineEntry", count: (db, ids) => db.timelineEntry.count({ where: { companyId: ids } }), remove: (db, ids) => db.timelineEntry.deleteMany({ where: { companyId: ids } }) },
   { table: "Opportunity", count: (db, ids) => db.opportunity.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunity.deleteMany({ where: { companyId: ids } }) },
+  // After the opportunities in them, before the users and roles their
+  // members and default roles point at (both cascade with the team)
+  { table: "Team", count: (db, ids) => db.team.count({ where: { companyId: ids } }), remove: (db, ids) => db.team.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunitySettings", count: (db, ids) => db.opportunitySettings.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunitySettings.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunityStage", count: (db, ids) => db.opportunityStage.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunityStage.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunityType", count: (db, ids) => db.opportunityType.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunityType.deleteMany({ where: { companyId: ids } }) },

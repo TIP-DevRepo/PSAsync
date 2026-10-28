@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
-import { getUserRank } from "@/lib/permissions"
 import { requireAccess } from "@/lib/api-access"
 import {
   readRoleIdsFromBody,
   loadRolesForAssignment,
   setUserRoles,
-  assignsRoleAtOrAboveRank,
-  ROLE_AT_OR_ABOVE_RANK_MESSAGE,
 } from "@/lib/user-roles"
+import { roleGrantProblem } from "@/lib/role-grants"
+import { effectiveRoles, membershipChangeRefusal, rankOf } from "@/lib/team-roles"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
 import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
 import { usesMicrosoftSso } from "@/lib/sso-account"
@@ -19,6 +18,27 @@ import { usesMicrosoftSso } from "@/lib/sso-account"
 const EMAIL_NOT_USABLE_MESSAGE = "This email cannot be used"
 const INVITE_EMAIL_SHAPE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
+const roleFields = { id: true, name: true, rank: true, color: true, isGlobalAdmin: true } as const
+
+type TeamRole = { id: string; name: string; rank: number; color: string | null; isGlobalAdmin: boolean }
+
+// A user's teams, and each role those teams give them with the teams it
+// comes from, highest rank first
+function teamRolesOf(memberships: { team: { id: string; name: string; defaultRoles: { role: TeamRole }[] } }[]) {
+  const byRole = new Map<string, TeamRole & { teams: { id: string; name: string }[] }>()
+  for (const { team } of memberships) {
+    for (const { role } of team.defaultRoles) {
+      const entry = byRole.get(role.id) ?? { ...role, teams: [] }
+      entry.teams.push({ id: team.id, name: team.name })
+      byRole.set(role.id, entry)
+    }
+  }
+  return {
+    teams: memberships.map(({ team }) => ({ id: team.id, name: team.name })),
+    teamRoles: [...byRole.values()].sort((a, b) => b.rank - a.rank),
+  }
+}
+
 // Any active user, since pickers on other pages (quote assign, inventory
 // checkout, approval workflows, SO notify rules) list users by name. Email
 // addresses only go to users who manage users.
@@ -27,6 +47,8 @@ export async function GET() {
   if (response) return response
 
   const showContact = ctx.can("settingsSections.users")
+  // Users who manage teams are told who they can't add to or remove from a team
+  const showTeamChanges = ctx.can("settingsSections.teams")
 
   const users = await prisma.user.findMany({
     where: { companyId: ctx.companyId },
@@ -39,7 +61,18 @@ export async function GET() {
       loginLockedUntil: true,
       userRoles: {
         where: { role: { isEveryone: false } },
-        select: { role: { select: { id: true, name: true, rank: true, color: true, isGlobalAdmin: true } } },
+        select: { role: { select: roleFields } },
+      },
+      // Teams and the roles they give, for Manage Users and the team rank
+      // rule only (nothing is read for anyone else)
+      teamMemberships: {
+        where: showContact || showTeamChanges ? { team: { companyId: ctx.companyId } } : { id: { in: [] } },
+        select: {
+          team: {
+            select: { id: true, name: true, defaultRoles: { where: { role: { isEveryone: false, isGlobalAdmin: false } }, select: { role: { select: roleFields } } } },
+          },
+        },
+        orderBy: [{ team: { sortOrder: "asc" } }, { team: { createdAt: "asc" } }],
       },
     },
     orderBy: { createdAt: "asc" },
@@ -50,15 +83,32 @@ export async function GET() {
   const showLocks = ctx.access.isGlobalAdmin
   const now = Date.now()
 
-  // roles is every role the user holds (highest rank first), with the rank
-  // and color Manage Users needs for its pills and hierarchy locks. role is
-  // the highest of them.
+  // roles is every role the user was given directly (highest rank first),
+  // with the rank and color Manage Users needs for its pills and hierarchy
+  // locks. role is the highest of them. For users who manage users, teams
+  // is the teams they are in and teamRoles every role a team gives them,
+  // each with the teams it comes from (a role can also be in roles). For
+  // users who manage teams, teamChangeRefusal says why they can't add the
+  // user to a team or remove them from one (membershipChangeRefusal: the
+  // user must rank below them, by effective rank), or null; anyone may still
+  // remove themselves.
+  const actor = { userId: ctx.userId, rank: ctx.access.rank, isGlobalAdmin: ctx.access.isGlobalAdmin }
   return NextResponse.json(
-    users.map(({ userRoles, loginLockedUntil, ...user }) => {
+    users.map(({ userRoles, loginLockedUntil, teamMemberships, ...user }) => {
       const roles = userRoles.map((ur) => ur.role).sort((a, b) => b.rank - a.rank)
-      if (!showLocks) return { ...user, role: roles[0] ?? null, roles }
+      const rank = rankOf(
+        effectiveRoles(
+          roles.map((r) => ({ ...r, isEveryone: false })),
+          teamMemberships.map(({ team }) => ({ team: { id: team.id, defaultRoles: team.defaultRoles.map(({ role }) => ({ role: { ...role, isEveryone: false } })) } }))
+        )
+      )
+      const teamInfo = {
+        ...(showContact ? teamRolesOf(teamMemberships) : {}),
+        ...(showTeamChanges ? { teamChangeRefusal: membershipChangeRefusal(actor, { id: user.id, rank }, "add") } : {}),
+      }
+      if (!showLocks) return { ...user, role: roles[0] ?? null, roles, ...teamInfo }
       const lockedUntil = loginLockedUntil && loginLockedUntil.getTime() > now ? loginLockedUntil : null
-      return { ...user, role: roles[0] ?? null, roles, loginLockedUntil: lockedUntil }
+      return { ...user, role: roles[0] ?? null, roles, ...teamInfo, loginLockedUntil: lockedUntil }
     })
   )
 }
@@ -119,13 +169,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: loaded.error }, { status: 400 })
   }
 
-  // The same rank rule as changing an existing user's roles: only roles
-  // below your own rank, otherwise inviting a fresh user would sidestep it
-  if (loaded.roles.length > 0) {
-    const actorRank = await getUserRank(ctx.userId)
-    if (assignsRoleAtOrAboveRank(loaded.roles, actorRank)) {
-      return NextResponse.json({ error: ROLE_AT_OR_ABOVE_RANK_MESSAGE }, { status: 403 })
-    }
+  // The same grant rule as changing an existing user's roles (below your
+  // own rank, and every permission each role grants held yourself),
+  // otherwise inviting a fresh user would sidestep it
+  const grantProblem = roleGrantProblem(ctx.access, loaded.roles, "user")
+  if (grantProblem) {
+    return NextResponse.json({ error: grantProblem, code: "FORBIDDEN" }, { status: 403 })
   }
 
   // Every company keeps its one Everyone role. GET /api/roles no longer

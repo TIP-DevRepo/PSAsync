@@ -1,4 +1,6 @@
-import { checkAccess, type EffectiveAccess, type RolePermissions } from "@/lib/permissions"
+import type { EffectiveAccess, RolePermissions } from "@/lib/permissions"
+// The database free module, so the grant rule (src/lib/role-grants.ts) can run in the browser too
+import { checkAccess } from "@/lib/access-check"
 
 // Every key a role's permissions JSON may hold, matching RolePermissions,
 // the Roles & Permissions panel, and the default role shapes. A permission
@@ -10,10 +12,10 @@ const BOOLEAN_SECTIONS: Record<string, readonly string[]> = {
   clients: ["create", "edit", "delete"],
   salesOrders: ["create", "edit", "delete", "changeStatus", "generatePO", "viewAll"],
   purchaseOrders: ["create", "edit", "delete", "changeStatus", "send", "viewAll"],
-  opportunities: ["create", "edit", "delete", "viewAll"],
+  opportunities: ["create", "edit", "delete", "viewTeam", "viewAll"],
   catalog: ["delete"],
   inventory: ["delete"],
-  settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders", "opportunities"],
+  settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders", "opportunities", "teams"],
   dashboards: ["manage"],
 }
 

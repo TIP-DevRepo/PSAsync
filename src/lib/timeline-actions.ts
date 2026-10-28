@@ -9,6 +9,7 @@
 export const TIMELINE_ACTIONS = [
   "created",
   "stage_changed",
+  "team_changed",
   "owner_changed",
   "type_changed",
   "client_changed",
@@ -34,6 +35,7 @@ export interface TimelineRef {
 export interface TimelineActionData {
   created: { label: string; number: string; title: string; stage: TimelineRef | null }
   stage_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  team_changed: { from: TimelineRef | null; to: TimelineRef | null }
   owner_changed: { from: TimelineRef | null; to: TimelineRef | null }
   type_changed: { from: TimelineRef | null; to: TimelineRef | null }
   client_changed: { from: TimelineRef | null; to: TimelineRef | null }
@@ -113,6 +115,8 @@ export function describeTimelineAction(action: string | null, data: unknown): st
       }`
     case "stage_changed":
       return `Stage changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
+    case "team_changed":
+      return `Team changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
     case "owner_changed":
       return `Owner changed from ${refName(d.from, "Unassigned")} to ${refName(d.to, "Unassigned")}`
     case "type_changed":

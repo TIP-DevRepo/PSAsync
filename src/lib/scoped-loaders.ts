@@ -345,24 +345,44 @@ type OpportunityViewer = Pick<AccessContext, "companyId" | "userId" | "can">
 // Matches no row, for callers who may not open any opportunity
 const NO_OPPORTUNITIES = { id: { in: [] as string[] } } satisfies Prisma.OpportunityWhereInput
 
-// Which of the company's opportunities a user may open (VOP): they need the
-// Opportunities page, and then an opportunity is theirs or unassigned
-// (no owner), unless they see everyone's (opportunities.viewAll). Global
-// Admin sees all.
+// Which of the company's opportunities a user may open (VOP). They need the
+// Opportunities page, and then one of three levels:
+//   basic: their own, plus unassigned ones in teams they belong to
+//   opportunities.viewTeam: their own anywhere, plus every one in teams
+//     they belong to
+//   opportunities.viewAll: every one (Global Admin too)
+// Team membership is matched in the same query (the team's members), so
+// joining or leaving a team applies on the next request.
 export function opportunityVisibilityWhere(ctx: OpportunityViewer): Prisma.OpportunityWhereInput {
   if (!ctx.can("pages.opportunities")) return NO_OPPORTUNITIES
   if (ctx.can("opportunities.viewAll")) return {}
-  return { OR: [{ ownerId: ctx.userId }, { ownerId: null }] }
+  const inMyTeams: Prisma.OpportunityWhereInput = { team: { members: { some: { userId: ctx.userId } } } }
+  if (ctx.can("opportunities.viewTeam")) return { OR: [{ ownerId: ctx.userId }, inMyTeams] }
+  return { OR: [{ ownerId: ctx.userId }, { ownerId: null, ...inMyTeams }] }
 }
 
-// Who a user may make an opportunity's owner. Without opportunities.viewAll
-// only themselves or nobody (unassigned), the two owners they can still
-// see, the same reason as mayAssignQuoteTo. viewAll holders (and Global
-// Admin) may assign anyone.
+// Who a user may make an opportunity's owner, given whether they are in
+// the opportunity's team themselves. Unassigned (null) is always allowed.
+// With opportunities.viewAll anyone; with opportunities.viewTeam anyone
+// while they are in the team; otherwise only themselves. The owner must
+// also be a member of the team (loadTeamMemberIds), checked separately
+// with a 400.
 export const OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE = "You can only assign opportunities to yourself or leave them unassigned"
 
-export function mayAssignOpportunityTo(ctx: Pick<AccessContext, "userId" | "can">, ownerId: string | null): boolean {
-  return ownerId === null || ownerId === ctx.userId || ctx.can("opportunities.viewAll")
+export function mayAssignOpportunityTo(
+  ctx: Pick<AccessContext, "userId" | "can">,
+  ownerId: string | null,
+  actorInTeam: boolean
+): boolean {
+  if (ownerId === null || ctx.can("opportunities.viewAll")) return true
+  if (ctx.can("opportunities.viewTeam") && actorInTeam) return true
+  return ownerId === ctx.userId
+}
+
+// Whether a user may put an opportunity in a team (choose it on create, or
+// move one there): a team they belong to, or any team with viewAll
+export function mayUseOpportunityTeam(ctx: Pick<AccessContext, "can">, actorInTeam: boolean): boolean {
+  return actorInTeam || ctx.can("opportunities.viewAll")
 }
 
 // The list filter for every opportunity the user may open
@@ -440,6 +460,29 @@ export const opportunityStageWhere = (ctx: Scope, stageId: string) =>
 export const opportunityTypeWhere = (ctx: Scope, typeId: string) =>
   ({ id: typeId, companyId: ctx.companyId }) satisfies Prisma.OpportunityTypeWhereUniqueInput
 
+// Teams (shared by opportunities now and tickets later)
+
+export const teamWhere = (ctx: Scope, teamId: string) =>
+  ({ id: teamId, companyId: ctx.companyId }) satisfies Prisma.TeamWhereUniqueInput
+
+// A team of the caller's company, for routes with a team id in the URL
+export function loadTeam(ctx: Scope, teamId: string) {
+  return prisma.team.findFirst({ where: teamWhere(ctx, teamId), select: { id: true, isDefault: true } })
+}
+
+// Which of these users are members of the team (a team of the caller's
+// company; another company's team has no members here). null and repeated
+// ids are skipped.
+export async function loadTeamMemberIds(ctx: Scope, teamId: string, userIds: (string | null | undefined)[]): Promise<Set<string>> {
+  const ids = [...new Set(userIds.filter((id): id is string => !!id))]
+  if (ids.length === 0) return new Set()
+  const rows = await prisma.teamMember.findMany({
+    where: { teamId, userId: { in: ids }, team: { companyId: ctx.companyId } },
+    select: { userId: true },
+  })
+  return new Set(rows.map((r) => r.userId))
+}
+
 // Company level records
 
 export const industryWhere = (ctx: Scope, industryId: string) =>
@@ -499,6 +542,8 @@ export interface BodyRefs {
   inventoryLocationId?: unknown
   opportunityStageId?: unknown
   opportunityTypeId?: unknown
+  // Teams of the company (one id or a list)
+  teamId?: unknown
 }
 
 type RefKey = keyof BodyRefs
@@ -524,6 +569,7 @@ const REF_LABELS: Record<RefKey, string> = {
   inventoryLocationId: "container",
   opportunityStageId: "stage",
   opportunityTypeId: "opportunity type",
+  teamId: "team",
 }
 
 // Turns a single id *Where builder's clause into one matching every id in
@@ -599,6 +645,8 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
       return prisma.opportunityStage.count({ where: whereIds(opportunityStageWhere(ctx, first), ids) })
     case "opportunityTypeId":
       return prisma.opportunityType.count({ where: whereIds(opportunityTypeWhere(ctx, first), ids) })
+    case "teamId":
+      return prisma.team.count({ where: whereIds(teamWhere(ctx, first), ids) })
   }
 }
 

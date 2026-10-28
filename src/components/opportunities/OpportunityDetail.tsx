@@ -13,7 +13,8 @@ import { TabsBar } from "@/components/ui/tabs-bar"
 import { toast } from "@/lib/toast"
 import { promptDialog } from "@/lib/prompt-dialog"
 import { OPPORTUNITY_TITLE_MAX } from "@/lib/opportunity-rules"
-import { formatDate, type StageOption, type TypeOption } from "@/lib/opportunity-view"
+import { formatDate, notifyOpportunitiesChanged, type StageOption, type TypeOption } from "@/lib/opportunity-view"
+import type { TeamSummary } from "@/lib/team-rules"
 import { OPPORTUNITY_ACTION_BUTTONS, type ActionButtonDefinition } from "@/lib/timeline-buttons"
 import { opportunityTabHref, readOpportunityTab, tabLabel, visibleOpportunityTabs, type OpportunityTabKey } from "@/lib/opportunity-tabs"
 import { noteStageChange } from "@/lib/timeline-actions"
@@ -47,6 +48,7 @@ export function OpportunityDetail({ id }: { id: string }) {
   const [types, setTypes] = useState<TypeOption[]>([])
   const [clients, setClients] = useState<{ id: string; name: string }[]>([])
   const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
+  const [teams, setTeams] = useState<TeamSummary[]>([])
   const [saving, setSaving] = useState(false)
   const [showDelete, setShowDelete] = useState(false)
   // Bumped after every change the server records on the timeline, so the
@@ -112,6 +114,8 @@ export function OpportunityDetail({ id }: { id: string }) {
     fetch("/api/clients").then(json).then((data) => Array.isArray(data) && setClients(data))
     // Every user's name, for the owner choices (ownerFieldChoices decides who)
     fetch("/api/users").then(json).then((data) => Array.isArray(data) && setUsers(data))
+    // The teams it may move to, and who may own it in each
+    fetch("/api/teams").then(json).then((data) => Array.isArray(data) && setTeams(data))
   }, [load, canEdit])
 
   // Saves only the fields given. The page takes the saved opportunity back,
@@ -131,6 +135,8 @@ export function OpportunityDetail({ id }: { id: string }) {
     }
     setOpportunity(data)
     setTimelineKey((k) => k + 1)
+    // The sidebar counts open opportunities by team and owner
+    if ("stageId" in patch || "ownerId" in patch || "teamId" in patch) notifyOpportunitiesChanged()
     return true
   }
 
@@ -148,6 +154,7 @@ export function OpportunityDetail({ id }: { id: string }) {
     const res = await fetch(`/api/opportunities/${id}`, { method: "DELETE" })
     if (res.ok) {
       toast.success("Opportunity deleted")
+      notifyOpportunitiesChanged()
       router.push("/dashboard/opportunities")
       return null
     }
@@ -247,7 +254,7 @@ export function OpportunityDetail({ id }: { id: string }) {
             types={types}
             clients={clients}
             users={users}
-            myUserId={myUserId}
+            teams={teams}
             canViewAll={canViewAll}
             save={save}
           />
@@ -276,7 +283,10 @@ export function OpportunityDetail({ id }: { id: string }) {
               stages={stages}
               // A note that moved the stage changed the opportunity too
               onPosted={(entry) => {
-                if (noteStageChange(entry.data)) load()
+                if (noteStageChange(entry.data)) {
+                  load()
+                  notifyOpportunitiesChanged()
+                }
               }}
             />
           </div>

@@ -20,6 +20,7 @@ export const opportunityListSelect = {
   client: { select: { id: true, name: true } },
   contact: { select: { id: true, firstName: true, lastName: true } },
   owner: userName,
+  team: { select: { id: true, name: true } },
   stage: { select: { id: true, name: true, category: true, winProbability: true } },
   type: { select: { id: true, name: true } },
 } satisfies Prisma.OpportunitySelect

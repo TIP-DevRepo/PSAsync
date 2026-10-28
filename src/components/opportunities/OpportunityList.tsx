@@ -17,7 +17,7 @@ import {
 } from "@/lib/opportunity-view"
 import { StagePill } from "./StagePill"
 
-type SortColumn = "number" | "title" | "client" | "contact" | "owner" | "stage" | "type" | "value" | "expectedClose" | "updated"
+type SortColumn = "number" | "title" | "client" | "contact" | "team" | "owner" | "stage" | "type" | "value" | "expectedClose" | "updated"
 type SortDirection = "asc" | "desc" | null
 
 // The text each column shows, which its column filter also matches
@@ -32,6 +32,7 @@ export const OPPORTUNITY_LIST_COLUMNS: (FilterableColumn<OpportunityRow> & { key
   { key: "title", label: "Title", width: 260, text: (o) => o.title },
   { key: "client", label: "Client", width: 190, text: (o) => o.client.name },
   { key: "contact", label: "Contact", width: 170, text: (o) => contactName(o.contact) },
+  { key: "team", label: "Team", width: 150, text: (o) => o.team?.name ?? "-" },
   { key: "owner", label: "Owner", width: 150, text: (o) => o.owner?.name ?? "Unassigned" },
   { key: "stage", label: "Stage", width: 160, text: (o) => o.stage.name },
   { key: "type", label: "Type", width: 150, text: (o) => o.type?.name ?? "-" },
@@ -58,6 +59,8 @@ function compare(a: OpportunityRow, b: OpportunityRow, column: SortColumn, stage
       return a.client.name.localeCompare(b.client.name)
     case "contact":
       return contactName(a.contact).localeCompare(contactName(b.contact))
+    case "team":
+      return (a.team?.name ?? "").localeCompare(b.team?.name ?? "")
     case "owner":
       return (a.owner?.name ?? "").localeCompare(b.owner?.name ?? "")
     case "stage":
@@ -146,6 +149,7 @@ export function OpportunityList({ opportunities, stages }: { opportunities: Oppo
     title: (o) => o.title,
     client: (o) => o.client.name,
     contact: (o) => contactName(o.contact),
+    team: (o) => o.team?.name ?? "-",
     owner: (o) => o.owner?.name ?? "Unassigned",
     stage: (o) => <StagePill name={o.stage.name} category={o.stage.category} />,
     type: (o) => o.type?.name ?? "-",
@@ -158,6 +162,7 @@ export function OpportunityList({ opportunities, stages }: { opportunities: Oppo
     title: "text-foreground",
     client: "text-foreground",
     contact: "text-muted-foreground",
+    team: "text-muted-foreground",
     owner: "text-muted-foreground",
     type: "text-muted-foreground",
     value: "text-right font-medium tabular-nums text-foreground",

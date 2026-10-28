@@ -13,12 +13,18 @@ import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
 import { Requirement } from "@/components/account/ChangePasswordCard"
-import { RoleAssignControl, RoleChecklist, type AssignableRole } from "@/components/roles/RoleAssignControl"
+import { RoleAssignControl, RoleChecklist, type AssignableRole, type TeamGrantedRole } from "@/components/roles/RoleAssignControl"
+import { Modal } from "@/components/Modal"
+import { SearchableChecklist } from "@/components/teams/SearchableChecklist"
+import { useAccess } from "@/components/AccessProvider"
+import { memberChangeBlockReason, type TeamSummary } from "@/lib/team-rules"
 import type { MenuAnchor } from "@/lib/useFixedMenu"
 import { sortUsersByName } from "@/lib/user-picker"
 
 interface RoleOption extends AssignableRole {
   isEveryone?: boolean
+  // Why you can't give this role to anyone (the grant rule), or null
+  grantRefusal?: string | null
 }
 
 // Excludes }{[]|\/><;:'"~`+=,.^ since those tend to cause trouble when a
@@ -38,13 +44,24 @@ interface User {
   name: string
   email: string
   active: boolean
-  // Every role the user holds, highest rank first (never Everyone)
+  // Every role the user was given directly, highest rank first (never Everyone)
   roles: AssignableRole[]
+  // The teams the user is in, and the roles those teams give them
+  teams?: { id: string; name: string }[]
+  teamRoles?: TeamGrantedRole[]
+  // With the Teams permission: why you can't add or remove this user from a team
+  teamChangeRefusal?: string | null
   // Only sent to Global Admins, and only set while the login is locked
   loginLockedUntil?: string | null
 }
 
 export function UsersSettingsPanel() {
+  const { can } = useAccess()
+  // Changing a user's teams also needs the Teams permission
+  const canManageTeams = can("settingsSections.teams")
+  const [teams, setTeams] = useState<TeamSummary[]>([])
+  // The user whose teams are being edited
+  const [teamsUser, setTeamsUser] = useState<User | null>(null)
   const [users, setUsers] = useState<User[]>([])
   const [roles, setRoles] = useState<RoleOption[]>([])
   // Your own highest rank, the same number the server's hierarchy rules
@@ -79,6 +96,11 @@ export function UsersSettingsPanel() {
       .then((res) => res.json())
       // Everyone is held by every user implicitly, so it is never assignable
       .then((data: RoleOption[]) => setRoles(data.filter((r) => !r.isEveryone)))
+    if (canManageTeams) {
+      fetch("/api/teams")
+        .then((res) => (res.ok ? res.json() : []))
+        .then((data) => Array.isArray(data) && setTeams(data))
+    }
     fetch("/api/auth/session")
       .then((res) => res.json())
       .then((session) => {
@@ -87,21 +109,27 @@ export function UsersSettingsPanel() {
         setIsGlobalAdmin(!!access?.isGlobalAdmin)
         setMyId(session?.user?.id ?? null)
       })
-  }, [])
+  }, [canManageTeams])
 
   // Same rules the users API enforces. Changing an existing user's roles
-  // needs the user AND every role involved strictly below your own rank.
-  // Inviting allows roles at or below your rank.
-  function existingUserRoleReason(role: AssignableRole) {
+  // needs the user AND every role involved strictly below your own rank,
+  // and a role the user doesn't hold yet must pass the grant rule (its
+  // grantRefusal from GET /api/roles: you hold every permission it grants).
+  // Removing a role needs no more than the rank.
+  const grantRefusalOf = (role: AssignableRole) => roles.find((r) => r.id === role.id)?.grantRefusal ?? null
+  function existingUserRoleReason(role: AssignableRole, user: User) {
     if (myRank === null || role.rank >= myRank) return "At or above your rank"
+    if (!user.roles.some((r) => r.id === role.id)) return grantRefusalOf(role)
     return null
   }
   function inviteRoleReason(role: AssignableRole) {
     if (myRank === null || role.rank > myRank) return "Above your rank"
-    return null
+    return grantRefusalOf(role)
   }
   function userLockedReason(user: User) {
-    const userRank = user.roles.length > 0 ? Math.max(...user.roles.map((r) => r.rank)) : 0
+    // Roles from teams count toward the user's rank too
+    const held = [...user.roles, ...(user.teamRoles ?? [])]
+    const userRank = held.length > 0 ? Math.max(...held.map((r) => r.rank)) : 0
     if (myRank === null || userRank >= myRank) return "This user is at or above your rank, so you can't change their roles"
     return null
   }
@@ -313,11 +341,12 @@ export function UsersSettingsPanel() {
                       roles={roles}
                       selectedIds={user.roles.map((r) => r.id)}
                       onChange={(nextIds) => setUserRoles(user, nextIds)}
-                      disabledReason={existingUserRoleReason}
+                      disabledReason={(role) => existingUserRoleReason(role, user)}
                       lockedReason={lockedReason}
                       busy={savingUserId === user.id}
                       label={`Edit roles for ${user.name}`}
                       showEditButton={false}
+                      teamRoles={user.teamRoles}
                     />
                   </td>
                   <td className="py-2 pr-3">
@@ -353,8 +382,9 @@ export function UsersSettingsPanel() {
                       onUnlock={() => unlockUser(user)}
                       roles={roles}
                       onRolesChange={(nextIds) => setUserRoles(user, nextIds)}
-                      roleDisabledReason={existingUserRoleReason}
+                      roleDisabledReason={(role) => existingUserRoleReason(role, user)}
                       rolesBusy={savingUserId === user.id}
+                      onEditTeams={canManageTeams ? () => setTeamsUser(user) : undefined}
                     />
                   </td>
                 </tr>
@@ -363,7 +393,95 @@ export function UsersSettingsPanel() {
           </tbody>
         </table>
       </div>
+
+      {teamsUser && (
+        <UserTeamsDialog
+          user={teamsUser}
+          teams={teams}
+          myUserId={myId}
+          onClose={() => setTeamsUser(null)}
+          onSaved={() => {
+            setTeamsUser(null)
+            loadUsers()
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+// Adds or removes a user's teams (PATCH /api/users/[id] teamIds), with the
+// Teams screen's rules: joining a team gives its default roles, so a team
+// giving a role you couldn't give (memberGrantRefusal) can't be added, and
+// a user ranked at or above you can't be added to or removed from any team
+// (teamChangeRefusal), though you may always take yourself out of one.
+function UserTeamsDialog({
+  user,
+  teams,
+  myUserId,
+  onClose,
+  onSaved,
+}: {
+  user: User
+  teams: TeamSummary[]
+  myUserId: string | null
+  onClose: () => void
+  onSaved: () => void
+}) {
+  const savedIds = (user.teams ?? []).map((t) => t.id)
+  const [teamIds, setTeamIds] = useState<string[]>(savedIds)
+  const [saving, setSaving] = useState(false)
+
+  async function handleSave() {
+    setSaving(true)
+    const res = await fetch(`/api/users/${user.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teamIds }),
+    })
+    setSaving(false)
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      toast.error("Couldn't update teams", err.error)
+      return
+    }
+    toast.success("Teams updated", user.name)
+    onSaved()
+  }
+
+  return (
+    <Modal maxWidth="md" onClose={saving ? undefined : onClose}>
+      <h2 className="text-lg font-bold text-foreground">Teams for {user.name}</h2>
+      <SearchableChecklist
+        label="Teams"
+        description="The user holds each team's default roles while they are in it."
+        options={teams.map((team) => ({
+          value: team.id,
+          label: team.name,
+          searchText: team.name,
+          // Unticking a saved team is a removal, ticking another an addition
+          disabledReason:
+            savedIds.includes(team.id) && teamIds.includes(team.id)
+              ? memberChangeBlockReason(user, myUserId, "remove")
+              : !savedIds.includes(team.id) && !teamIds.includes(team.id)
+                ? (team.memberGrantRefusal ?? memberChangeBlockReason(user, myUserId, "add"))
+                : null,
+        }))}
+        selected={teamIds}
+        onChange={setTeamIds}
+        disabled={saving}
+        emptyText="No teams yet. Add them in Settings, Teams."
+        searchLabel="Search teams"
+      />
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <Button type="button" onClick={handleSave} disabled={saving}>
+          {saving ? "Saving..." : "Save teams"}
+        </Button>
+      </div>
+    </Modal>
   )
 }
 
@@ -383,6 +501,7 @@ function UserActionsMenu({
   onRolesChange,
   roleDisabledReason,
   rolesBusy,
+  onEditTeams,
 }: {
   user: User
   // Set when the user is at or above your rank, so you can't manage them
@@ -395,6 +514,8 @@ function UserActionsMenu({
   onRolesChange: (nextIds: string[]) => void
   roleDisabledReason: (role: AssignableRole) => string | null
   rolesBusy: boolean
+  // Only with the Teams permission
+  onEditTeams?: () => void
 }) {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const [checklistOpen, setChecklistOpen] = useState(false)
@@ -449,6 +570,7 @@ function UserActionsMenu({
             reason={manageReason}
             onSelect={() => (pendingAction.current = openChecklist)}
           />
+          {onEditTeams && <UserActionItem label="Edit Teams" reason={null} onSelect={() => (pendingAction.current = onEditTeams)} />}
           <UserActionItem
             label={user.active ? "Deactivate User" : "Activate User"}
             reason={activeReason}
@@ -471,6 +593,7 @@ function UserActionsMenu({
         busy={rolesBusy}
         label={`Edit roles for ${user.name}`}
         autoFocus
+        teamRoles={user.teamRoles}
       />
     </>
   )

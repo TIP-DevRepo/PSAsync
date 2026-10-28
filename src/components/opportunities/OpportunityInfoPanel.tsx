@@ -14,6 +14,7 @@ import {
   formatDate,
   formatDateOnly,
   ownerFieldChoices,
+  teamChoices,
   valueCents,
   type ClientLocationSummary,
   type OpportunityRow,
@@ -24,6 +25,7 @@ import {
 import { StagePill } from "./StagePill"
 import { useClientLocations } from "./useClientLocations"
 import { clientContactHref, clientLocationHref, clientPageHref } from "@/lib/client-links"
+import type { TeamSummary } from "@/lib/team-rules"
 
 // GET /api/opportunities/[id] (opportunityDetailSelect), with the client
 // details only users who may open the opportunity get
@@ -35,7 +37,7 @@ export interface OpportunityDetailData extends OpportunityRow {
   _count: { attachments: number; quotes: number; salesOrders: number; purchaseOrders: number }
 }
 
-type FieldKey = "party" | "location" | "owner" | "stage" | "type" | "value" | "date"
+type FieldKey = "party" | "location" | "team" | "owner" | "stage" | "type" | "value" | "date"
 
 const LABEL = "mb-1 block text-xs font-medium text-muted-foreground"
 const LINK = "text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
@@ -91,7 +93,7 @@ export function OpportunityInfoPanel({
   types,
   clients,
   users,
-  myUserId,
+  teams,
   canViewAll,
   save,
 }: {
@@ -101,7 +103,8 @@ export function OpportunityInfoPanel({
   types: TypeOption[]
   clients: { id: string; name: string }[]
   users: { id: string; name: string; active: boolean }[]
-  myUserId: string | null
+  // GET /api/teams: the teams it may move to, and who may own it in each
+  teams: TeamSummary[]
   canViewAll: boolean
   save: (patch: Record<string, unknown>, what: string) => Promise<boolean>
 }) {
@@ -151,7 +154,24 @@ export function OpportunityInfoPanel({
     }
   }
 
-  const owners = ownerFieldChoices(canViewAll, users, myUserId, o.owner)
+  // Owners are Unassigned and the members of its team the user may assign
+  const team = o.team ? (teams.find((t) => t.id === o.team!.id) ?? null) : null
+  const owners = ownerFieldChoices(team?.assignableOwnerIds ?? [], users, o.owner)
+  // Teams it may move to: the user's own teams (all with viewAll), plus its current one
+  const teamOptions = teamChoices(teams, canViewAll, { keepId: o.team?.id }).map((t) => ({ value: t.id, label: t.name }))
+  if (o.team && !teamOptions.some((t) => t.value === o.team!.id)) teamOptions.unshift({ value: o.team.id, label: o.team.name })
+
+  // A new team whose members the user may assign don't include the owner
+  // clears the owner in the same save (the server refuses to keep an owner
+  // outside the team)
+  async function saveTeam(teamId: string) {
+    if (teamId === o.team?.id) return true
+    const next = teams.find((t) => t.id === teamId)
+    const keepOwner = !o.owner || !!next?.assignableOwnerIds.includes(o.owner.id)
+    const saved = await save(keepOwner ? { teamId } : { teamId, ownerId: null }, "team")
+    if (saved && !keepOwner) toast.success("Team changed", "The owner is not in the new team, so the opportunity is now unassigned.")
+    return saved
+  }
   const stageList = stages.some((s) => s.id === o.stage.id) ? stages : [{ ...o.stage, sortOrder: -1 }, ...stages]
   const stageOptions = STAGE_GROUPS.flatMap((category) =>
     stageList.filter((s) => s.category === category).map((s) => ({ value: s.id, label: s.name, group: CATEGORY_LABELS[category] }))
@@ -263,6 +283,14 @@ export function OpportunityInfoPanel({
 
       <div className="space-y-3 border-t border-border pt-4">
         <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opportunity</h3>
+        <InlineEditField
+          label="Team"
+          value={o.team?.id ?? ""}
+          renderValue={(id) => teamOptions.find((t) => t.value === id)?.label ?? o.team?.name ?? DASH}
+          onSave={saveTeam}
+          renderEditor={({ value, commit, cancel }) => <InlineListbox ariaLabel="Team" value={value} options={teamOptions} commit={commit} cancel={cancel} />}
+          {...field("team")}
+        />
         <InlineEditField
           label="Owner"
           value={o.owner?.id ?? ""}

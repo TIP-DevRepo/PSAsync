@@ -5,6 +5,7 @@ import { closedAtFor } from "@/lib/opportunity-rules"
 import { NOTE_EMPTY_MESSAGE, readNoteBody, recordTimelineActions } from "@/lib/timeline"
 import { opportunityCreatedAction } from "@/lib/opportunity-timeline"
 import { UserError } from "@/lib/user-error"
+import { loadDefaultTeamId } from "@/lib/team-defaults"
 
 // Creating an opportunity, shared by POST /api/opportunities (a person) and
 // a later branch that creates one automatically (from a sent quote). Every
@@ -27,8 +28,12 @@ export interface NewOpportunity {
   clientId: string
   contactId: string
   clientLocationId: string | null
-  // Null is unassigned, the default for new records
+  // Null is unassigned, the default for new records. Callers check the
+  // owner is a member of the team.
   ownerId: string | null
+  // The team the opportunity goes to. Left out or null, the company's
+  // General team (callers run ensureTeamDefaults first).
+  teamId?: string | null
   stage: { id: string; category: OpportunityStageCategory }
   typeId: string | null
   source: OpportunitySource
@@ -54,6 +59,8 @@ export async function createOpportunity(db: Pick<PrismaClient, "$transaction">, 
   const authorId = input.initialNote.by === "person" ? input.initialNote.userId : null
 
   return db.$transaction(async (tx) => {
+    const teamId = input.teamId ?? (await loadDefaultTeamId(input.companyId, tx))
+    if (!teamId) throw new Error("The company has no General team; run ensureTeamDefaults first")
     const number = await takeOpportunityNumber(tx, input.companyId, now)
     const created = await tx.opportunity.create({
       data: {
@@ -64,6 +71,7 @@ export async function createOpportunity(db: Pick<PrismaClient, "$transaction">, 
         contactId: input.contactId,
         clientLocationId: input.clientLocationId,
         ownerId: input.ownerId,
+        teamId,
         stageId: input.stage.id,
         typeId: input.typeId,
         source: input.source,

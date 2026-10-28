@@ -4,12 +4,16 @@ import { apiError, requireAccess } from "@/lib/api-access"
 import {
   assertRefs,
   loadClientMainLocationId,
+  loadTeamMemberIds,
   mayAssignOpportunityTo,
+  mayUseOpportunityTeam,
   opportunityListWhere,
   opportunityStageWhere,
   OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE,
 } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
+import { ensureTeamDefaults, loadDefaultTeamId } from "@/lib/team-defaults"
+import { OWNER_NOT_IN_TEAM_MESSAGE, TEAM_NOT_MEMBER_MESSAGE } from "@/lib/team-rules"
 import { opportunityListSelect, STAGE_ORDER } from "@/lib/opportunity-selects"
 import {
   INVALID_BODY_MESSAGE,
@@ -27,11 +31,13 @@ import type { Prisma } from "@/generated/prisma"
 
 const DAY = 24 * 60 * 60 * 1000
 
-// Every opportunity the user may open (their own and unassigned ones, or
-// everyone's with opportunities.viewAll), newest first, the same as the
-// quotes list. Filters: stageId, typeId, clientId, ownerId (a user id or
-// "unassigned"), closeFrom and closeTo (YYYY-MM-DD, the expected close
-// date, both days included), and q (title, number, or client name).
+// Every opportunity the user may open (opportunityVisibilityWhere: their
+// own, unassigned ones in their teams, every one in their teams with
+// opportunities.viewTeam, or everyone's with opportunities.viewAll), newest
+// first, the same as the quotes list. Filters: stageId, typeId, clientId,
+// teamId, ownerId (a user id or "unassigned"), closeFrom and closeTo
+// (YYYY-MM-DD, the expected close date, both days included), and q (title,
+// number, or client name).
 export async function GET(req: NextRequest) {
   const { ctx, response } = await requireAccess({
     permission: "pages.opportunities",
@@ -40,9 +46,11 @@ export async function GET(req: NextRequest) {
   if (response) return response
 
   await ensureOpportunityDefaults(ctx.companyId)
+  await ensureTeamDefaults(ctx.companyId)
 
   const params = req.nextUrl.searchParams
   const stageId = params.get("stageId") || undefined
+  const teamId = params.get("teamId") || undefined
   const typeId = params.get("typeId") || undefined
   const clientId = params.get("clientId") || undefined
   const ownerParam = params.get("ownerId") || undefined
@@ -55,6 +63,7 @@ export async function GET(req: NextRequest) {
     opportunityStageId: stageId,
     opportunityTypeId: typeId,
     companyUserId: ownerId,
+    teamId,
   })
   if (invalid) return invalid
 
@@ -70,6 +79,7 @@ export async function GET(req: NextRequest) {
   if (stageId) filters.push({ stageId })
   if (typeId) filters.push({ typeId })
   if (clientId) filters.push({ clientId })
+  if (teamId) filters.push({ teamId })
   if (unassigned) filters.push({ ownerId: null })
   else if (ownerId) filters.push({ ownerId })
   if (closeFrom.value) filters.push({ expectedCloseDate: { gte: closeFrom.value } })
@@ -102,6 +112,7 @@ export async function POST(req: NextRequest) {
   if (response) return response
 
   await ensureOpportunityDefaults(ctx.companyId)
+  await ensureTeamDefaults(ctx.companyId)
 
   const body = await readJsonObject(req)
   if (!body) return apiError(400, INVALID_BODY_MESSAGE)
@@ -130,13 +141,32 @@ export async function POST(req: NextRequest) {
     return apiError(400, "A contact is required")
   }
 
+  // The team: left out, null, or blank is the General team. General is open
+  // to every creator (it is where new opportunities go unless another team
+  // is chosen); any other team must be one the creator belongs to (any team
+  // with opportunities.viewAll).
+  const team = readOptionalId(body.teamId)
+  if (team.error !== undefined) return apiError(400, "Invalid team", "INVALID_REFERENCE")
+  if (team.value) {
+    const invalidTeam = await assertRefs(ctx, { teamId: team.value })
+    if (invalidTeam) return invalidTeam
+  }
+  const defaultTeamId = await loadDefaultTeamId(ctx.companyId)
+  const teamId = team.value ?? defaultTeamId
+  if (!teamId) return apiError(400, "Invalid team", "INVALID_REFERENCE")
+
   // New records start unassigned: left out, null, or blank is unassigned. A
-  // named owner follows the owner rule: without opportunities.viewAll only
-  // the creator, the one owner besides unassigned they can still see.
+  // named owner follows the owner rule (mayAssignOpportunityTo) and must be
+  // a member of the team.
   const owner = readOptionalId(body.ownerId)
   if (owner.error !== undefined) return apiError(400, "Invalid user", "INVALID_REFERENCE")
   const ownerId = owner.value
-  if (!mayAssignOpportunityTo(ctx, ownerId)) {
+  const members = await loadTeamMemberIds(ctx, teamId, [ctx.userId, ownerId])
+  const actorInTeam = members.has(ctx.userId)
+  if (teamId !== defaultTeamId && !mayUseOpportunityTeam(ctx, actorInTeam)) {
+    return apiError(403, TEAM_NOT_MEMBER_MESSAGE, "FORBIDDEN")
+  }
+  if (!mayAssignOpportunityTo(ctx, ownerId, actorInTeam)) {
     return apiError(403, OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE, "FORBIDDEN")
   }
 
@@ -161,6 +191,7 @@ export async function POST(req: NextRequest) {
     opportunityTypeId: type.value,
   })
   if (invalid) return invalid
+  if (ownerId && !members.has(ownerId)) return apiError(400, OWNER_NOT_IN_TEAM_MESSAGE, "OWNER_NOT_IN_TEAM")
   const clientId = body.clientId as string
   const contactId = body.contactId as string
   const clientLocationId = hasLocation ? location.value : await loadClientMainLocationId(ctx, clientId)
@@ -182,6 +213,7 @@ export async function POST(req: NextRequest) {
       contactId,
       clientLocationId,
       ownerId,
+      teamId,
       stage: chosenStage,
       typeId: type.value,
       source: "MANUAL",

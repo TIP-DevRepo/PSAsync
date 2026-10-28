@@ -2,6 +2,7 @@ import { cache } from "react"
 import { prisma } from "@/lib/prisma"
 import { usesMicrosoftSso } from "@/lib/sso-account"
 import { checkAccess } from "@/lib/access-check"
+import { effectiveRoles, rankOf } from "@/lib/team-roles"
 
 // Shape of the permissions JSON stored on each Role. Kept loose (not every
 // field required) since it's read with optional chaining throughout —
@@ -15,18 +16,19 @@ export interface RolePermissions {
   clients?: Partial<Record<"create" | "edit" | "delete", boolean>>
   salesOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "generatePO" | "viewAll", boolean>>
   purchaseOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "send" | "viewAll", boolean>>
-  opportunities?: Partial<Record<"create" | "edit" | "delete" | "viewAll", boolean>>
+  opportunities?: Partial<Record<"create" | "edit" | "delete" | "viewTeam" | "viewAll", boolean>>
   catalog?: Partial<Record<"delete", boolean>>
   inventory?: Partial<Record<"delete", boolean>>
   settingsSections?: Partial<Record<
-    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders" | "opportunities",
+    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders" | "opportunities" | "teams",
     boolean
   >>
   dashboards?: Partial<Record<"manage", boolean>>
 }
 
-// One user's resolved access across every role they hold plus their
-// company's Everyone role. This is the only thing permission checks read,
+// One user's resolved access across every role they hold (directly or from
+// a team's default roles, src/lib/team-roles.ts) plus their company's
+// Everyone role. This is the only thing permission checks read,
 // server side (hasPermission, getUserRank) and client side (exposed as
 // session.user.access by the session callback in src/auth.ts).
 export interface EffectiveAccess {
@@ -35,15 +37,19 @@ export interface EffectiveAccess {
   // routes scope by the company the user actually belongs to right now.
   companyId: string
   isGlobalAdmin: boolean
-  // Highest rank among the user's assigned roles, Number.MAX_SAFE_INTEGER
-  // for Global Admin, 0 when they hold no assigned role (same as a user
-  // with no role before multi role support). Everyone never counts here.
+  // Highest rank among the user's effective roles (assigned directly or
+  // by a team), Number.MAX_SAFE_INTEGER for Global Admin, 0 when they hold
+  // no role (same as a user with no role before multi role support).
+  // Everyone never counts here.
   rank: number
   // Union of every held role's permissions JSON: a boolean is true if any
   // role has it true, a number (maxDiscount) takes the highest value.
   permissions: RolePermissions
-  // Assigned role ids, never including the Everyone role.
+  // Effective role ids (direct and from teams), never including the
+  // Everyone role.
   roleIds: string[]
+  // The teams the user is a member of
+  teamIds: string[]
   // True while the user is still on an admin's temporary password. Every
   // other field is then empty (no permissions, rank 0, no roles), so every
   // permission check refuses them until they choose their own password.
@@ -71,13 +77,16 @@ function mergePermissionsInto(target: Record<string, unknown>, source: unknown) 
   }
 }
 
+const roleFields = { id: true, rank: true, isGlobalAdmin: true, isEveryone: true, permissions: true } as const
+
 // Resolves a user's effective access fresh from the database (never from
-// the login token), so role and permission changes apply on the very next
-// request. Wrapped in React cache so a single server render that checks
-// several permissions (layout, page, hasPermission calls) only queries once.
-// Returns null for a missing or deactivated user, which every check treats
-// as no access. A company with no Everyone role yet is treated as Everyone
-// having no permissions.
+// the login token), so role, permission, team membership, and team default
+// role changes all apply on the very next request, with nothing cached
+// between requests. Wrapped in React cache so a single server render that
+// checks several permissions (layout, page, hasPermission calls) only
+// queries once. Returns null for a missing or deactivated user, which every
+// check treats as no access. A company with no Everyone role yet is treated
+// as Everyone having no permissions.
 export const getEffectiveAccess = cache(async (userId: string): Promise<EffectiveAccess | null> => {
   const user = await prisma.user.findUnique({
     where: { id: userId },
@@ -86,10 +95,10 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
       companyId: true,
       mustChangePassword: true,
       company: { select: { settings: { select: { ssoEnabled: true } } } },
-      userRoles: {
-        select: {
-          role: { select: { id: true, rank: true, isGlobalAdmin: true, isEveryone: true, permissions: true } },
-        },
+      userRoles: { select: { role: { select: roleFields } } },
+      // Each team's default roles count as the user's own while they are in it
+      teamMemberships: {
+        select: { team: { select: { id: true, companyId: true, defaultRoles: { select: { role: { select: roleFields } } } } } },
       },
     },
   })
@@ -106,6 +115,7 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
       rank: 0,
       permissions: {},
       roleIds: [],
+      teamIds: [],
       mustChangePassword: true,
     }
   }
@@ -115,7 +125,10 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
     select: { permissions: true },
   })
 
-  const assigned = user.userRoles.map((ur) => ur.role).filter((r) => !r.isEveryone)
+  // Only the user's own company's teams, as a guard; the Teams routes never
+  // add anyone to another company's team
+  const memberships = user.teamMemberships.filter((m) => m.team.companyId === user.companyId)
+  const assigned = effectiveRoles(user.userRoles.map((ur) => ur.role), memberships)
 
   // Global Admin has access to everything, unconditionally, before the
   // permissions JSON is even looked at. This is what guarantees any
@@ -127,9 +140,7 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
   mergePermissionsInto(permissions, everyone?.permissions)
   for (const role of assigned) mergePermissionsInto(permissions, role.permissions)
 
-  let rank = 0
-  if (isGlobalAdmin) rank = Number.MAX_SAFE_INTEGER
-  else if (assigned.length > 0) rank = Math.max(...assigned.map((r) => r.rank))
+  const rank = rankOf(assigned)
 
   return {
     userId,
@@ -138,6 +149,7 @@ export const getEffectiveAccess = cache(async (userId: string): Promise<Effectiv
     rank,
     permissions: permissions as RolePermissions,
     roleIds: assigned.map((r) => r.id),
+    teamIds: memberships.map((m) => m.team.id),
     mustChangePassword: false,
   }
 })

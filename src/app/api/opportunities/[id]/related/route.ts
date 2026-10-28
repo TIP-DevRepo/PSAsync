@@ -3,6 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
 import { loadViewableOpportunity } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
+import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { loadOpportunityRelated } from "@/lib/opportunity-related"
 
 // The opportunity page's Related panel: its linked quotes, sales orders,
@@ -19,6 +20,7 @@ export async function GET(
   if (response) return response
 
   await ensureOpportunityDefaults(ctx.companyId)
+  await ensureTeamDefaults(ctx.companyId)
 
   const { id } = await params
   const opportunity = await loadViewableOpportunity(ctx, id)

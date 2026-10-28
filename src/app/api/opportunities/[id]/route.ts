@@ -4,7 +4,9 @@ import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import {
   assertRefs,
   loadClientMainLocationId,
+  loadTeamMemberIds,
   mayAssignOpportunityTo,
+  mayUseOpportunityTeam,
   opportunityStageWhere,
   opportunityWhere,
   OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE,
@@ -12,6 +14,8 @@ import {
   type BodyRefs,
 } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
+import { ensureTeamDefaults } from "@/lib/team-defaults"
+import { OWNER_NOT_IN_TEAM_MESSAGE, TEAM_CHANGE_OWNER_MESSAGE, TEAM_NOT_MEMBER_MESSAGE } from "@/lib/team-rules"
 import { opportunityDetailSelect } from "@/lib/opportunity-selects"
 import {
   INVALID_BODY_MESSAGE,
@@ -44,6 +48,7 @@ export async function GET(
   if (response) return response
 
   await ensureOpportunityDefaults(ctx.companyId)
+  await ensureTeamDefaults(ctx.companyId)
 
   const { id } = await params
   const opportunity = await prisma.opportunity.findFirst({
@@ -68,11 +73,12 @@ export async function PATCH(
   if (response) return response
 
   await ensureOpportunityDefaults(ctx.companyId)
+  await ensureTeamDefaults(ctx.companyId)
 
   const { id } = await params
   const existing = await prisma.opportunity.findFirst({
     where: viewableOpportunityWhere(ctx, id),
-    select: { id: true, clientId: true, contactId: true, stageId: true },
+    select: { id: true, clientId: true, contactId: true, stageId: true, teamId: true, ownerId: true },
   })
   if (!existing) return notFound()
 
@@ -98,16 +104,45 @@ export async function PATCH(
     data.expectedCloseDate = expectedCloseDate.value
   }
 
-  // Null or blank unassigns. Without opportunities.viewAll only the caller
-  // or unassigned.
-  if ("ownerId" in body) {
+  // A new team must be the company's, and one the caller belongs to (any
+  // team with opportunities.viewAll). It can't be cleared.
+  let teamChange: string | null = null
+  if ("teamId" in body) {
+    if (isBlank(body.teamId)) return apiError(400, "A team is required")
+    if (typeof body.teamId !== "string") return apiError(400, "Invalid team", "INVALID_REFERENCE")
+    const invalidTeam = await assertRefs(ctx, { teamId: body.teamId })
+    if (invalidTeam) return invalidTeam
+    if (body.teamId !== existing.teamId) {
+      teamChange = body.teamId
+      data.teamId = body.teamId
+    }
+  }
+
+  // Null or blank unassigns. A named owner follows the owner rule
+  // (mayAssignOpportunityTo) for the opportunity's team, new or kept, and
+  // must be a member of it.
+  const ownerGiven = "ownerId" in body
+  let ownerId = existing.ownerId
+  if (ownerGiven) {
     const owner = readOptionalId(body.ownerId)
     if (owner.error !== undefined) return apiError(400, "Invalid user", "INVALID_REFERENCE")
-    if (!mayAssignOpportunityTo(ctx, owner.value)) {
-      return apiError(403, OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE, "FORBIDDEN")
-    }
+    ownerId = owner.value
     data.ownerId = owner.value
     refs.userId = owner.value
+  }
+  // Only a team or owner change is checked against the team, so an older
+  // opportunity whose owner isn't in its team keeps saving its other fields
+  const teamId = teamChange ?? existing.teamId
+  let members = new Set<string>()
+  if ((teamChange || ownerGiven) && teamId) {
+    members = await loadTeamMemberIds(ctx, teamId, [ctx.userId, ownerId])
+    const actorInTeam = members.has(ctx.userId)
+    if (teamChange && !mayUseOpportunityTeam(ctx, actorInTeam)) {
+      return apiError(403, TEAM_NOT_MEMBER_MESSAGE, "FORBIDDEN")
+    }
+    if (ownerGiven && !mayAssignOpportunityTo(ctx, ownerId, actorInTeam)) {
+      return apiError(403, OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE, "FORBIDDEN")
+    }
   }
 
   // A new client or contact is checked as a pair, so the contact (new or
@@ -144,6 +179,13 @@ export async function PATCH(
 
   const invalid = await assertRefs(ctx, refs)
   if (invalid) return invalid
+
+  // The owner (new, or kept through a team change) must be in the team. A
+  // team change whose owner isn't in the new team needs a new owner or
+  // unassigned in the same request.
+  if ((teamChange || ownerGiven) && ownerId && !members.has(ownerId)) {
+    return apiError(400, teamChange && !ownerGiven ? TEAM_CHANGE_OWNER_MESSAGE : OWNER_NOT_IN_TEAM_MESSAGE, "OWNER_NOT_IN_TEAM")
+  }
 
   // A new client without a location takes the new client's main location
   if ("clientId" in body && body.clientId !== existing.clientId && !("clientLocationId" in body)) {
@@ -202,6 +244,7 @@ export async function DELETE(
   if (response) return response
 
   await ensureOpportunityDefaults(ctx.companyId)
+  await ensureTeamDefaults(ctx.companyId)
 
   const { id } = await params
   const opportunity = await prisma.opportunity.findFirst({
