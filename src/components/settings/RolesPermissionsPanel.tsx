@@ -53,7 +53,7 @@ interface RolePermissions {
   clients: { create: boolean; edit: boolean; delete: boolean }
   salesOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; generatePO: boolean; viewAll: boolean }
   purchaseOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; send: boolean; viewAll: boolean }
-  opportunities: { create: boolean; edit: boolean; delete: boolean; viewAll: boolean }
+  opportunities: { create: boolean; edit: boolean; delete: boolean; viewTeam: boolean; viewAll: boolean }
   catalog: { delete: boolean }
   inventory: { delete: boolean }
   settingsSections: {
@@ -65,6 +65,7 @@ interface RolePermissions {
     integrations: boolean
     salesOrders: boolean
     opportunities: boolean
+    teams: boolean
   }
   dashboards: { manage: boolean }
 }
@@ -133,6 +134,7 @@ const OPPORTUNITY_LABELS: [keyof RolePermissions["opportunities"], string][] = [
   ["create", "Create opportunities"],
   ["edit", "Edit opportunities"],
   ["delete", "Delete opportunities"],
+  ["viewTeam", "View team opportunities"],
   ["viewAll", "See all users' opportunities (not just their own and unassigned ones)"],
 ]
 
@@ -153,6 +155,7 @@ const SETTINGS_LABELS: [keyof RolePermissions["settingsSections"], string][] = [
   ["integrations", "Integrations"],
   ["salesOrders", "Sales & Purchase Order Settings"],
   ["opportunities", "Opportunity Settings"],
+  ["teams", "Teams"],
 ]
 
 const DASHBOARD_LABELS: [keyof RolePermissions["dashboards"], string][] = [

@@ -10,10 +10,10 @@ const BOOLEAN_SECTIONS: Record<string, readonly string[]> = {
   clients: ["create", "edit", "delete"],
   salesOrders: ["create", "edit", "delete", "changeStatus", "generatePO", "viewAll"],
   purchaseOrders: ["create", "edit", "delete", "changeStatus", "send", "viewAll"],
-  opportunities: ["create", "edit", "delete", "viewAll"],
+  opportunities: ["create", "edit", "delete", "viewTeam", "viewAll"],
   catalog: ["delete"],
   inventory: ["delete"],
-  settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders", "opportunities"],
+  settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders", "opportunities", "teams"],
   dashboards: ["manage"],
 }
 

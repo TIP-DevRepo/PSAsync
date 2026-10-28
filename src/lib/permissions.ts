@@ -15,11 +15,11 @@ export interface RolePermissions {
   clients?: Partial<Record<"create" | "edit" | "delete", boolean>>
   salesOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "generatePO" | "viewAll", boolean>>
   purchaseOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "send" | "viewAll", boolean>>
-  opportunities?: Partial<Record<"create" | "edit" | "delete" | "viewAll", boolean>>
+  opportunities?: Partial<Record<"create" | "edit" | "delete" | "viewTeam" | "viewAll", boolean>>
   catalog?: Partial<Record<"delete", boolean>>
   inventory?: Partial<Record<"delete", boolean>>
   settingsSections?: Partial<Record<
-    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders" | "opportunities",
+    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders" | "opportunities" | "teams",
     boolean
   >>
   dashboards?: Partial<Record<"manage", boolean>>

@@ -11,10 +11,10 @@ const DEFAULT_PERMISSIONS = {
   clients: { create: false, edit: false, delete: false },
   salesOrders: { create: false, edit: false, delete: false, changeStatus: false, generatePO: false, viewAll: false },
   purchaseOrders: { create: false, edit: false, delete: false, changeStatus: false, send: false, viewAll: false },
-  opportunities: { create: false, edit: false, delete: false, viewAll: false },
+  opportunities: { create: false, edit: false, delete: false, viewTeam: false, viewAll: false },
   catalog: { delete: false },
   inventory: { delete: false },
-  settingsSections: { company: false, users: false, quotes: false, approvalWorkflows: false, notifications: false, integrations: false, salesOrders: false, opportunities: false },
+  settingsSections: { company: false, users: false, quotes: false, approvalWorkflows: false, notifications: false, integrations: false, salesOrders: false, opportunities: false, teams: false },
   dashboards: { manage: false },
 }
 
