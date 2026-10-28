@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
   const roleIds = body.defaultRoleIds === undefined ? [] : readIdList(body.defaultRoleIds)
   if (roleIds === null) return apiError(400, "Invalid role", "INVALID_REFERENCE")
 
-  const invalid = await assertRefs(ctx, { userId: memberIds })
+  const invalid = await assertRefs(ctx, { userId: memberIds, roleId: roleIds })
   if (invalid) return invalid
   const refused = await checkDefaultRoles(ctx, roleIds)
   if (refused) return apiError(refused.status, refused.error, refused.code)
