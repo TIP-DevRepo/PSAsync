@@ -2,17 +2,12 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 import { getUserRank } from "@/lib/permissions"
-import {
-  readRoleIdsFromBody,
-  loadRolesForAssignment,
-  setUserRoles,
-  assignsRoleAtOrAboveRank,
-  ROLE_AT_OR_ABOVE_RANK_MESSAGE,
-} from "@/lib/user-roles"
+import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
+import { roleGrantProblem } from "@/lib/role-grants"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
-import { effectiveRoles, rankOf } from "@/lib/team-roles"
+import { effectiveRoles, membershipChangeRefusal, rankOf } from "@/lib/team-roles"
 import { assertRefs } from "@/lib/scoped-loaders"
-import { MEMBER_GRANT_REFUSAL, readIdList, setUserTeams, teamsGrantAboveRank } from "@/lib/teams"
+import { readIdList, setUserTeams, teamsGrantRefusal, type TeamRefusal } from "@/lib/teams"
 
 const targetRoleFields = { id: true, rank: true, isGlobalAdmin: true, isEveryone: true } as const
 
@@ -103,8 +98,13 @@ export async function PATCH(
     if (loaded.error !== undefined) {
       return NextResponse.json({ error: loaded.error }, { status: 400 })
     }
-    if (assignsRoleAtOrAboveRank(loaded.roles, actorRank)) {
-      return NextResponse.json({ error: ROLE_AT_OR_ABOVE_RANK_MESSAGE }, { status: 403 })
+    // The grant rule (src/lib/role-grants.ts) for every role the user doesn't
+    // already hold directly: below your rank and every permission held.
+    // Roles kept or removed need nothing more.
+    const heldIds = new Set(targetUser.userRoles.map((ur) => ur.role.id))
+    const problem = roleGrantProblem(ctx.access, loaded.roles.filter((r) => !heldIds.has(r.id)), "user")
+    if (problem) {
+      return NextResponse.json({ error: problem, code: "FORBIDDEN" }, { status: 403 })
     }
     newRoles = loaded.roles
   }
@@ -115,6 +115,17 @@ export async function PATCH(
     if (invalidTeam) return invalidTeam
     const currentTeamIds = new Set(targetUser.teamMemberships.map((m) => m.team.id))
     addedTeamIds = teamIds.filter((teamId) => !currentTeamIds.has(teamId))
+    const removesTeams = [...currentTeamIds].some((teamId) => !teamIds.includes(teamId))
+    // The membership rank rule: the user must rank below you, except that
+    // you may always take yourself out of a team
+    const actor = { userId: ctx.userId, rank: ctx.access.rank, isGlobalAdmin: ctx.access.isGlobalAdmin }
+    const target = { id, rank: targetRank }
+    const problem =
+      (addedTeamIds.length > 0 ? membershipChangeRefusal(actor, target, "add") : null) ??
+      (removesTeams ? membershipChangeRefusal(actor, target, "remove") : null)
+    if (problem) {
+      return NextResponse.json({ error: problem, code: "FORBIDDEN" }, { status: 403 })
+    }
   }
 
   // A company must never be left without an active Global Admin. If this
@@ -144,10 +155,10 @@ export async function PATCH(
       })
       if (otherGlobalAdmins === 0) return { lastGlobalAdmin: true as const }
     }
-    // Read with the write, so a default role added to a team in the meantime counts
-    if (addedTeamIds.length > 0 && (await teamsGrantAboveRank(tx, ctx, addedTeamIds))) {
-      return { teamGrantRefused: true as const }
-    }
+    // Joining a team gives its default roles: the grant rule, read with the
+    // write so a default role added to a team in the meantime counts
+    const teamGrant: TeamRefusal | null = addedTeamIds.length > 0 ? await teamsGrantRefusal(tx, ctx, addedTeamIds) : null
+    if (teamGrant) return { teamGrantRefused: teamGrant }
 
     if (active !== undefined) {
       await tx.user.update({ where: { id, companyId }, data: { active } })
@@ -176,8 +187,9 @@ export async function PATCH(
     }
   })
 
-  if ("teamGrantRefused" in result) {
-    return NextResponse.json({ error: MEMBER_GRANT_REFUSAL.error, code: MEMBER_GRANT_REFUSAL.code }, { status: MEMBER_GRANT_REFUSAL.status })
+  if ("teamGrantRefused" in result && result.teamGrantRefused) {
+    const refused = result.teamGrantRefused
+    return NextResponse.json({ error: refused.error, code: refused.code }, { status: refused.status })
   }
   if ("lastGlobalAdmin" in result) {
     return NextResponse.json(

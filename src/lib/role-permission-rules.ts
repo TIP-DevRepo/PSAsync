@@ -1,4 +1,6 @@
-import { checkAccess, type EffectiveAccess, type RolePermissions } from "@/lib/permissions"
+import type { EffectiveAccess, RolePermissions } from "@/lib/permissions"
+// The database free module, so the grant rule (src/lib/role-grants.ts) can run in the browser too
+import { checkAccess } from "@/lib/access-check"
 
 // Every key a role's permissions JSON may hold, matching RolePermissions,
 // the Roles & Permissions panel, and the default role shapes. A permission

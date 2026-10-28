@@ -5,7 +5,7 @@ import { assertRefs } from "@/lib/scoped-loaders"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { TEAM_ORDER, teamSelect } from "@/lib/team-selects"
 import { TEAM_DESCRIPTION_MAX, TEAM_NAME_MAX, TEAM_NAME_TAKEN_MESSAGE } from "@/lib/team-rules"
-import { checkDefaultRoles, readIdList, setTeamDefaultRoles, setTeamMembers, toTeamResponse } from "@/lib/teams"
+import { checkDefaultRoles, membershipChangesRefusal, readIdList, setTeamDefaultRoles, setTeamMembers, toTeamResponse } from "@/lib/teams"
 import { INVALID_BODY_MESSAGE, isPrismaError, readJsonObject, readText } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
 
@@ -28,8 +28,8 @@ export async function GET() {
 
 // A new team goes at the end of the order. memberIds and defaultRoleIds are
 // optional and follow the same rules as the members and default roles
-// routes: active users of the company, and default roles the creator could
-// grant directly.
+// routes: active users of the company ranked below the creator, and default
+// roles the creator could give directly (the grant rule).
 export async function POST(req: NextRequest) {
   const { ctx, response } = await requireAccess({
     permission: "settingsSections.teams",
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest) {
 
   const invalid = await assertRefs(ctx, { userId: memberIds, roleId: roleIds })
   if (invalid) return invalid
-  const refused = await checkDefaultRoles(ctx, roleIds)
+  const refused = (await checkDefaultRoles(ctx, roleIds)) ?? (await membershipChangesRefusal(prisma, ctx, { added: memberIds, removed: [] }))
   if (refused) return apiError(refused.status, refused.error, refused.code)
 
   const companyId = ctx.companyId

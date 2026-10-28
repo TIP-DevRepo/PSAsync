@@ -27,13 +27,13 @@ export async function loadRolesForAssignment(
   companyId: string,
   roleIds: string[]
 ): Promise<
-  | { roles: { id: string; name: string; rank: number; isGlobalAdmin: boolean }[]; error?: undefined }
+  | { roles: { id: string; name: string; rank: number; isGlobalAdmin: boolean; permissions: Prisma.JsonValue }[]; error?: undefined }
   | { error: string; roles?: undefined }
 > {
   if (roleIds.length === 0) return { roles: [] }
   const roles = await db.role.findMany({
     where: { id: { in: roleIds } },
-    select: { id: true, name: true, rank: true, isGlobalAdmin: true, isEveryone: true, companyId: true },
+    select: { id: true, name: true, rank: true, isGlobalAdmin: true, isEveryone: true, companyId: true, permissions: true },
   })
   if (roles.length !== roleIds.length || roles.some((r) => r.companyId !== companyId)) {
     return { error: "Invalid role" }
@@ -41,7 +41,8 @@ export async function loadRolesForAssignment(
   if (roles.some((r) => r.isEveryone)) {
     return { error: "The Everyone role is held by every user automatically and can't be assigned" }
   }
-  return { roles: roles.map(({ id, name, rank, isGlobalAdmin }) => ({ id, name, rank, isGlobalAdmin })) }
+  // permissions are for the grant rule (src/lib/role-grants.ts)
+  return { roles: roles.map(({ id, name, rank, isGlobalAdmin, permissions }) => ({ id, name, rank, isGlobalAdmin, permissions })) }
 }
 
 // The rank rule for handing out roles, shared by inviting a user (POST

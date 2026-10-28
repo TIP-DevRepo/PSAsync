@@ -57,3 +57,20 @@ export const TEAM_ROLE_GLOBAL_ADMIN_MESSAGE = "Global Admin can't be a team's de
 export const TEAM_ROLE_ABOVE_RANK_MESSAGE = "You can't give a team a default role at or above your own rank"
 export const TEAM_MEMBER_ROLE_ABOVE_RANK_MESSAGE =
   "This team gives its members a role at or above your own rank, so you can't add members to it"
+
+export const TEAM_MEMBER_RANK_MESSAGE = "You can only add or remove team members ranked below you"
+
+// The rank rule for changing who is in a team (the Teams members route and
+// Manage Users' Edit Teams), the same one Manage Users uses for changing a
+// user's roles: the user being added or removed must rank below the acting
+// user, by effective rank (rankOf). Anyone may remove themselves. Global
+// Admin ranks above everyone. Returns the refusal message, or null.
+export function membershipChangeRefusal(
+  actor: { userId: string; rank: number; isGlobalAdmin: boolean },
+  target: { id: string; rank: number },
+  change: "add" | "remove"
+): string | null {
+  if (actor.isGlobalAdmin) return null
+  if (change === "remove" && target.id === actor.userId) return null
+  return target.rank < actor.rank ? null : TEAM_MEMBER_RANK_MESSAGE
+}

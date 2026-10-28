@@ -3,17 +3,19 @@ import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { assertRefs, loadTeam } from "@/lib/scoped-loaders"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
-import { teamSelect } from "@/lib/team-selects"
-import { MEMBER_GRANT_REFUSAL, readIdList, setTeamMembers, teamsGrantAboveRank, toTeamResponse } from "@/lib/teams"
+import { teamSelect, type TeamRow } from "@/lib/team-selects"
+import { membershipChangesRefusal, readIdList, setTeamMembers, teamsGrantRefusal, toTeamResponse, type TeamRefusal } from "@/lib/teams"
 import { readJsonObject } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
 
 // Replaces the team's members with userIds. Every added user must be an
-// active user of the company, and adding anyone to a team with default
-// roles counts as granting those roles, so it is refused (403) unless the
-// caller could grant each of them directly. Members already in the team
-// stay (even if deactivated since) and removing members needs nothing more
-// than managing teams. Changes apply on each member's next request.
+// active user of the company. Adding anyone to a team with default roles
+// gives them those roles, so it follows the grant rule (teamsGrantRefusal:
+// the caller ranks above each role and holds every permission it grants),
+// and every user added or removed must rank below the caller (the Manage
+// Users rule, membershipChangesRefusal), except that anyone may remove
+// themselves. Either refusal is a 403. Members already in the team stay
+// (even if deactivated since). Changes apply on each member's next request.
 export async function PUT(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -37,20 +39,24 @@ export async function PUT(
   const current = await prisma.teamMember.findMany({ where: { teamId: team.id }, select: { userId: true } })
   const currentIds = new Set(current.map((m) => m.userId))
   const added = userIds.filter((userId) => !currentIds.has(userId))
+  const removed = [...currentIds].filter((userId) => !userIds.includes(userId))
 
   // Every id a user of the company, and every added one active
   const invalid = await assertRefs(ctx, { companyUserId: userIds, userId: added })
   if (invalid) return invalid
 
   try {
-    const saved = await prisma.$transaction(async (tx) => {
+    const saved = await prisma.$transaction(async (tx): Promise<{ refused: TeamRefusal } | { team: TeamRow }> => {
       // Read with the write, so a default role added in the meantime counts
-      if (added.length > 0 && (await teamsGrantAboveRank(tx, ctx, [team.id]))) return null
+      const grant = added.length > 0 ? await teamsGrantRefusal(tx, ctx, [team.id]) : null
+      if (grant) return { refused: grant }
+      const rank = await membershipChangesRefusal(tx, ctx, { added, removed })
+      if (rank) return { refused: rank }
       await setTeamMembers(tx, team.id, userIds)
-      return tx.team.findUniqueOrThrow({ where: { id: team.id }, select: teamSelect })
+      return { team: await tx.team.findUniqueOrThrow({ where: { id: team.id }, select: teamSelect }) }
     })
-    if (!saved) return apiError(MEMBER_GRANT_REFUSAL.status, MEMBER_GRANT_REFUSAL.error, MEMBER_GRANT_REFUSAL.code)
-    return NextResponse.json(toTeamResponse(saved, ctx))
+    if ("refused" in saved) return apiError(saved.refused.status, saved.refused.error, saved.refused.code)
+    return NextResponse.json(toTeamResponse(saved.team, ctx))
   } catch (err) {
     const { message, status } = userFacingError(err, "Saving team members")
     return apiError(status, message)

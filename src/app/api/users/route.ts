@@ -1,15 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import bcrypt from "bcryptjs"
 import { prisma } from "@/lib/prisma"
-import { getUserRank } from "@/lib/permissions"
 import { requireAccess } from "@/lib/api-access"
 import {
   readRoleIdsFromBody,
   loadRolesForAssignment,
   setUserRoles,
-  assignsRoleAtOrAboveRank,
-  ROLE_AT_OR_ABOVE_RANK_MESSAGE,
 } from "@/lib/user-roles"
+import { roleGrantProblem } from "@/lib/role-grants"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
 import { MIN_PASSWORD_LENGTH, MAX_PASSWORD_BYTES, passwordByteLength } from "@/lib/password-rules"
 import { usesMicrosoftSso } from "@/lib/sso-account"
@@ -154,13 +152,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: loaded.error }, { status: 400 })
   }
 
-  // The same rank rule as changing an existing user's roles: only roles
-  // below your own rank, otherwise inviting a fresh user would sidestep it
-  if (loaded.roles.length > 0) {
-    const actorRank = await getUserRank(ctx.userId)
-    if (assignsRoleAtOrAboveRank(loaded.roles, actorRank)) {
-      return NextResponse.json({ error: ROLE_AT_OR_ABOVE_RANK_MESSAGE }, { status: 403 })
-    }
+  // The same grant rule as changing an existing user's roles (below your
+  // own rank, and every permission each role grants held yourself),
+  // otherwise inviting a fresh user would sidestep it
+  const grantProblem = roleGrantProblem(ctx.access, loaded.roles, "user")
+  if (grantProblem) {
+    return NextResponse.json({ error: grantProblem, code: "FORBIDDEN" }, { status: 403 })
   }
 
   // Every company keeps its one Everyone role. GET /api/roles no longer

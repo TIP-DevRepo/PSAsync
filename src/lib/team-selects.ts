@@ -17,7 +17,8 @@ export const teamSelect = {
     select: { user: { select: { id: true, name: true, active: true } } },
     orderBy: { user: { name: "asc" } },
   },
-  defaultRoles: { select: { role: { select: roleFields } }, orderBy: { role: { rank: "desc" } } },
+  // permissions only for the grant rule; toTeamResponse never returns them
+  defaultRoles: { select: { role: { select: { ...roleFields, permissions: true } } }, orderBy: { role: { rank: "desc" } } },
 } satisfies Prisma.TeamSelect
 
 export type TeamRow = Prisma.TeamGetPayload<{ select: typeof teamSelect }>
