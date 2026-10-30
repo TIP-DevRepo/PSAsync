@@ -7,6 +7,8 @@ import { termsForStorage } from "@/lib/sanitize-terms"
 import { copiedLineData, COPY_SOURCE_LINE_ORDER } from "@/lib/quote-line-copy"
 import { clientDefaultsSelect, clientQuoteDefaults } from "@/lib/quote-client-defaults"
 import { DEFAULT_QUOTE_EXPIRY_DAYS, expiryDateFromToday } from "@/lib/quote-expiry"
+import { userFacingError } from "@/lib/user-error"
+import { isNumberCollision, NUMBER_TAKEN_MESSAGE, takeRecordNumber } from "@/lib/record-number"
 
 // A copy takes only the quote's details and items: its title, intro, terms,
 // sections, and line items. The rep picks the client and contact for the
@@ -57,9 +59,6 @@ export async function POST(
 
   const settings = await prisma.companySettings.findUnique({ where: { companyId } })
   const prefix = settings?.quotePrefix ?? "Q"
-  const year = new Date().getFullYear()
-  const existingCount = await prisma.quote.count({ where: { companyId, version: 1 } })
-  const quoteNumber = `${prefix}-${year}-${String(existingCount + 1).padStart(4, "0")}`
 
   // Expiry days the way the New Quote form picks them: the template's when
   // the quote was made from one that still exists, else the company default
@@ -68,37 +67,49 @@ export async function POST(
     : null
   const expiryDays = template?.expiryDays || settings?.quoteExpiryDays || DEFAULT_QUOTE_EXPIRY_DAYS
 
-  const copy = await prisma.quote.create({
-    data: {
-      companyId,
-      clientId,
-      contactId,
-      // The copy belongs to whoever made it, so they can always open it
-      userId: ctx.userId,
-      quoteNumber,
-      accessToken: newAccessToken(),
-      internalAccessToken: newAccessToken(),
-      templateId: source.templateId,
-      title: source.title ? `${source.title} (Copy)` : null,
-      introText: source.introText,
-      // The copy is a draft: with the flag ticked it stores a copy of the
-      // current default, like a new quote, otherwise the source's own text
-      useDefaultTerms: source.useDefaultTerms,
-      terms: source.useDefaultTerms ? termsForStorage(settings?.quoteTerms) : termsForStorage(source.terms),
-      paymentTerms: defaults.paymentTerms || null,
-      shipAddress: defaults.shipAddress || null,
-      shipAddress2: defaults.shipAddress2 || null,
-      shipCity: defaults.shipCity || null,
-      shipState: defaults.shipState || null,
-      shipZip: defaults.shipZip || null,
-      shipCountry: defaults.shipCountry || null,
-      expiresAt: expiryDateFromToday(expiryDays),
-      // The section list keeps the order and any section with no lines yet
-      sections: source.sections,
-      // Every kind of line, cost from the stored rows
-      lineItems: { create: source.lineItems.map(copiedLineData) },
-    },
-  })
+  // The next number from the company's quote counter, taken in the same
+  // transaction as the create so a failed create gives it back
+  let copy
+  try {
+    copy = await prisma.$transaction(async (tx) => {
+      const quoteNumber = await takeRecordNumber(tx, companyId, "quote", prefix)
+      return tx.quote.create({
+        data: {
+          companyId,
+          clientId,
+          contactId,
+          // The copy belongs to whoever made it, so they can always open it
+          userId: ctx.userId,
+          quoteNumber,
+          accessToken: newAccessToken(),
+          internalAccessToken: newAccessToken(),
+          templateId: source.templateId,
+          title: source.title ? `${source.title} (Copy)` : null,
+          introText: source.introText,
+          // The copy is a draft: with the flag ticked it stores a copy of the
+          // current default, like a new quote, otherwise the source's own text
+          useDefaultTerms: source.useDefaultTerms,
+          terms: source.useDefaultTerms ? termsForStorage(settings?.quoteTerms) : termsForStorage(source.terms),
+          paymentTerms: defaults.paymentTerms || null,
+          shipAddress: defaults.shipAddress || null,
+          shipAddress2: defaults.shipAddress2 || null,
+          shipCity: defaults.shipCity || null,
+          shipState: defaults.shipState || null,
+          shipZip: defaults.shipZip || null,
+          shipCountry: defaults.shipCountry || null,
+          expiresAt: expiryDateFromToday(expiryDays),
+          // The section list keeps the order and any section with no lines yet
+          sections: source.sections,
+          // Every kind of line, cost from the stored rows
+          lineItems: { create: source.lineItems.map(copiedLineData) },
+        },
+      })
+    })
+  } catch (err) {
+    if (isNumberCollision(err)) return apiError(409, NUMBER_TAKEN_MESSAGE, "NUMBER_TAKEN")
+    const { message, status } = userFacingError(err, "Copying a quote")
+    return apiError(status, message)
+  }
 
   return NextResponse.json(withoutPortalTokens(copy))
 }
