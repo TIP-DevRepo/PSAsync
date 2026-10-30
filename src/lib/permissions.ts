@@ -24,6 +24,7 @@ export interface RolePermissions {
     boolean
   >>
   dashboards?: Partial<Record<"manage", boolean>>
+  auditLog?: Partial<Record<"view" | "restore", boolean>>
 }
 
 // One user's resolved access across every role they hold (directly or from

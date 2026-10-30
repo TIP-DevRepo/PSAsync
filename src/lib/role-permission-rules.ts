@@ -17,6 +17,7 @@ const BOOLEAN_SECTIONS: Record<string, readonly string[]> = {
   inventory: ["delete"],
   settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders", "opportunities", "teams", "actionButtons"],
   dashboards: ["manage"],
+  auditLog: ["view", "restore"],
 }
 
 // Keys that were removed from the catalog but may still be stored on

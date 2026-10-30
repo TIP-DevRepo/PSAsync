@@ -53,6 +53,7 @@ export function buildGlobalAdminPermissions(): Prisma.InputJsonValue {
       actionButtons: true,
     },
     dashboards: { manage: true },
+    auditLog: { view: true, restore: true },
     maxDiscount: 100,
   }
 }
