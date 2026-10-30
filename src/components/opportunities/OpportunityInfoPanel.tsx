@@ -34,6 +34,9 @@ export interface OpportunityDetailData extends OpportunityRow {
   client: { id: string; name: string; phone: string | null; locations: ClientLocationSummary[]; mainBillingLocation: ClientLocationSummary | null }
   contact: { id: string; firstName: string; lastName: string; title: string | null; email: string | null; phone: string | null; mobile: string | null }
   createdBy: { id: string; name: string } | null
+  // Set only on a deleted opportunity, which only audit log viewers open
+  deletedAt: string | null
+  deletedBy: { id: string; name: string } | null
   _count: { attachments: number; quotes: number; salesOrders: number; purchaseOrders: number }
 }
 

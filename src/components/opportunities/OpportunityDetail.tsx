@@ -11,7 +11,9 @@ import { Timeline, type TimelineHandle } from "@/components/timeline/Timeline"
 import { emailUnavailableReason, type EmailOptions } from "@/components/timeline/EmailComposer"
 import { ActionButtonBar } from "@/components/timeline/ActionButtonBar"
 import { TabsBar } from "@/components/ui/tabs-bar"
+import { AuditLogTable } from "@/components/audit/AuditLogTable"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 import { promptDialog } from "@/lib/prompt-dialog"
 import { OPPORTUNITY_TITLE_MAX } from "@/lib/opportunity-rules"
 import { formatDate, notifyOpportunitiesChanged, type StageOption, type TypeOption } from "@/lib/opportunity-view"
@@ -29,13 +31,19 @@ import { OpportunityInfoPanel, type OpportunityDetailData } from "./OpportunityI
 const breadcrumbItems = [{ label: "Opportunities", href: "/dashboard/opportunities" }]
 
 const NEEDS_EDIT_MESSAGE = "You need edit access to use this"
+const DELETED_MESSAGE = "This opportunity is deleted"
 
 // Laid out like HaloPSA: the client and number large on the first line
 // (Delete at the top right), the title under it, the action buttons on their
 // own row aligned left, then the stage pill with created and closed text. The main column is tabs (src/lib/opportunity-
-// tabs.ts, kept in ?tab=): Details (the timeline), Attachments, and Related.
-// The details panel (edited in place) is on the right. At phone width the
-// panel comes first, then the tabs.
+// tabs.ts, kept in ?tab=): Details (the timeline), Attachments, Related, and
+// the Audit log (auditLog.view). The details panel (edited in place) is on
+// the right. At phone width the panel comes first, then the tabs.
+//
+// A deleted opportunity opens only for audit log viewers (the API's 404 for
+// everyone else): a banner says who deleted it and when, with Restore for
+// auditLog.restore, everything is read only, and only the Audit log tab
+// shows, since its other routes answer 404.
 export function OpportunityDetail({ id }: { id: string }) {
   const router = useRouter()
   // For hiding controls only: every route checks the same keys itself
@@ -74,7 +82,11 @@ export function OpportunityDetail({ id }: { id: string }) {
   // the composer in one go; a URL change (back, forward) is followed.
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  const tabs = visibleOpportunityTabs(can)
+  const deleted = !!opportunity?.deletedAt
+  // Editing needs the permission and an opportunity that isn't deleted
+  const editable = canEdit && !deleted
+  const allTabs = visibleOpportunityTabs(can)
+  const tabs = deleted ? allTabs.filter((t) => t.key === "audit") : allTabs
   const urlTab = readOpportunityTab(searchParams, tabs)
   const [tab, setTabState] = useState<OpportunityTabKey>(urlTab)
   const [seenUrlTab, setSeenUrlTab] = useState<OpportunityTabKey>(urlTab)
@@ -82,6 +94,8 @@ export function OpportunityDetail({ id }: { id: string }) {
     setSeenUrlTab(urlTab)
     setTabState(urlTab)
   }
+  // A deleted opportunity only has its audit log to show
+  const activeTab: OpportunityTabKey = deleted ? "audit" : tab
   function setTab(key: OpportunityTabKey) {
     setTabState(key)
     router.replace(opportunityTabHref(pathname, searchParams.toString(), key), { scroll: false })
@@ -92,10 +106,11 @@ export function OpportunityDetail({ id }: { id: string }) {
   // from.
   const unavailableReason = useCallback(
     (button: ActionButtonDefinition): string | null => {
+      if (deleted) return DELETED_MESSAGE
       if (!canEdit) return NEEDS_EDIT_MESSAGE
       return button.opens.kind === "email" ? emailUnavailableReason(emailOptions) : null
     },
-    [canEdit, emailOptions]
+    [canEdit, deleted, emailOptions]
   )
 
   // A header button opens the composer at the top of the timeline, on the
@@ -142,12 +157,12 @@ export function OpportunityDetail({ id }: { id: string }) {
   }, [load, canEdit])
 
   useEffect(() => {
-    if (!canEdit || !hasEmailButton) return
+    if (!editable || !hasEmailButton) return
     fetch(`/api/opportunities/${id}/email-options`)
       .then((res) => (res.ok ? res.json() : null))
       .then((data: EmailOptions | null) => data && setEmailOptions(data))
       .catch(() => undefined)
-  }, [id, canEdit, hasEmailButton])
+  }, [id, editable, hasEmailButton])
 
   // Saves only the fields given. The page takes the saved opportunity back,
   // or keeps what it had (the old value shows again) and says why.
@@ -179,6 +194,27 @@ export function OpportunityDetail({ id }: { id: string }) {
       return
     }
     save({ title }, "title")
+  }
+
+  async function handleRestore() {
+    const ok = await confirmDialog({
+      title: `Restore ${opportunity?.number ?? "this opportunity"}?`,
+      description: "It shows in lists again, with its attachments and timeline.",
+      confirmLabel: "Restore",
+    })
+    if (!ok) return
+    setSaving(true)
+    const res = await fetch(`/api/opportunities/${id}/restore`, { method: "POST" }).catch(() => null)
+    const data = res ? await res.json().catch(() => ({})) : {}
+    setSaving(false)
+    if (!res || !res.ok) {
+      toast.error("Couldn't restore this opportunity", typeof data.error === "string" ? data.error : "Please try again.")
+      return
+    }
+    toast.success("Opportunity restored")
+    setOpportunity(data)
+    setTimelineKey((k) => k + 1)
+    notifyOpportunitiesChanged()
   }
 
   async function handleDelete(): Promise<string | null> {
@@ -238,7 +274,7 @@ export function OpportunityDetail({ id }: { id: string }) {
             {/* Line 2: the title, smaller but clear */}
             <p className="flex items-start gap-2 text-lg font-medium text-foreground">
               <span className="break-words">{o.title}</span>
-              {canEdit && (
+              {editable && (
                 <button
                   type="button"
                   onClick={() => editTitle(o.title)}
@@ -251,7 +287,7 @@ export function OpportunityDetail({ id }: { id: string }) {
               )}
             </p>
           </div>
-          {canDelete && (
+          {canDelete && !deleted && (
             <Button variant="outline" onClick={() => setShowDelete(true)} className="text-danger hover:text-danger">
               Delete
             </Button>
@@ -267,6 +303,19 @@ export function OpportunityDetail({ id }: { id: string }) {
           unavailableReason={unavailableReason}
           label="Timeline actions"
         />
+
+        {o.deletedAt && (
+          <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">
+            <p className="font-medium">
+              This opportunity was deleted{o.deletedBy ? ` by ${o.deletedBy.name}` : ""} on {formatDate(o.deletedAt)}
+            </p>
+            {can("auditLog.restore") && (
+              <Button variant="outline" onClick={handleRestore} disabled={saving}>
+                Restore
+              </Button>
+            )}
+          </div>
+        )}
 
         {/* Line 4: the stage pill, created and closed text */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -284,7 +333,7 @@ export function OpportunityDetail({ id }: { id: string }) {
         <aside className="min-w-0 lg:col-start-2 lg:row-start-1">
           <OpportunityInfoPanel
             o={o}
-            canEdit={canEdit}
+            canEdit={editable}
             stages={stages}
             types={types}
             clients={clients}
@@ -298,46 +347,48 @@ export function OpportunityDetail({ id }: { id: string }) {
         <div className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-1">
           <TabsBar
             tabs={tabs.map((t) => ({ key: t.key, label: tabLabel(t.label, counts[t.key]) }))}
-            activeTab={tab}
+            activeTab={activeTab}
             onChange={setTab}
             ariaLabel="Opportunity sections"
           />
 
           {/* Details stays mounted (hidden on other tabs), so a composer the
               header opens is ready and a draft survives switching tabs */}
-          <div role="tabpanel" id="tabpanel-details" aria-labelledby="tab-details" hidden={tab !== "details"}>
-            <Timeline
-              ref={timelineRef}
-              timelineUrl={`/api/opportunities/${o.id}/timeline`}
-              canAddNotes={canEdit}
-              myUserId={myUserId}
-              refreshKey={timelineKey}
-              buttons={buttons}
-              unavailableReason={unavailableReason}
-              showButtons={false}
-              onComposerChange={setOpenButtonId}
-              stages={stages}
-              email={{
-                sendUrl: `/api/opportunities/${o.id}/email`,
-                attachmentsUrl: `/api/opportunities/${o.id}/attachments`,
-                options: emailOptions,
-                defaultSubject: defaultEmailSubject(o.number, o.title),
-                defaultTo: o.contact.email ? [o.contact.email] : [],
-              }}
-              // A note or email that moved the stage changed the opportunity too
-              onPosted={(entry) => {
-                if (noteStageChange(entry.data)) {
-                  load()
-                  notifyOpportunitiesChanged()
-                }
-              }}
-            />
-          </div>
-          {tab === "attachments" && (
+          {!deleted && (
+            <div role="tabpanel" id="tabpanel-details" aria-labelledby="tab-details" hidden={activeTab !== "details"}>
+              <Timeline
+                ref={timelineRef}
+                timelineUrl={`/api/opportunities/${o.id}/timeline`}
+                canAddNotes={editable}
+                myUserId={myUserId}
+                refreshKey={timelineKey}
+                buttons={buttons}
+                unavailableReason={unavailableReason}
+                showButtons={false}
+                onComposerChange={setOpenButtonId}
+                stages={stages}
+                email={{
+                  sendUrl: `/api/opportunities/${o.id}/email`,
+                  attachmentsUrl: `/api/opportunities/${o.id}/attachments`,
+                  options: emailOptions,
+                  defaultSubject: defaultEmailSubject(o.number, o.title),
+                  defaultTo: o.contact.email ? [o.contact.email] : [],
+                }}
+                // A note or email that moved the stage changed the opportunity too
+                onPosted={(entry) => {
+                  if (noteStageChange(entry.data)) {
+                    load()
+                    notifyOpportunitiesChanged()
+                  }
+                }}
+              />
+            </div>
+          )}
+          {activeTab === "attachments" && (
             <div role="tabpanel" id="tabpanel-attachments" aria-labelledby="tab-attachments">
               <OpportunityAttachments
                 opportunityId={o.id}
-                canEdit={canEdit}
+                canEdit={editable}
                 // The tab's count and the timeline both change
                 onChanged={() => {
                   setTimelineKey((k) => k + 1)
@@ -346,9 +397,23 @@ export function OpportunityDetail({ id }: { id: string }) {
               />
             </div>
           )}
-          {tab === "related" && (
+          {activeTab === "related" && (
             <div role="tabpanel" id="tabpanel-related" aria-labelledby="tab-related">
               <OpportunityRelatedPanel related={related} failed={relatedFailed} linkedCount={linkedCount} />
+            </div>
+          )}
+          {activeTab === "audit" && (
+            <div role="tabpanel" id="tabpanel-audit" aria-labelledby="tab-audit">
+              <AuditLogTable
+                listUrl={`/api/opportunities/${o.id}/audit`}
+                filterRowId="opportunity-audit-column-filters"
+                // An undo changed the opportunity and its timeline
+                onChanged={() => {
+                  load()
+                  setTimelineKey((k) => k + 1)
+                  notifyOpportunitiesChanged()
+                }}
+              />
             </div>
           )}
         </div>
