@@ -519,6 +519,11 @@ export async function loadTeamMemberIds(ctx: Scope, teamId: string, userIds: (st
   return new Set(rows.map((r) => r.userId))
 }
 
+// Audit log entries (shared by every record type)
+
+export const auditEntryWhere = (ctx: Scope, entryId: string) =>
+  ({ id: entryId, companyId: ctx.companyId }) satisfies Prisma.AuditLogEntryWhereUniqueInput
+
 // Company level records
 
 export const industryWhere = (ctx: Scope, industryId: string) =>
