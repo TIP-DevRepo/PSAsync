@@ -1,69 +1,142 @@
 "use client"
 
-import { CalendarDays, CircleX, Mail, Phone, SquareCheck, StickyNote, Trophy, type LucideIcon } from "lucide-react"
-import type { ActionButtonColor, ActionButtonDefinition, ActionButtonIcon } from "@/lib/timeline-buttons"
+import {
+  CalendarDays,
+  CircleCheck,
+  CircleX,
+  Clock,
+  FileText,
+  Flag,
+  Mail,
+  Phone,
+  Send,
+  SquareCheck,
+  Star,
+  StickyNote,
+  Ticket,
+  TriangleAlert,
+  Trophy,
+  User,
+  type LucideIcon,
+} from "lucide-react"
+import { buttonTextColor, type ActionButtonDefinition, type ActionButtonIcon } from "@/lib/timeline-buttons"
 import { cn } from "@/lib/utils"
 
-const ICONS: Record<ActionButtonIcon, LucideIcon> = {
+export const ACTION_BUTTON_ICON_COMPONENTS: Record<ActionButtonIcon, LucideIcon> = {
   note: StickyNote,
+  email: Mail,
   won: Trophy,
   lost: CircleX,
-  email: Mail,
   call: Phone,
   meeting: CalendarDays,
   task: SquareCheck,
+  quote: FileText,
+  ticket: Ticket,
+  flag: Flag,
+  star: Star,
+  clock: Clock,
+  check: CircleCheck,
+  alert: TriangleAlert,
+  user: User,
+  send: Send,
 }
 
-// Tinted pills in the brand and status tokens
-const COLORS: Record<ActionButtonColor, string> = {
-  neutral: "border-border bg-muted text-foreground hover:bg-surface-hover",
-  primary: "border-brand-primary-500/25 bg-brand-primary-500/10 text-brand-primary-500 hover:bg-brand-primary-500/20",
-  success: "border-success/25 bg-success/10 text-success hover:bg-success/20",
-  danger: "border-danger/25 bg-danger/10 text-danger hover:bg-danger/20",
-  warning: "border-warning/25 bg-warning/10 text-warning hover:bg-warning/20",
-  info: "border-info/25 bg-info/10 text-info hover:bg-info/20",
+// One button as it shows on a record: a rounded pill filled with the
+// button's color, its text white or near black for contrast. Also the live
+// preview in Settings > Action Buttons.
+export function ActionButtonPill({
+  label,
+  icon,
+  color,
+  pressed = false,
+  unavailableReason = null,
+  onClick,
+  as = "button",
+}: {
+  label: string
+  icon: ActionButtonIcon
+  color: string
+  pressed?: boolean
+  // Shown as the tooltip of a button that can't be used; the button stays
+  // focusable so the reason can be read
+  unavailableReason?: string | null
+  onClick?: () => void
+  // "span" for a preview that isn't a control
+  as?: "button" | "span"
+}) {
+  const Icon = ACTION_BUTTON_ICON_COMPONENTS[icon] ?? StickyNote
+  const style = { backgroundColor: color, borderColor: color, color: buttonTextColor(color) }
+  const className = cn(
+    "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm font-medium transition-[filter] duration-100",
+    as === "button" &&
+      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+    as === "button" && !unavailableReason && "hover:brightness-110",
+    unavailableReason && "cursor-not-allowed opacity-50",
+    pressed && "ring-2 ring-ring ring-offset-2 ring-offset-background"
+  )
+  const content = (
+    <>
+      <Icon size={15} aria-hidden="true" />
+      {label}
+    </>
+  )
+  if (as === "span") {
+    return (
+      <span className={className} style={style}>
+        {content}
+      </span>
+    )
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        if (!unavailableReason) onClick?.()
+      }}
+      aria-disabled={unavailableReason ? true : undefined}
+      aria-pressed={pressed}
+      title={unavailableReason ?? undefined}
+      className={className}
+      style={style}
+    >
+      {content}
+    </button>
+  )
 }
 
 // A row of rounded pill buttons with an icon, styled like HaloPSA's action
-// bar, from a list of button definitions (src/lib/timeline-buttons.ts).
-// Wraps onto more lines at narrow widths; buttons keep their size.
+// bar, from the company's button definitions (GET /api/action-buttons,
+// src/lib/timeline-buttons.ts). Wraps onto more lines at narrow widths;
+// buttons keep their size. A button unavailableReason names a reason for
+// is shown dimmed with that reason as its tooltip and does nothing.
 export function ActionButtonBar({
   buttons,
   onSelect,
   activeId,
-  disabled = false,
+  unavailableReason,
   label = "Actions",
 }: {
   buttons: readonly ActionButtonDefinition[]
   onSelect: (button: ActionButtonDefinition) => void
   // The button whose composer is open, shown as pressed
   activeId?: string | null
-  disabled?: boolean
+  unavailableReason?: (button: ActionButtonDefinition) => string | null
   label?: string
 }) {
   if (buttons.length === 0) return null
   return (
     <div role="toolbar" aria-label={label} className="flex flex-wrap gap-2">
-      {buttons.map((button) => {
-        const Icon = ICONS[button.icon] ?? StickyNote
-        return (
-          <button
-            key={button.id}
-            type="button"
-            onClick={() => onSelect(button)}
-            disabled={disabled}
-            aria-pressed={activeId === button.id}
-            className={cn(
-              "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm font-medium transition-colors duration-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-60",
-              COLORS[button.color] ?? COLORS.neutral,
-              activeId === button.id && "ring-2 ring-current"
-            )}
-          >
-            <Icon size={15} aria-hidden="true" />
-            {button.label}
-          </button>
-        )
-      })}
+      {buttons.map((button) => (
+        <ActionButtonPill
+          key={button.id}
+          label={button.label}
+          icon={button.icon}
+          color={button.color}
+          pressed={activeId === button.id}
+          unavailableReason={unavailableReason?.(button) ?? null}
+          onClick={() => onSelect(button)}
+        />
+      ))}
     </div>
   )
 }

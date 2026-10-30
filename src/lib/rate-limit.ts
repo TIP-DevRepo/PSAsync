@@ -235,6 +235,9 @@ export const SUBJECT_LIMITS = {
   "portal-pdf": { limit: 20, windowSeconds: 60 * 60 },
   // Portal comments posted per customer link
   "portal-comment": { limit: 30, windowSeconds: 60 * 60 },
+  // Emails a signed in user sends from records (the Email action), per
+  // user id, whatever the mailbox
+  "record-email": { limit: 30, windowSeconds: 10 * 60 },
 } as const satisfies Record<string, RateLimitRule>
 
 export type SubjectLimitKey = keyof typeof SUBJECT_LIMITS
@@ -289,6 +292,19 @@ export function linkLimitedResponse(retryAfter: number) {
   return NextResponse.json(
     {
       error: `This quote link has been used too often. Please try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`,
+      code: RATE_LIMITED_CODE,
+      retryAfterSeconds: retryAfter,
+    },
+    { status: 429, headers: { "Retry-After": String(retryAfter) } }
+  )
+}
+
+// The 429 for a user who has sent too many emails from records
+export function emailLimitedResponse(retryAfter: number) {
+  const minutes = minutesUntil(retryAfter)
+  return NextResponse.json(
+    {
+      error: `You've sent a lot of emails in a short time. Please try again in ${minutes} ${minutes === 1 ? "minute" : "minutes"}.`,
       code: RATE_LIMITED_CODE,
       retryAfterSeconds: retryAfter,
     },

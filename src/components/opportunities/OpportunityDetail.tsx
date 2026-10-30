@@ -8,6 +8,7 @@ import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
 import { Timeline, type TimelineHandle } from "@/components/timeline/Timeline"
+import { emailUnavailableReason, type EmailOptions } from "@/components/timeline/EmailComposer"
 import { ActionButtonBar } from "@/components/timeline/ActionButtonBar"
 import { TabsBar } from "@/components/ui/tabs-bar"
 import { toast } from "@/lib/toast"
@@ -15,9 +16,10 @@ import { promptDialog } from "@/lib/prompt-dialog"
 import { OPPORTUNITY_TITLE_MAX } from "@/lib/opportunity-rules"
 import { formatDate, notifyOpportunitiesChanged, type StageOption, type TypeOption } from "@/lib/opportunity-view"
 import type { TeamSummary } from "@/lib/team-rules"
-import { OPPORTUNITY_ACTION_BUTTONS, type ActionButtonDefinition } from "@/lib/timeline-buttons"
+import type { ActionButtonDefinition } from "@/lib/timeline-buttons"
 import { opportunityTabHref, readOpportunityTab, tabLabel, visibleOpportunityTabs, type OpportunityTabKey } from "@/lib/opportunity-tabs"
 import { noteStageChange } from "@/lib/timeline-actions"
+import { defaultEmailSubject } from "@/lib/record-email"
 import { StagePill } from "./StagePill"
 import { OpportunityRelatedPanel, relatedCount, useOpportunityRelated } from "./OpportunityRelatedPanel"
 import { OpportunityAttachments } from "./OpportunityAttachments"
@@ -25,6 +27,8 @@ import { DeleteOpportunityDialog } from "./DeleteOpportunityDialog"
 import { OpportunityInfoPanel, type OpportunityDetailData } from "./OpportunityInfoPanel"
 
 const breadcrumbItems = [{ label: "Opportunities", href: "/dashboard/opportunities" }]
+
+const NEEDS_EDIT_MESSAGE = "You need edit access to use this"
 
 // Laid out like HaloPSA: the client and number large on the first line
 // (Delete at the top right), the title under it, the action buttons on their
@@ -57,6 +61,12 @@ export function OpportunityDetail({ id }: { id: string }) {
   // The header's action bar opens the timeline's composer
   const timelineRef = useRef<TimelineHandle>(null)
   const [openButtonId, setOpenButtonId] = useState<string | null>(null)
+  // The company's buttons for opportunities (Settings > Action Buttons)
+  const [buttons, setButtons] = useState<ActionButtonDefinition[]>([])
+  // The Email action's From choices, signature, and contacts; loaded when
+  // the user can use it
+  const [emailOptions, setEmailOptions] = useState<EmailOptions | null>(null)
+  const hasEmailButton = buttons.some((b) => b.opens.kind === "email")
   const { related, failed: relatedFailed } = useOpportunityRelated(id)
 
   // The open tab lives in the URL, so a refresh or a shared link keeps it.
@@ -77,9 +87,21 @@ export function OpportunityDetail({ id }: { id: string }) {
     router.replace(opportunityTabHref(pathname, searchParams.toString(), key), { scroll: false })
   }
 
+  // Everyone who can open the opportunity sees its buttons; without edit
+  // access they are dimmed and say why. Email also needs a mailbox to send
+  // from.
+  const unavailableReason = useCallback(
+    (button: ActionButtonDefinition): string | null => {
+      if (!canEdit) return NEEDS_EDIT_MESSAGE
+      return button.opens.kind === "email" ? emailUnavailableReason(emailOptions) : null
+    },
+    [canEdit, emailOptions]
+  )
+
   // A header button opens the composer at the top of the timeline, on the
   // Details tab
   function openFromHeader(button: ActionButtonDefinition) {
+    if (unavailableReason(button)) return
     if (tab !== "details") setTab("details")
     timelineRef.current?.openComposer(button)
   }
@@ -109,6 +131,7 @@ export function OpportunityDetail({ id }: { id: string }) {
     load()
     const json = (res: Response) => (res.ok ? res.json() : [])
     fetch("/api/opportunity-stages").then(json).then((data) => Array.isArray(data) && setStages(data))
+    fetch("/api/action-buttons?for=opportunity").then(json).then((data) => Array.isArray(data) && setButtons(data))
     if (!canEdit) return
     fetch("/api/opportunity-types").then(json).then((data) => Array.isArray(data) && setTypes(data))
     fetch("/api/clients").then(json).then((data) => Array.isArray(data) && setClients(data))
@@ -117,6 +140,14 @@ export function OpportunityDetail({ id }: { id: string }) {
     // The teams it may move to, and who may own it in each
     fetch("/api/teams").then(json).then((data) => Array.isArray(data) && setTeams(data))
   }, [load, canEdit])
+
+  useEffect(() => {
+    if (!canEdit || !hasEmailButton) return
+    fetch(`/api/opportunities/${id}/email-options`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data: EmailOptions | null) => data && setEmailOptions(data))
+      .catch(() => undefined)
+  }, [id, canEdit, hasEmailButton])
 
   // Saves only the fields given. The page takes the saved opportunity back,
   // or keeps what it had (the old value shows again) and says why.
@@ -229,9 +260,13 @@ export function OpportunityDetail({ id }: { id: string }) {
 
         {/* Line 3: the action buttons on their own row, aligned left; they
             wrap onto more lines at narrow widths */}
-        {canEdit && (
-          <ActionButtonBar buttons={OPPORTUNITY_ACTION_BUTTONS} onSelect={openFromHeader} activeId={openButtonId} label="Timeline actions" />
-        )}
+        <ActionButtonBar
+          buttons={buttons}
+          onSelect={openFromHeader}
+          activeId={openButtonId}
+          unavailableReason={unavailableReason}
+          label="Timeline actions"
+        />
 
         {/* Line 4: the stage pill, created and closed text */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
@@ -277,11 +312,19 @@ export function OpportunityDetail({ id }: { id: string }) {
               canAddNotes={canEdit}
               myUserId={myUserId}
               refreshKey={timelineKey}
-              buttons={OPPORTUNITY_ACTION_BUTTONS}
+              buttons={buttons}
+              unavailableReason={unavailableReason}
               showButtons={false}
               onComposerChange={setOpenButtonId}
               stages={stages}
-              // A note that moved the stage changed the opportunity too
+              email={{
+                sendUrl: `/api/opportunities/${o.id}/email`,
+                attachmentsUrl: `/api/opportunities/${o.id}/attachments`,
+                options: emailOptions,
+                defaultSubject: defaultEmailSubject(o.number, o.title),
+                defaultTo: o.contact.email ? [o.contact.email] : [],
+              }}
+              // A note or email that moved the stage changed the opportunity too
               onPosted={(entry) => {
                 if (noteStageChange(entry.data)) {
                   load()

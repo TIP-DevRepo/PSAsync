@@ -219,6 +219,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
   const { logAssetEvent } = await import("@/lib/inventory/logAssetEvent")
   const { ensureOpportunityDefaults } = await import("@/lib/opportunity-defaults")
   const { ensureTeamDefaults } = await import("@/lib/team-defaults")
+  const { ensureActionButtonDefaults } = await import("@/lib/action-buttons")
   const { takeOpportunityNumber } = await import("@/lib/opportunity-number")
   const year = new Date().getFullYear()
 
@@ -743,6 +744,41 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
     const salesBasicOpportunity = await createOpportunity(n.salesBasicOpportunity, teamBasicUserId, "sales-basic", salesTeam.id)
     const salesUnassignedOpportunity = await createOpportunity(n.salesUnassignedOpportunity, null, "sales-unassigned", salesTeam.id)
 
+    // ── Action buttons ──
+    // The four defaults, made the way the app makes them on first use, then
+    // one custom Note button that always moves to the second stage
+    await ensureActionButtonDefaults(companyId, prisma)
+    const defaultButtons = await prisma.actionButton.findMany({
+      where: { companyId },
+      select: { id: true, label: true },
+      orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+    })
+    for (const button of defaultButtons) rec("actionButton", button)
+    const defaultButtonId = (label: string) => {
+      const found = defaultButtons.find((b) => b.label === label)
+      if (!found) throw new HarnessBroken(`The default ${label} action button is missing`)
+      return found.id
+    }
+    const customButton = rec(
+      "actionButton",
+      await prisma.actionButton.create({
+        data: {
+          companyId,
+          label: n.customActionButton,
+          icon: "flag",
+          color: "#6D28D9",
+          forOpportunities: true,
+          forTickets: false,
+          kind: "NOTE",
+          stageMode: "FIXED",
+          fixedStageId: opportunityStages[1].id,
+          noteMode: "REQUIRED",
+          sortOrder: defaultButtons.length,
+        },
+        select: { id: true },
+      })
+    )
+
     // The admin's mailbox row
     const adminMailboxId = await addRunMailbox(prisma, run, {
       companyId,
@@ -795,6 +831,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         generalTeamId: generalTeam.id,
         salesTeamId: salesTeam.id,
         teamGrantRoleId,
+        actionButtonId: customButton.id,
       },
       fixtures: {
         everyoneUserId,
@@ -849,6 +886,12 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         salesViewerOpportunityId: salesViewerOpportunity.id,
         salesBasicOpportunityId: salesBasicOpportunity.id,
         salesUnassignedOpportunityId: salesUnassignedOpportunity.id,
+        actionButtonIds: [...defaultButtons.map((b) => b.id), customButton.id],
+        noteButtonId: defaultButtonId("Note"),
+        emailButtonId: defaultButtonId("Email"),
+        wonButtonId: defaultButtonId("Won"),
+        lostButtonId: defaultButtonId("Lost"),
+        customButtonStageId: opportunityStages[1].id,
       },
     }
   }
@@ -920,6 +963,8 @@ const DELETE_STEPS: {
   // members and default roles point at (both cascade with the team)
   { table: "Team", count: (db, ids) => db.team.count({ where: { companyId: ids } }), remove: (db, ids) => db.team.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunitySettings", count: (db, ids) => db.opportunitySettings.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunitySettings.deleteMany({ where: { companyId: ids } }) },
+  // Before the stages a button moves to
+  { table: "ActionButton", count: (db, ids) => db.actionButton.count({ where: { companyId: ids } }), remove: (db, ids) => db.actionButton.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunityStage", count: (db, ids) => db.opportunityStage.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunityStage.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunityType", count: (db, ids) => db.opportunityType.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunityType.deleteMany({ where: { companyId: ids } }) },
   { table: "QuoteTemplate", count: (db, ids) => db.quoteTemplate.count({ where: { companyId: ids } }), remove: (db, ids) => db.quoteTemplate.deleteMany({ where: { companyId: ids } }) },

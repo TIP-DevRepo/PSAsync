@@ -20,7 +20,7 @@ export interface RolePermissions {
   catalog?: Partial<Record<"delete", boolean>>
   inventory?: Partial<Record<"delete", boolean>>
   settingsSections?: Partial<Record<
-    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders" | "opportunities" | "teams",
+    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders" | "opportunities" | "teams" | "actionButtons",
     boolean
   >>
   dashboards?: Partial<Record<"manage", boolean>>

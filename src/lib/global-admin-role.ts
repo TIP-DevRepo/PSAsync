@@ -50,6 +50,7 @@ export function buildGlobalAdminPermissions(): Prisma.InputJsonValue {
       salesOrders: true,
       opportunities: true,
       teams: true,
+      actionButtons: true,
     },
     dashboards: { manage: true },
     maxDiscount: 100,
