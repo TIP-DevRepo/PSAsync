@@ -998,6 +998,8 @@ const DELETE_STEPS: {
   { table: "CompanySettings", count: (db, ids) => db.companySettings.count({ where: { companyId: ids } }), remove: (db, ids) => db.companySettings.deleteMany({ where: { companyId: ids } }) },
   { table: "User", count: (db, ids) => db.user.count({ where: { companyId: ids } }), remove: (db, ids) => db.user.deleteMany({ where: { companyId: ids } }) },
   { table: "Role", count: (db, ids) => db.role.count({ where: { companyId: ids } }), remove: (db, ids) => db.role.deleteMany({ where: { companyId: ids } }) },
+  // The record number counters the app's create routes added during the run
+  { table: "NumberSequence", count: (db, ids) => db.numberSequence.count({ where: { companyId: ids } }), remove: (db, ids) => db.numberSequence.deleteMany({ where: { companyId: ids } }) },
   { table: "Company", count: (db, ids) => db.company.count({ where: { id: ids } }), remove: (db, ids) => db.company.deleteMany({ where: { id: ids } }) },
 ]
 

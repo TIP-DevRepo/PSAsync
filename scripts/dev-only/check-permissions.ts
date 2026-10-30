@@ -179,6 +179,13 @@
 // another opportunity's attachment, a Note button, or a stage the Email
 // button doesn't allow (400). The test companies have no Microsoft
 // credentials either (findExternalServices), so nothing could go out.
+//
+// Record numbers (checkRecordNumbering): Test Admin B creates several
+// quotes, sales orders, and purchase orders at the same time with parallel
+// requests, and every number must be different, in the company prefix,
+// year, and four digit format, and one after another. Deleting the newest
+// one and creating another must not reuse its number. Every record it
+// makes is deleted at the end; the counters stay until teardown.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -3125,11 +3132,79 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await checkTeamChange(prisma, sessions.admin, ctx, rows)
     await checkGrantRules(prisma, sessions.teamManager, sessions.manager, ctx, rows)
 
+    // Record numbers: parallel creates never share a number, and a delete
+    // never gives one back
+    await checkRecordNumbering(prisma, sessions.admin, ctx, rows)
+
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
     console.log(`\n${rows.length} checks: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("UNEXPECTED")} UNEXPECTED`)
 
     return checkResult(rows)
+  }
+}
+
+// Parallel creates get distinct numbers in the usual format, one after
+// another, and a delete never gives a number back (NumberSequence and
+// takeNextNumber in src/lib/record-number.ts)
+async function checkRecordNumbering(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const label = (name: string) => `[Admin B] Record numbers: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const settings = await prisma.companySettings.findUnique({ where: { companyId: ctx.b.companyId } })
+  const year = new Date().getFullYear()
+  const PARALLEL = 6
+  const kinds = [
+    { name: "quotes", path: "/api/quotes", field: "quoteNumber", prefix: settings?.quotePrefix ?? "Q", body: { clientId: ctx.b.clientId, contactId: ctx.b.contactId } },
+    { name: "sales orders", path: "/api/sales-orders", field: "soNumber", prefix: settings?.soPrefix ?? "SO", body: { clientId: ctx.b.clientId } },
+    { name: "purchase orders", path: "/api/purchase-orders", field: "poNumber", prefix: settings?.poPrefix ?? "PO", body: { vendorId: ctx.b.vendorId } },
+  ] as const
+  type Kind = (typeof kinds)[number]
+  const created: Record<Kind["name"], string[]> = { quotes: [], "sales orders": [], "purchase orders": [] }
+
+  const make = async (kind: Kind) => {
+    const res = await admin.request("POST", kind.path, { json: kind.body })
+    const body = res.status === 200 ? (JSON.parse(res.text) as Record<string, unknown>) : null
+    const id = typeof body?.id === "string" ? body.id : null
+    const number = typeof body?.[kind.field] === "string" ? (body[kind.field] as string) : null
+    if (id) created[kind.name].push(id)
+    return { status: res.status, text: res.text, id, number }
+  }
+  // The prefix may hold hyphens; the sequence is what follows the last one
+  const sequenceOf = (number: string) => Number(number.slice(number.lastIndexOf("-") + 1))
+  const matchesFormat = (number: string, prefix: string) =>
+    number.startsWith(`${prefix}-${year}-`) && /^\d{4,}$/.test(number.slice(`${prefix}-${year}-`.length))
+
+  try {
+    for (const kind of kinds) {
+      const results = await Promise.all(Array.from({ length: PARALLEL }, () => make(kind)))
+      const failed = results.find((r) => r.status !== 200 || !r.number || !r.id)
+      const numbers = results.map((r) => r.number ?? "")
+      const sequences = numbers.map(sequenceOf).sort((a, b) => a - b)
+      push(`${PARALLEL} ${kind.name} created at once get different numbers`, `${PARALLEL} distinct`, `${new Set(numbers).size} distinct`,
+        failed ? `got ${failed.status}: ${errorText(failed.text)}` : new Set(numbers).size !== PARALLEL ? `numbers ${numbers.join(", ")}` : null)
+      if (failed) continue
+      push(`${kind.name} numbers follow ${kind.prefix}-${year}-NNNN`, `${kind.prefix}-${year}-NNNN`, numbers.join(", "),
+        numbers.every((n) => matchesFormat(n, kind.prefix)) ? null : `numbers ${numbers.join(", ")}`)
+      push(`${kind.name} numbers are one after another`, "consecutive", sequences.join(", "),
+        sequences.every((n, i) => i === 0 || n === sequences[i - 1] + 1) ? null : `sequences ${sequences.join(", ")}`)
+
+      // Delete the newest, then create one more: its number comes after it
+      const highest = sequences[sequences.length - 1]
+      const newest = results.find((r) => sequenceOf(r.number ?? "") === highest)!
+      const del = await admin.request("DELETE", `${kind.path}/${newest.id}`)
+      if (del.status === 200) created[kind.name] = created[kind.name].filter((id) => id !== newest.id)
+      const next = await make(kind)
+      push(`after deleting the newest of the ${kind.name}, its number is not reused`, `delete 200, then sequence ${highest + 1}`,
+        `delete ${del.status}, then ${next.number ?? next.status}`,
+        del.status !== 200 ? `delete got ${del.status}: ${errorText(del.text)}`
+          : !next.number ? `create got ${next.status}: ${errorText(next.text)}`
+            : next.number === newest.number || sequenceOf(next.number) !== highest + 1 ? `got ${next.number} after deleting ${newest.number}` : null)
+    }
+  } finally {
+    await prisma.quote.deleteMany({ where: { id: { in: created.quotes } } })
+    await prisma.purchaseOrder.deleteMany({ where: { id: { in: created["purchase orders"] } } })
+    await prisma.salesOrder.deleteMany({ where: { id: { in: created["sales orders"] } } })
   }
 }
 
