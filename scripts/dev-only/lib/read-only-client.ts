@@ -1,5 +1,5 @@
 // Wraps a Prisma client so only reads reach the database, for the read only
-// dev scripts (report-file-links.ts). Every model method outside
+// dev scripts (report-file-links.ts, report-duplicate-numbers.ts). Every model method outside
 // READ_METHODS, every raw query, and every transaction throws before it
 // runs. Type-only imports here, so loading this file never touches the
 // database.

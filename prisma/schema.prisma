@@ -53,6 +53,7 @@ model Company {
   teams                   Team[]
   actionButtons           ActionButton[]
   auditLogEntries         AuditLogEntry[]
+  numberSequences         NumberSequence[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -742,6 +743,9 @@ model Quote {
   approvals  QuoteApproval[]
   comments   QuoteComment[]
 
+  // Every version of a quote is its own row sharing the quote number, so
+  // the number is unique together with the version
+  @@unique([companyId, quoteNumber, version])
   @@index([opportunityId])
 }
 
@@ -842,6 +846,7 @@ model SalesOrder {
   comments       SOComment[]
   attachments    SOAttachment[]
 
+  @@unique([companyId, soNumber])
   @@index([opportunityId])
 }
 
@@ -952,6 +957,7 @@ model PurchaseOrder {
   comments    POComment[]
   attachments POAttachment[]
 
+  @@unique([companyId, poNumber])
   @@index([opportunityId])
 }
 
@@ -1759,6 +1765,25 @@ model TimelineEntry {
 
   @@index([companyId])
   @@index([opportunityId, createdAt])
+}
+
+// ─── NUMBER SEQUENCES ─────────────────────────────────────────────────────────
+// One counter per company and numbered record type (key "quote",
+// "salesOrder", or "purchaseOrder"; tickets add "ticket"). nextValue is the
+// sequence the next record takes, handed out by takeNextNumber
+// (src/lib/record-number.ts) inside the record's create transaction. A
+// missing row is created on first use, starting after the highest number
+// the company already has for that key.
+model NumberSequence {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  key       String
+  nextValue Int
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, key])
 }
 
 // ─── RATE LIMITS ──────────────────────────────────────────────────────────────

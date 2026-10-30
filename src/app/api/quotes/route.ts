@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
+import { userFacingError } from "@/lib/user-error"
+import { isNumberCollision, NUMBER_TAKEN_MESSAGE, takeRecordNumber } from "@/lib/record-number"
 import { assertRefs, mayAssignQuoteTo, quoteListWhere, SELF_ASSIGN_ONLY_MESSAGE } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
 import { termsForStorage } from "@/lib/sanitize-terms"
@@ -145,15 +147,6 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  // Generate the next sequential quote number for this company
-  const year = new Date().getFullYear()
-  // Count quote *families*, not every row — each family has exactly one
-  // version-1 row, so counting those (not all versions) keeps numbering
-  // sequential for genuinely new quotes regardless of how many revisions
-  // any existing quote has
-  const existingCount = await prisma.quote.count({ where: { companyId, version: 1 } })
-  const quoteNumber = `${prefix}-${year}-${String(existingCount + 1).padStart(4, "0")}`
-
   // Expiry date: explicit date from the form, or today + expiry days
   const expiryDays = Number(body.expiryDays) || settings?.quoteExpiryDays || 30
   const expiresAt = body.expiresAt
@@ -175,35 +168,47 @@ export async function POST(req: NextRequest) {
     ? termsForStorage(settings?.quoteTerms)
     : termsForStorage(body.terms) || termsForStorage(templateTerms) || termsForStorage(settings?.quoteTerms)
 
-  const quote = await prisma.quote.create({
-    data: {
-      companyId,
-      clientId: body.clientId,
-      contactId: body.contactId || null,
-      userId: body.userId || ctx.userId,
-      quoteNumber,
-      accessToken: newAccessToken(),
-      internalAccessToken: newAccessToken(),
-      templateId: body.templateId || null,
-      title: body.title || null,
-      introText: body.introText || null,
-      useDefaultTerms,
-      terms,
-      internalNotes: body.internalNotes || null,
-      shipAddress: body.shipAddress || null,
-      shipAddress2: body.shipAddress2 || null,
-      shipCity: body.shipCity || null,
-      shipState: body.shipState || null,
-      shipZip: body.shipZip || null,
-      shipCountry: body.shipCountry || null,
-      paymentTerms: body.paymentTerms || null,
-      expiresAt,
-      sections: templateSections,
-      lineItems: {
-        create: templateLineItems,
-      },
-    },
-  })
+  // The next number from the company's quote counter, taken in the same
+  // transaction as the create so a failed create gives it back
+  let quote
+  try {
+    quote = await prisma.$transaction(async (tx) => {
+      const quoteNumber = await takeRecordNumber(tx, companyId, "quote", prefix)
+      return tx.quote.create({
+        data: {
+          companyId,
+          clientId: body.clientId,
+          contactId: body.contactId || null,
+          userId: body.userId || ctx.userId,
+          quoteNumber,
+          accessToken: newAccessToken(),
+          internalAccessToken: newAccessToken(),
+          templateId: body.templateId || null,
+          title: body.title || null,
+          introText: body.introText || null,
+          useDefaultTerms,
+          terms,
+          internalNotes: body.internalNotes || null,
+          shipAddress: body.shipAddress || null,
+          shipAddress2: body.shipAddress2 || null,
+          shipCity: body.shipCity || null,
+          shipState: body.shipState || null,
+          shipZip: body.shipZip || null,
+          shipCountry: body.shipCountry || null,
+          paymentTerms: body.paymentTerms || null,
+          expiresAt,
+          sections: templateSections,
+          lineItems: {
+            create: templateLineItems,
+          },
+        },
+      })
+    })
+  } catch (err) {
+    if (isNumberCollision(err)) return apiError(409, NUMBER_TAKEN_MESSAGE, "NUMBER_TAKEN")
+    const { message, status } = userFacingError(err, "Creating a quote")
+    return apiError(status, message)
+  }
 
   return NextResponse.json(withoutPortalTokens(quote))
 }

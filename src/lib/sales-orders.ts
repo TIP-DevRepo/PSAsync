@@ -1,5 +1,6 @@
 import { prisma } from "@/lib/prisma"
 import type { QuoteLineItem } from "@/generated/prisma"
+import { isNumberCollision, takeRecordNumber } from "@/lib/record-number"
 
 type QuoteLineItemWithCatalog = QuoteLineItem & {
   catalogItem: { vendorId: string | null; vendorSku: string | null; manufacturerSku: string | null } | null
@@ -39,55 +40,66 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
   const orderedItems = resolveOrderedLineItems(quote.lineItems)
 
   const prefix = quote.company.settings?.soPrefix ?? "SO"
-  const year = new Date().getFullYear()
-  const existingCount = await prisma.salesOrder.count({ where: { companyId: quote.companyId } })
-  const soNumber = `${prefix}-${year}-${String(existingCount + 1).padStart(4, "0")}`
-
-  const salesOrder = await prisma.salesOrder.create({
-    data: {
-      companyId: quote.companyId,
-      quoteId: quote.id,
-      clientId: quote.clientId,
-      userId: quote.userId,
-      soNumber,
-      clientPoNumber: quote.clientPoNumber,
-      status: "DRAFT",
-      paymentTerms: quote.paymentTerms,
-      shipAddress: quote.client.mainShippingLocation?.address ?? null,
-      shipCity: quote.client.mainShippingLocation?.city ?? null,
-      shipState: quote.client.mainShippingLocation?.state ?? null,
-      shipZip: quote.client.mainShippingLocation?.zip ?? null,
-      shipCountry: null,
-      lineItems: {
-        create: orderedItems.map((li) => ({
-          catalogItemId: li.catalogItemId,
-          // A catalog-sourced item's own part number/SKU carries through
-          // as partNumber, and its assigned Vendor (who you'd buy it from)
-          // carries through as vendorId. Ad-hoc quote items have no
-          // catalogItem link, so both simply stay null — there's no vendor
-          // data anywhere upstream for those.
-          vendorId: li.catalogItem?.vendorId ?? null,
-          partNumber: li.catalogItem?.manufacturerSku ?? li.catalogItem?.vendorSku ?? li.sku,
-          name: li.name,
-          description: li.description,
-          sku: li.sku,
-          section: li.section,
-          quantity: li.quantity,
-          unitPrice: li.unitPrice,
-          cost: li.cost,
-          discount: li.discount,
-          taxable: li.taxable,
-          isRecurring: li.isRecurring,
-          recurringInterval: li.recurringInterval,
-          isTextBlock: li.isTextBlock,
-          bundleName: li.bundleName,
-          bundleDisplayMode: li.bundleDisplayMode,
-          isBundleHeader: li.isBundleHeader,
-          sortOrder: li.sortOrder,
-        })),
-      },
-    },
-  })
+  // The next number from the company's sales order counter, taken in the
+  // same transaction as the create so a failed create gives it back. A
+  // second request for the same quote that got past the check above loses
+  // on the unique quoteId and gets the order the first one created.
+  let salesOrder
+  try {
+    salesOrder = await prisma.$transaction(async (tx) => {
+      const soNumber = await takeRecordNumber(tx, quote.companyId, "salesOrder", prefix)
+      return tx.salesOrder.create({
+        data: {
+          companyId: quote.companyId,
+          quoteId: quote.id,
+          clientId: quote.clientId,
+          userId: quote.userId,
+          soNumber,
+          clientPoNumber: quote.clientPoNumber,
+          status: "DRAFT",
+          paymentTerms: quote.paymentTerms,
+          shipAddress: quote.client.mainShippingLocation?.address ?? null,
+          shipCity: quote.client.mainShippingLocation?.city ?? null,
+          shipState: quote.client.mainShippingLocation?.state ?? null,
+          shipZip: quote.client.mainShippingLocation?.zip ?? null,
+          shipCountry: null,
+          lineItems: {
+            create: orderedItems.map((li) => ({
+              catalogItemId: li.catalogItemId,
+              // A catalog-sourced item's own part number/SKU carries through
+              // as partNumber, and its assigned Vendor (who you'd buy it from)
+              // carries through as vendorId. Ad-hoc quote items have no
+              // catalogItem link, so both simply stay null: there's no vendor
+              // data anywhere upstream for those.
+              vendorId: li.catalogItem?.vendorId ?? null,
+              partNumber: li.catalogItem?.manufacturerSku ?? li.catalogItem?.vendorSku ?? li.sku,
+              name: li.name,
+              description: li.description,
+              sku: li.sku,
+              section: li.section,
+              quantity: li.quantity,
+              unitPrice: li.unitPrice,
+              cost: li.cost,
+              discount: li.discount,
+              taxable: li.taxable,
+              isRecurring: li.isRecurring,
+              recurringInterval: li.recurringInterval,
+              isTextBlock: li.isTextBlock,
+              bundleName: li.bundleName,
+              bundleDisplayMode: li.bundleDisplayMode,
+              isBundleHeader: li.isBundleHeader,
+              sortOrder: li.sortOrder,
+            })),
+          },
+        },
+      })
+    })
+  } catch (err) {
+    if (!isNumberCollision(err)) throw err
+    const created = await prisma.salesOrder.findUnique({ where: { quoteId } })
+    if (!created) throw err
+    return created
+  }
 
   return salesOrder
 }

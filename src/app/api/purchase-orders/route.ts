@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
+import { userFacingError } from "@/lib/user-error"
+import { isNumberCollision, NUMBER_TAKEN_MESSAGE, takeRecordNumber } from "@/lib/record-number"
 import { assertRefs, purchaseOrderListWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
 
 export async function GET() {
@@ -69,10 +71,6 @@ export async function POST(req: NextRequest) {
   const settings = await prisma.companySettings.findUnique({ where: { companyId } })
   const prefix = settings?.poPrefix ?? "PO"
   const paymentType = body.paymentType || settings?.poDefaultPaymentType || "Net30"
-
-  const year = new Date().getFullYear()
-  const existingCount = await prisma.purchaseOrder.count({ where: { companyId } })
-  const poNumber = `${prefix}-${year}-${String(existingCount + 1).padStart(4, "0")}`
 
   // Two ways into this route: generating a PO from selected SO line items
   // (the existing "Generate Purchase Order" flow on a Sales Order), or
@@ -162,30 +160,42 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const purchaseOrder = await prisma.purchaseOrder.create({
-    data: {
-      companyId,
-      salesOrderId,
-      vendorId: body.vendorId,
-      userId: ctx.userId,
-      poNumber,
-      status: "DRAFT",
-      paymentType,
-      internalNotes: body.internalNotes || null,
-      expectedAt: body.expectedAt ? new Date(body.expectedAt) : null,
-      shipToClient: body.shipToClient ?? false,
-      shipToClientId,
-      shipToClientLocationId,
-      shipContactName: body.shipContactName || null,
-      shipAddress: body.shipAddress || null,
-      shipAddress2: body.shipAddress2 || null,
-      shipCity: body.shipCity || null,
-      shipState: body.shipState || null,
-      shipZip: body.shipZip || null,
-      shipCountry: body.shipCountry || null,
-      ...(lineItemsCreate.length > 0 ? { lineItems: { create: lineItemsCreate } } : {}),
-    },
-  })
+  // The next number from the company's purchase order counter, taken in the
+  // same transaction as the create so a failed create gives it back
+  let purchaseOrder
+  try {
+    purchaseOrder = await prisma.$transaction(async (tx) => {
+      const poNumber = await takeRecordNumber(tx, companyId, "purchaseOrder", prefix)
+      return tx.purchaseOrder.create({
+        data: {
+          companyId,
+          salesOrderId,
+          vendorId: body.vendorId,
+          userId: ctx.userId,
+          poNumber,
+          status: "DRAFT",
+          paymentType,
+          internalNotes: body.internalNotes || null,
+          expectedAt: body.expectedAt ? new Date(body.expectedAt) : null,
+          shipToClient: body.shipToClient ?? false,
+          shipToClientId,
+          shipToClientLocationId,
+          shipContactName: body.shipContactName || null,
+          shipAddress: body.shipAddress || null,
+          shipAddress2: body.shipAddress2 || null,
+          shipCity: body.shipCity || null,
+          shipState: body.shipState || null,
+          shipZip: body.shipZip || null,
+          shipCountry: body.shipCountry || null,
+          ...(lineItemsCreate.length > 0 ? { lineItems: { create: lineItemsCreate } } : {}),
+        },
+      })
+    })
+  } catch (err) {
+    if (isNumberCollision(err)) return apiError(409, NUMBER_TAKEN_MESSAGE, "NUMBER_TAKEN")
+    const { message, status } = userFacingError(err, "Creating a purchase order")
+    return apiError(status, message)
+  }
 
   return NextResponse.json(purchaseOrder)
 }
