@@ -20,6 +20,7 @@ export const TIMELINE_ACTIONS = [
   "expected_close_date_changed",
   "attachment_added",
   "attachment_removed",
+  "restored",
 ] as const
 
 export type TimelineActionKey = (typeof TIMELINE_ACTIONS)[number]
@@ -48,6 +49,8 @@ export interface TimelineActionData {
   expected_close_date_changed: { from: string | null; to: string | null }
   attachment_added: { attachmentId: string; fileName: string }
   attachment_removed: { attachmentId: string; fileName: string }
+  // A deleted record restored from the audit log
+  restored: { label: string }
 }
 
 // A NOTE posted with a stage change stores the move in its data as
@@ -170,6 +173,8 @@ export function describeTimelineAction(action: string | null, data: unknown): st
       return `Attachment added: ${text(d.fileName, "a file")}`
     case "attachment_removed":
       return `Attachment removed: ${text(d.fileName, "a file")}`
+    case "restored":
+      return `${text(d.label, "Record")} restored after being deleted`
     default:
       return "Updated"
   }

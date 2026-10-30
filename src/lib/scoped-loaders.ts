@@ -414,7 +414,7 @@ export function loadViewableOpportunity(ctx: OpportunityViewer, opportunityId: s
   if (!ctx.can("pages.opportunities")) return Promise.resolve(null)
   return prisma.opportunity.findFirst({
     where: viewableOpportunityWhere(ctx, opportunityId),
-    select: { id: true, ownerId: true },
+    select: { id: true, ownerId: true, number: true, title: true },
   })
 }
 
@@ -438,7 +438,7 @@ export function loadOpportunityTimelineEntry(ctx: OpportunityViewer, opportunity
   if (!ctx.can("pages.opportunities")) return Promise.resolve(null)
   return prisma.timelineEntry.findFirst({
     where: { id: entryId, companyId: ctx.companyId, opportunityId, opportunity: viewableOpportunityWhere(ctx, opportunityId) },
-    select: { id: true, kind: true, authorId: true },
+    select: { id: true, kind: true, authorId: true, opportunity: { select: { id: true, number: true, title: true } } },
   })
 }
 

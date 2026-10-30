@@ -15,6 +15,8 @@ import { readStoredObject } from "@/lib/uploads"
 import { fileExtension, formatMegabytes, UPLOAD_TYPES } from "@/lib/upload-rules"
 import { consumeSubject, emailLimitedResponse } from "@/lib/rate-limit"
 import { escapeHtmlWithBreaks } from "@/lib/html"
+import { recordAudit, type AuditEntryInput } from "@/lib/audit-log"
+import { opportunityEmailAudit, opportunityStageAudit } from "@/lib/opportunity-audit"
 import type { Prisma } from "@/generated/prisma"
 
 export const runtime = "nodejs"
@@ -35,7 +37,8 @@ export const maxDuration = 30
 // Only after Microsoft accepts the message does one transaction write the
 // entry (author, from, to, cc, bcc, subject, body, attachment names, the
 // button's label) and move the stage, recorded on the same entry like a
-// note. A failed send records nothing and answers a plain error.
+// note, with the audit entries (email_sent, and field_changed for a stage
+// move). A failed send records nothing and answers a plain error.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -143,7 +146,7 @@ export async function POST(
         ...(stageChange ? { stageChange } : {}),
         ...(button ? { actionButton: { id: button.id, label: button.label } } : {}),
       }
-      return tx.timelineEntry.create({
+      const created = await tx.timelineEntry.create({
         data: {
           companyId: ctx.companyId,
           opportunityId: opportunity.id,
@@ -155,6 +158,11 @@ export async function POST(
         },
         select: timelineEntrySelect,
       })
+      const audits: AuditEntryInput[] = []
+      if (stageChange) audits.push(opportunityStageAudit(opportunity, stageChange.from, stageChange.to))
+      audits.push(opportunityEmailAudit(opportunity, { entryId: created.id, to: recipients.value.to, subject: subject.value }))
+      await recordAudit(tx, { companyId: ctx.companyId, actorId: ctx.userId, entries: audits, at: now })
+      return created
     })
   } catch (err) {
     // The email has gone; only recording it failed. One log line with the

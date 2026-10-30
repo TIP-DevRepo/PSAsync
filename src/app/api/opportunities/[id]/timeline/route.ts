@@ -17,6 +17,8 @@ import {
   toTimelineEntryResponse,
 } from "@/lib/timeline"
 import { readActionRequest } from "@/lib/action-buttons"
+import { recordAudit, type AuditEntryInput } from "@/lib/audit-log"
+import { opportunityNoteAudit, opportunityStageAudit } from "@/lib/opportunity-audit"
 
 // The opportunity's timeline, newest first, TIMELINE_PAGE_SIZE at a time.
 // ?cursor= is the last entry of the previous page (nextCursor), which must
@@ -60,7 +62,8 @@ export async function GET(
 // one asked for, or its fixed stage), its note rule whether the text may
 // be empty, and its label is stored on the entry (data.actionButton). A
 // note left empty under an optional button must move the stage, or there
-// is nothing to post.
+// is nothing to post. The audit log gets the stage change (field_changed)
+// and the note (note_added) in the same transaction.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -106,7 +109,7 @@ export async function POST(
       ...(stageChange ? { stageChange } : {}),
       ...(button ? { actionButton: { id: button.id, label: button.label } } : {}),
     }
-    return tx.timelineEntry.create({
+    const created = await tx.timelineEntry.create({
       data: {
         companyId: ctx.companyId,
         opportunityId: opportunity.id,
@@ -118,6 +121,11 @@ export async function POST(
       },
       select: timelineEntrySelect,
     })
+    const audits: AuditEntryInput[] = []
+    if (stageChange) audits.push(opportunityStageAudit(opportunity, stageChange.from, stageChange.to))
+    if (note.value !== null) audits.push(opportunityNoteAudit(opportunity, "added", { entryId: created.id, after: note.value }))
+    await recordAudit(tx, { companyId: ctx.companyId, actorId: ctx.userId, entries: audits, at: now })
+    return created
   })
   if (!result) return apiError(400, NOTE_EMPTY_MESSAGE)
   return NextResponse.json(toTimelineEntryResponse(result))

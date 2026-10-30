@@ -8,6 +8,8 @@ import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { opportunityAttachmentSelect } from "@/lib/opportunity-selects"
 import { recordTimelineActions } from "@/lib/timeline"
 import { attachmentAction } from "@/lib/opportunity-timeline"
+import { recordAudit } from "@/lib/audit-log"
+import { opportunityAttachmentAudit } from "@/lib/opportunity-audit"
 
 export async function GET(
   req: NextRequest,
@@ -59,7 +61,7 @@ export async function POST(
 
   const fileUrl = await storeUpload(file, { folder: `opportunities/${opportunity.id}`, profile: "ATTACHMENT" })
 
-  // The row and its timeline entry are saved together
+  // The row and its timeline and audit entries are saved together
   const attachment = await prisma.$transaction(async (tx) => {
     const created = await tx.opportunityAttachment.create({
       data: {
@@ -77,6 +79,7 @@ export async function POST(
       subject: { opportunityId: opportunity.id },
       actions: [attachmentAction("added", created)],
     })
+    await recordAudit(tx, { companyId: ctx.companyId, actorId: ctx.userId, entries: [opportunityAttachmentAudit(opportunity, "added", created)] })
     return created
   })
 

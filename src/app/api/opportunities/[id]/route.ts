@@ -1,41 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
-import {
-  assertRefs,
-  loadClientMainLocationId,
-  loadTeamMemberIds,
-  mayAssignOpportunityTo,
-  mayUseOpportunityTeam,
-  opportunityStageWhere,
-  opportunityWhere,
-  OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE,
-  viewableOpportunityWhere,
-  type BodyRefs,
-} from "@/lib/scoped-loaders"
+import { opportunityWhere, viewableOpportunityWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
-import { OWNER_NOT_IN_TEAM_MESSAGE, TEAM_CHANGE_OWNER_MESSAGE, TEAM_NOT_MEMBER_MESSAGE } from "@/lib/team-rules"
 import { opportunityDetailSelect } from "@/lib/opportunity-selects"
-import {
-  INVALID_BODY_MESSAGE,
-  isPrismaError,
-  linkedRecordsMessage,
-  OPPORTUNITY_TITLE_MAX,
-  readDate,
-  readExpectedValue,
-  readJsonObject,
-  readOptionalId,
-  readText,
-  stageChangeData,
-} from "@/lib/opportunity-rules"
+import { INVALID_BODY_MESSAGE, isPrismaError, linkedRecordsMessage, readJsonObject } from "@/lib/opportunity-rules"
 import { deleteStoredObjects } from "@/lib/uploads"
-import { recordTimelineActions } from "@/lib/timeline"
-import { opportunityChangeActions, opportunityTimelineSnapshotSelect } from "@/lib/opportunity-timeline"
+import { applyOpportunityUpdate, opportunityUpdateExistingSelect, planOpportunityUpdate } from "@/lib/opportunity-update"
 import { userFacingError } from "@/lib/user-error"
-import type { Prisma } from "@/generated/prisma"
-
-const isBlank = (value: unknown) => value === undefined || value === null || value === ""
 
 export async function GET(
   req: NextRequest,
@@ -61,7 +34,7 @@ export async function GET(
 }
 
 // Changes only the fields the body includes, and records a timeline ACTION
-// entry for each field that actually changed
+// entry and an audit entry for each field that actually changed
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -78,152 +51,22 @@ export async function PATCH(
   const { id } = await params
   const existing = await prisma.opportunity.findFirst({
     where: viewableOpportunityWhere(ctx, id),
-    select: { id: true, clientId: true, contactId: true, stageId: true, teamId: true, ownerId: true },
+    select: opportunityUpdateExistingSelect,
   })
   if (!existing) return notFound()
 
   const body = await readJsonObject(req)
   if (!body) return apiError(400, INVALID_BODY_MESSAGE)
 
-  const data: Prisma.OpportunityUncheckedUpdateInput = {}
-  const refs: BodyRefs = {}
-
-  if ("title" in body) {
-    const title = readText(body.title, { label: "Title", max: OPPORTUNITY_TITLE_MAX, required: true })
-    if (title.error !== undefined) return apiError(400, title.error)
-    data.title = title.value as string
-  }
-  if ("expectedValue" in body) {
-    const expectedValue = readExpectedValue(body.expectedValue)
-    if (expectedValue.error !== undefined) return apiError(400, expectedValue.error)
-    data.expectedValue = expectedValue.value
-  }
-  if ("expectedCloseDate" in body) {
-    const expectedCloseDate = readDate(body.expectedCloseDate)
-    if (expectedCloseDate.error !== undefined) return apiError(400, expectedCloseDate.error)
-    data.expectedCloseDate = expectedCloseDate.value
-  }
-
-  // A new team must be the company's, and one the caller belongs to (any
-  // team with opportunities.viewAll). It can't be cleared.
-  let teamChange: string | null = null
-  if ("teamId" in body) {
-    if (isBlank(body.teamId)) return apiError(400, "A team is required")
-    if (typeof body.teamId !== "string") return apiError(400, "Invalid team", "INVALID_REFERENCE")
-    const invalidTeam = await assertRefs(ctx, { teamId: body.teamId })
-    if (invalidTeam) return invalidTeam
-    if (body.teamId !== existing.teamId) {
-      teamChange = body.teamId
-      data.teamId = body.teamId
-    }
-  }
-
-  // Null or blank unassigns. A named owner follows the owner rule
-  // (mayAssignOpportunityTo) for the opportunity's team, new or kept, and
-  // must be a member of it.
-  const ownerGiven = "ownerId" in body
-  let ownerId = existing.ownerId
-  if (ownerGiven) {
-    const owner = readOptionalId(body.ownerId)
-    if (owner.error !== undefined) return apiError(400, "Invalid user", "INVALID_REFERENCE")
-    ownerId = owner.value
-    data.ownerId = owner.value
-    refs.userId = owner.value
-  }
-  // Only a team or owner change is checked against the team, so an older
-  // opportunity whose owner isn't in its team keeps saving its other fields
-  const teamId = teamChange ?? existing.teamId
-  let members = new Set<string>()
-  if ((teamChange || ownerGiven) && teamId) {
-    members = await loadTeamMemberIds(ctx, teamId, [ctx.userId, ownerId])
-    const actorInTeam = members.has(ctx.userId)
-    if (teamChange && !mayUseOpportunityTeam(ctx, actorInTeam)) {
-      return apiError(403, TEAM_NOT_MEMBER_MESSAGE, "FORBIDDEN")
-    }
-    if (ownerGiven && !mayAssignOpportunityTo(ctx, ownerId, actorInTeam)) {
-      return apiError(403, OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE, "FORBIDDEN")
-    }
-  }
-
-  // A new client or contact is checked as a pair, so the contact (new or
-  // kept) always belongs to the client (new or kept)
-  if ("clientId" in body || "contactId" in body) {
-    if ("clientId" in body && isBlank(body.clientId)) return apiError(400, "A client is required")
-    if ("contactId" in body && isBlank(body.contactId)) return apiError(400, "A contact is required")
-    refs.clientId = "clientId" in body ? body.clientId : existing.clientId
-    refs.contactId = "contactId" in body ? body.contactId : existing.contactId
-    if ("clientId" in body) data.clientId = body.clientId as string
-    if ("contactId" in body) data.contactId = body.contactId as string
-  }
-
-  if ("stageId" in body) {
-    if (isBlank(body.stageId)) return apiError(400, "A stage is required")
-    refs.opportunityStageId = body.stageId
-  }
-  // A location of the opportunity's client (new or kept). Null or blank
-  // clears it.
-  if ("clientLocationId" in body) {
-    const location = readOptionalId(body.clientLocationId)
-    if (location.error !== undefined) return apiError(400, "Invalid location", "INVALID_REFERENCE")
-    data.clientLocationId = location.value
-    refs.clientLocationId = location.value
-    refs.clientId = "clientId" in body ? body.clientId : existing.clientId
-  }
-
-  if ("typeId" in body) {
-    const type = readOptionalId(body.typeId)
-    if (type.error !== undefined) return apiError(400, "Invalid opportunity type", "INVALID_REFERENCE")
-    data.typeId = type.value
-    refs.opportunityTypeId = type.value
-  }
-
-  const invalid = await assertRefs(ctx, refs)
-  if (invalid) return invalid
-
-  // The owner (new, or kept through a team change) must be in the team. A
-  // team change whose owner isn't in the new team needs a new owner or
-  // unassigned in the same request.
-  if ((teamChange || ownerGiven) && ownerId && !members.has(ownerId)) {
-    return apiError(400, teamChange && !ownerGiven ? TEAM_CHANGE_OWNER_MESSAGE : OWNER_NOT_IN_TEAM_MESSAGE, "OWNER_NOT_IN_TEAM")
-  }
-
-  // A new client without a location takes the new client's main location
-  if ("clientId" in body && body.clientId !== existing.clientId && !("clientLocationId" in body)) {
-    data.clientLocationId = await loadClientMainLocationId(ctx, body.clientId as string)
-  }
-
-  // Moving to another stage stamps stageChangedAt and sets or clears closedAt
-  if ("stageId" in body) {
-    const stage = await prisma.opportunityStage.findFirst({
-      where: opportunityStageWhere(ctx, body.stageId as string),
-      select: { id: true, category: true },
-    })
-    if (!stage) return apiError(400, "Invalid stage", "INVALID_REFERENCE")
-    Object.assign(data, stageChangeData({ id: existing.stageId }, stage, new Date()))
-  }
+  // Every field rule lives in planOpportunityUpdate, shared with the audit
+  // log undo
+  const plan = await planOpportunityUpdate(ctx, existing, body)
+  if (plan.response) return plan.response
 
   try {
-    // The change and its timeline entries are saved together. The before
-    // values are read again inside the transaction, right before the write.
-    const opportunity = await prisma.$transaction(async (tx) => {
-      const before = await tx.opportunity.findFirstOrThrow({
-        where: opportunityWhere(ctx, existing.id),
-        select: opportunityTimelineSnapshotSelect,
-      })
-      const saved = await tx.opportunity.update({
-        where: opportunityWhere(ctx, existing.id),
-        data,
-        select: opportunityDetailSelect,
-      })
-      // Nothing when the PATCH changed nothing
-      await recordTimelineActions(tx, {
-        companyId: ctx.companyId,
-        authorId: ctx.userId,
-        subject: { opportunityId: existing.id },
-        actions: opportunityChangeActions(before, saved),
-      })
-      return saved
-    })
+    // The change, its timeline entries, and its audit entries are saved
+    // together (nothing is recorded when the PATCH changed nothing)
+    const opportunity = await prisma.$transaction(async (tx) => (await applyOpportunityUpdate(tx, ctx, existing.id, plan.data)).saved)
     return NextResponse.json(opportunity)
   } catch (err) {
     const { message, status } = userFacingError(err, "Editing an opportunity")

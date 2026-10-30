@@ -19,6 +19,8 @@ import {
 } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
 import { stageUsedByButtonMessage } from "@/lib/action-buttons"
+import { recordAudit } from "@/lib/audit-log"
+import { opportunityClosedDateAudit } from "@/lib/opportunity-audit"
 import { OpportunityStageCategory, type Prisma } from "@/generated/prisma"
 
 function refusalResponse(refusal: Refusal) {
@@ -29,7 +31,9 @@ function refusalResponse(refusal: Refusal) {
 // refused when the stage is the last of its old category, or when it is the
 // stage a sent quote moves to and would stop being OPEN. An accepted one
 // sets or clears closedAt on the stage's opportunities in the same
-// transaction (stageCategoryClosedAtUpdate).
+// transaction (stageCategoryClosedAtUpdate), with a closed_date_changed
+// audit entry for each opportunity whose closedAt changed. Deleted
+// opportunities follow too, so one restored later still matches its stage.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -93,10 +97,22 @@ export async function PATCH(
     // when it becomes OPEN
     const closedAt = category === undefined ? null : stageCategoryClosedAtUpdate(stage.category, category, new Date())
     if (closedAt) {
-      await tx.opportunity.updateMany({
-        where: { companyId, stageId: stage.id, ...(closedAt.onlyWithoutClosedAt ? { closedAt: null } : {}) },
-        data: { closedAt: closedAt.closedAt },
+      // Deliberately without the not deleted condition (see above)
+      const affected = await tx.opportunity.findMany({
+        where: { companyId, stageId: stage.id, ...(closedAt.onlyWithoutClosedAt ? { closedAt: null } : { closedAt: { not: null } }) },
+        select: { id: true, number: true, title: true, closedAt: true },
       })
+      if (affected.length > 0) {
+        await tx.opportunity.updateMany({
+          where: { companyId, id: { in: affected.map((o) => o.id) } },
+          data: { closedAt: closedAt.closedAt },
+        })
+        await recordAudit(tx, {
+          companyId,
+          actorId: ctx.userId,
+          entries: affected.map((o) => opportunityClosedDateAudit(o, o.closedAt, closedAt.closedAt)),
+        })
+      }
     }
 
     return saved
