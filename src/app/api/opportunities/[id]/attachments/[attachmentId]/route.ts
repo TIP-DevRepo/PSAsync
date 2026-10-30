@@ -7,6 +7,8 @@ import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { deleteStoredObject } from "@/lib/uploads"
 import { recordTimelineActions } from "@/lib/timeline"
 import { attachmentAction } from "@/lib/opportunity-timeline"
+import { recordAudit } from "@/lib/audit-log"
+import { opportunityAttachmentAudit } from "@/lib/opportunity-audit"
 
 export async function DELETE(
   req: NextRequest,
@@ -25,11 +27,19 @@ export async function DELETE(
   const existing = await loadOpportunityAttachment(ctx, id, attachmentId)
   if (!existing) return notFound()
 
-  // The row and its timeline entry go together
+  // The row and its timeline and audit entries go together. The audit
+  // entry keeps the file's name and size; the file itself is not restorable.
   const deleted = await prisma.$transaction(async (tx) => {
     const removed = await tx.opportunityAttachment.delete({
       where: opportunityAttachmentWhere(ctx, id, attachmentId),
-      select: { id: true, fileName: true, fileUrl: true, opportunityId: true },
+      select: {
+        id: true,
+        fileName: true,
+        fileUrl: true,
+        fileSize: true,
+        opportunityId: true,
+        opportunity: { select: { id: true, number: true, title: true } },
+      },
     })
     await recordTimelineActions(tx, {
       companyId: ctx.companyId,
@@ -37,6 +47,7 @@ export async function DELETE(
       subject: { opportunityId: removed.opportunityId },
       actions: [attachmentAction("removed", removed)],
     })
+    await recordAudit(tx, { companyId: ctx.companyId, actorId: ctx.userId, entries: [opportunityAttachmentAudit(removed.opportunity, "removed", removed)] })
     return removed
   })
 

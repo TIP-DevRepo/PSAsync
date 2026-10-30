@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError, isEnumValue, notFound, requireAccess } from "@/lib/api-access"
-import { opportunityStageWhere } from "@/lib/scoped-loaders"
+import { DELETED_OPPORTUNITY, opportunityStageWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults, isRefusal, refuse, withOpportunitySettingsLock, type Refusal } from "@/lib/opportunity-defaults"
 import { opportunityStageSelect } from "@/lib/opportunity-selects"
 import {
@@ -19,6 +19,8 @@ import {
 } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
 import { stageUsedByButtonMessage } from "@/lib/action-buttons"
+import { recordAudit } from "@/lib/audit-log"
+import { opportunityClosedDateAudit } from "@/lib/opportunity-audit"
 import { OpportunityStageCategory, type Prisma } from "@/generated/prisma"
 
 function refusalResponse(refusal: Refusal) {
@@ -29,7 +31,9 @@ function refusalResponse(refusal: Refusal) {
 // refused when the stage is the last of its old category, or when it is the
 // stage a sent quote moves to and would stop being OPEN. An accepted one
 // sets or clears closedAt on the stage's opportunities in the same
-// transaction (stageCategoryClosedAtUpdate).
+// transaction (stageCategoryClosedAtUpdate), with a closed_date_changed
+// audit entry for each opportunity whose closedAt changed. Deleted
+// opportunities follow too, so one restored later still matches its stage.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -93,10 +97,22 @@ export async function PATCH(
     // when it becomes OPEN
     const closedAt = category === undefined ? null : stageCategoryClosedAtUpdate(stage.category, category, new Date())
     if (closedAt) {
-      await tx.opportunity.updateMany({
-        where: { companyId, stageId: stage.id, ...(closedAt.onlyWithoutClosedAt ? { closedAt: null } : {}) },
-        data: { closedAt: closedAt.closedAt },
+      // Deliberately without the not deleted condition (see above)
+      const affected = await tx.opportunity.findMany({
+        where: { companyId, stageId: stage.id, ...(closedAt.onlyWithoutClosedAt ? { closedAt: null } : { closedAt: { not: null } }) },
+        select: { id: true, number: true, title: true, closedAt: true },
       })
+      if (affected.length > 0) {
+        await tx.opportunity.updateMany({
+          where: { companyId, id: { in: affected.map((o) => o.id) } },
+          data: { closedAt: closedAt.closedAt },
+        })
+        await recordAudit(tx, {
+          companyId,
+          actorId: ctx.userId,
+          entries: affected.map((o) => opportunityClosedDateAudit(o, o.closedAt, closedAt.closedAt)),
+        })
+      }
     }
 
     return saved
@@ -128,8 +144,12 @@ export async function DELETE(
       const stage = await tx.opportunityStage.findFirst({ where: opportunityStageWhere(ctx, id), select: { id: true, category: true } })
       if (!stage) return refuse(404, "Not found")
 
+      // Deleted opportunities count too: their rows are kept, so they still hold the stage
       const inUse = await tx.opportunity.count({ where: { companyId, stageId: stage.id } })
-      if (inUse > 0) return refuse(409, stageInUseMessage(inUse), "STAGE_IN_USE")
+      if (inUse > 0) {
+        const deleted = await tx.opportunity.count({ where: { companyId, stageId: stage.id, ...DELETED_OPPORTUNITY } })
+        return refuse(409, stageInUseMessage(inUse, deleted), "STAGE_IN_USE")
+      }
       const button = await tx.actionButton.findFirst({
         where: { companyId, fixedStageId: stage.id },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],

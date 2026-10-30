@@ -54,7 +54,7 @@ export function DeleteOpportunityDialog({
             </AlertDialog.Header>
             <AlertDialog.Body className="space-y-3 text-muted-foreground">
               <p>
-                &quot;{opportunity.title}&quot; and its attachments will be deleted. This can&apos;t be undone.
+                &quot;{opportunity.title}&quot; and its attachments will be deleted. Admins with audit log access can restore it.
               </p>
               {error && (
                 <p role="alert" className="rounded-md bg-danger/10 px-3 py-2 text-sm text-danger">

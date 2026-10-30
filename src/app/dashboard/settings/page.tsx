@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
-import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound, MousePointerClick } from "lucide-react"
+import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound, MousePointerClick, History } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
@@ -20,6 +20,7 @@ import { SalesOrderSettingsPanel } from "@/components/settings/SalesOrderSetting
 import { OpportunitySettingsPanel } from "@/components/settings/OpportunitySettingsPanel"
 import { TeamsSettingsPanel } from "@/components/settings/TeamsSettingsPanel"
 import { ActionButtonsSettingsPanel } from "@/components/settings/ActionButtonsSettingsPanel"
+import { AuditLogSettingsPanel } from "@/components/settings/AuditLogSettingsPanel"
 import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
 import { NoAccess } from "@/components/NoAccess"
 import { useAccess } from "@/components/AccessProvider"
@@ -40,6 +41,7 @@ type PanelKey =
   | "notifications"
   | "distributors"
   | "microsoft"
+  | "auditLog"
 
 interface SettingsItem {
   key: PanelKey
@@ -105,6 +107,10 @@ const settingsCategories: SettingsCategory[] = [
       { key: "microsoft", label: "Microsoft / Outlook Integration", icon: Mail },
     ],
   },
+  {
+    label: "Audit",
+    items: [{ key: "auditLog", label: "Audit Log", icon: History }],
+  },
 ]
 
 // The permission each panel needs, matching the API rules behind it. null
@@ -127,6 +133,7 @@ const PANEL_PERMISSION: Record<PanelKey, string | null> = {
   notifications: "settingsSections.notifications",
   distributors: "settingsSections.integrations",
   microsoft: null,
+  auditLog: "auditLog.view",
 }
 
 const ITEM_LOOKUP = {} as Record<PanelKey, { label: string; category: string }>
@@ -172,6 +179,8 @@ function renderPanel(key: PanelKey | null) {
       return <DistributorSettingsPanel />
     case "microsoft":
       return <MicrosoftSettingsPanel />
+    case "auditLog":
+      return <AuditLogSettingsPanel />
     default:
       return (
         <p className="text-sm text-muted-foreground">

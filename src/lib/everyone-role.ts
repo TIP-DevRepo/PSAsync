@@ -17,6 +17,7 @@ function buildNoPermissions(): Prisma.InputJsonValue {
     inventory: { delete: false },
     settingsSections: { company: false, users: false, quotes: false, approvalWorkflows: false, notifications: false, integrations: false, salesOrders: false, opportunities: false, teams: false, actionButtons: false },
     dashboards: { manage: false },
+    auditLog: { view: false, restore: false },
   }
 }
 

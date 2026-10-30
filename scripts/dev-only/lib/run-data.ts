@@ -735,7 +735,16 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
       rec("timelineEntry", await entry({ kind: "ACTION", authorId: adminId, action: "stage_changed", data: { from: stageRef(1), to: stageRef(0) }, createdAt: at(30) }))
       const adminNote = rec("timelineEntry", await entry({ kind: "NOTE", authorId: adminId, body: `<p>${n.timelineNotePrefix} by the admin</p>`, createdAt: at(20) }))
       const repNote = rec("timelineEntry", await entry({ kind: "NOTE", authorId: repUserId, body: `<p>${n.timelineNotePrefix} by Test Rep</p>`, createdAt: at(10) }))
-      return { id: opportunity.id, attachmentId: attachment.id, actionId: createdAction.id, adminNoteId: adminNote.id, repNoteId: repNote.id }
+      // Its audit log: created, and the same stage change as a field_changed
+      // entry, written directly the way recordAudit writes them
+      const audit = (data: Omit<Prisma.AuditLogEntryUncheckedCreateInput, "companyId" | "recordType" | "recordId" | "recordLabel" | "actorId" | "actorName">) =>
+        prisma.auditLogEntry.create({
+          data: { companyId, recordType: "OPPORTUNITY", recordId: opportunity.id, recordLabel: `${opportunity.number} ${title}`, actorId: adminId, actorName: n.adminName, ...data },
+          select: { id: true },
+        })
+      rec("auditLogEntry", await audit({ action: "created", after: { number: opportunity.number, title, stage: stageRef(1) }, createdAt: at(40) }))
+      const stageAudit = rec("auditLogEntry", await audit({ action: "field_changed", field: "stageId", before: stageRef(1), after: stageRef(0), createdAt: at(30) }))
+      return { id: opportunity.id, attachmentId: attachment.id, actionId: createdAction.id, adminNoteId: adminNote.id, repNoteId: repNote.id, auditEntryId: stageAudit.id }
     }
     const adminOpportunity = await createOpportunity(n.adminOpportunity, adminId, "admin")
     const repOpportunity = await createOpportunity(n.repOpportunity, repUserId, "rep")
@@ -828,6 +837,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         opportunityTypeId: opportunityTypes[0].id,
         timelineActionId: adminOpportunity.actionId,
         timelineNoteId: adminOpportunity.adminNoteId,
+        auditEntryId: adminOpportunity.auditEntryId,
         generalTeamId: generalTeam.id,
         salesTeamId: salesTeam.id,
         teamGrantRoleId,
@@ -946,6 +956,8 @@ const DELETE_STEPS: {
   remove: (db: Db, ids: Ids) => Promise<{ count: number }>
 }[] = [
   { table: "Notification", count: (db, ids) => db.notification.count({ where: { companyId: ids } }), remove: (db, ids) => db.notification.deleteMany({ where: { companyId: ids } }) },
+  // Nothing points at audit entries; their actor and undoer are SET NULL
+  { table: "AuditLogEntry", count: (db, ids) => db.auditLogEntry.count({ where: { companyId: ids } }), remove: (db, ids) => db.auditLogEntry.deleteMany({ where: { companyId: ids } }) },
   { table: "Dashboard", count: (db, ids) => db.dashboard.count({ where: { companyId: ids } }), remove: (db, ids) => db.dashboard.deleteMany({ where: { companyId: ids } }) },
   { table: "QuoteApproval", count: (db, ids) => db.quoteApproval.count({ where: { quote: { companyId: ids } } }), remove: (db, ids) => db.quoteApproval.deleteMany({ where: { quote: { companyId: ids } } }) },
   { table: "PurchaseOrder", count: (db, ids) => db.purchaseOrder.count({ where: { companyId: ids } }), remove: (db, ids) => db.purchaseOrder.deleteMany({ where: { companyId: ids } }) },

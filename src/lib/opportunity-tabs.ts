@@ -4,12 +4,12 @@
 //
 // Adding a tab: add its key to OpportunityTabKey and an entry to
 // OPPORTUNITY_TABS (with the permission that shows it, if any), then its
-// panel in OpportunityDetail. A later branch adds the Audit log this way:
-//   { key: "audit", label: "Audit log", permission: "<the key it defines>" }
+// panel in OpportunityDetail. The Audit log tab was added this way, shown
+// only with auditLog.view.
 
 import { readTabParam, tabHref, TAB_PARAM } from "@/lib/tab-url"
 
-export type OpportunityTabKey = "details" | "attachments" | "related"
+export type OpportunityTabKey = "details" | "attachments" | "related" | "audit"
 
 export interface OpportunityTabDefinition {
   key: OpportunityTabKey
@@ -23,6 +23,7 @@ export const OPPORTUNITY_TABS: readonly OpportunityTabDefinition[] = [
   { key: "details", label: "Details" },
   { key: "attachments", label: "Attachments" },
   { key: "related", label: "Related" },
+  { key: "audit", label: "Audit log", permission: "auditLog.view" },
 ]
 
 export const DEFAULT_OPPORTUNITY_TAB: OpportunityTabKey = "details"

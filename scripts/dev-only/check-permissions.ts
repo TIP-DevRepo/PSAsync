@@ -111,6 +111,22 @@
 // attempt); one left out, empty, or script only (empty after sanitizing) is
 // refused with 400, and a create without an owner is unassigned.
 //
+// Audit log (AUDIT_ATTEMPTS): the lists need auditLog.view and undo and
+// restore auditLog.restore (Test Audit Viewer B, made here, reads but can't
+// undo or restore). checkAuditRecording has Test Admin B create an
+// opportunity and checks each change records the right entries (created,
+// field_changed with before and after, a stage moved by a note, note_added,
+// note_edited, note_deleted) and a PATCH that changes nothing records none.
+// checkSoftDelete deletes it and checks it is gone from the list, the
+// sidebar counts, and its opportunity (for Test Opp Viewer B), timeline,
+// related, attachments, email options, and email routes (the email is a
+// 404 before anything is read or sent), then restores it. checkAuditUndo
+// undoes a title change once, is refused after a later change to the same
+// field, and is refused while the old owner is out of the team (Test Rep
+// B's General membership is put back). The opportunity is removed at the
+// end; its audit entries go with the run's teardown. Attachments and emails
+// are never added, so their entries are covered by the scratch tests.
+//
 // Teams (TEAM_ATTEMPTS, fixtures in lib/run-data.ts): the three visibility
 // levels on the list, an opportunity, its timeline, its related records,
 // and the sidebar counts (Test Team Basic B: own plus the team's
@@ -228,6 +244,7 @@ type Actor =
   | "teamBasic"
   | "teamViewer"
   | "teamManager"
+  | "auditViewer"
 
 interface AttemptContext {
   b: SampleIds
@@ -731,6 +748,37 @@ const TEAM_ATTEMPTS: Attempt[] = [
   { name: "Add a member at its own rank", actor: "teamManager", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.fx.opsTeamId}/members`, body: (c) => ({ userIds: [c.b.adminId, c.fx.teamManagerUserId, c.repUserId] }), expect: 403, expectError: "ranked below you" },
   { name: "Remove a member ranked above it", actor: "teamManager", kind: "refused", method: "PUT", path: (c) => `/api/teams/${c.fx.opsTeamId}/members`, body: (c) => ({ userIds: [c.fx.teamManagerUserId] }), expect: 403, expectError: "ranked below you" },
   { name: "Rename to another team's name", actor: "teamManager", kind: "refused", method: "PATCH", path: (c) => `/api/teams/${c.fx.supportTeamId}`, body: (c) => ({ name: c.names.salesTeam }), expect: 400, expectError: "already exists" },
+]
+
+// ─── AUDIT LOG ───────────────────────────────────────────────────────────────
+// The audit routes need auditLog.view (the lists) and auditLog.restore (undo
+// and restore). Test Audit Viewer B (made by this script) holds view but not
+// restore. Undo and restore that succeed are checked in checkAuditUndo and
+// checkSoftDelete on an opportunity the script creates.
+
+const AUDIT_VIEW = "view the audit log"
+const AUDIT_RESTORE = "restore from the audit log"
+
+const AUDIT_ATTEMPTS: Attempt[] = [
+  { name: "Read the audit log", actor: "admin", kind: "control", method: "GET", path: () => "/api/audit-log", expect: 200, contains: (c) => [c.b.auditEntryId] },
+  { name: "Read the audit log", actor: "auditViewer", kind: "allowed", method: "GET", path: () => "/api/audit-log", expect: 200, contains: (c) => [c.b.auditEntryId] },
+  { name: "Read an opportunity's audit log", actor: "auditViewer", kind: "allowed", method: "GET", path: (c) => `/api/opportunities/${c.b.opportunityId}/audit`, expect: 200, contains: (c) => [c.b.auditEntryId] },
+  { name: "Undo a change", actor: "auditViewer", kind: "refused", method: "POST", path: (c) => `/api/audit-log/${c.b.auditEntryId}/undo`, expect: 403, expectError: AUDIT_RESTORE },
+  { name: "Restore an opportunity", actor: "auditViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.b.opportunityId}/restore`, expect: 403, expectError: AUDIT_RESTORE },
+  { name: "Read the audit log", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/audit-log", expect: 403, expectError: AUDIT_VIEW },
+  { name: "Read the audit log", actor: "oppViewer", kind: "refused", method: "GET", path: () => "/api/audit-log", expect: 403, expectError: AUDIT_VIEW },
+  { name: "Read the audit log", actor: "oppSettings", kind: "refused", method: "GET", path: () => "/api/audit-log", expect: 403, expectError: AUDIT_VIEW },
+  { name: "Read the audit log", actor: "manager", kind: "refused", method: "GET", path: () => "/api/audit-log", expect: 403, expectError: AUDIT_VIEW },
+  { name: "Read an opportunity's audit log", actor: "oppViewer", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/audit`, expect: 403, expectError: AUDIT_VIEW },
+  { name: "Undo a change", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/audit-log/${c.b.auditEntryId}/undo`, expect: 403, expectError: AUDIT_RESTORE },
+  { name: "Undo a change", actor: "everyone", kind: "refused", method: "POST", path: (c) => `/api/audit-log/${c.b.auditEntryId}/undo`, expect: 403, expectError: AUDIT_RESTORE },
+  { name: "Restore an opportunity", actor: "oppViewer", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/restore`, expect: 403, expectError: AUDIT_RESTORE },
+  { name: "Restore an opportunity that isn't deleted", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/opportunities/${c.b.opportunityId}/restore`, expect: 409, expectError: "isn't deleted" },
+  { name: "Undo a made up entry", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/audit-log/${c.fakeId}/undo`, expect: 404, expectError: "Not found" },
+  { name: "Audit log of a made up record type", actor: "admin", kind: "refused", method: "GET", path: () => "/api/audit-log?recordType=NOPE", expect: 400, expectError: "Invalid record type" },
+  { name: "Audit log with a broken date", actor: "admin", kind: "refused", method: "GET", path: () => "/api/audit-log?from=not-a-date", expect: 400, expectError: "date range" },
+  { name: "Audit log paged with a made up cursor", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/audit-log?cursor=${c.fakeId}`, expect: 400, expectError: "Invalid cursor" },
+  { name: "Opportunity audit log paged with another opportunity's entry", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/audit?cursor=${c.b.auditEntryId}`, expect: 400, expectError: "Invalid cursor" },
 ]
 
 const ATTEMPTS: Attempt[] = [
@@ -1455,6 +1503,8 @@ const ATTEMPTS: Attempt[] = [
 
   ...TEAM_ATTEMPTS,
 
+  ...AUDIT_ATTEMPTS,
+
   { name: "Disconnect someone else's shared mailbox", actor: "sender", kind: "refused", sharedMode: "admin", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
   // Even one's own mailbox needs Integrations access while it is the shared sender
   { name: "Disconnect own mailbox while it is the shared sender", actor: "sender", kind: "refused", sharedMode: "sender", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.senderMailboxId}`, expect: 403, expectError: "shared quote sender" },
@@ -1539,6 +1589,7 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
     opportunityTypes: prisma.opportunityType.findMany({ where: { companyId: b }, ...byId }),
     opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId: b } }),
     actionButtons: prisma.actionButton.findMany({ where: { companyId: b }, ...byId }),
+    auditLogEntries: prisma.auditLogEntry.findMany({ where: { companyId: b }, ...byId }),
   }
   const keys = Object.keys(sections) as (keyof typeof sections)[]
   const values = await Promise.all(keys.map((k) => sections[k]))
@@ -1580,6 +1631,20 @@ async function ensureViewerFixture(prisma: PrismaClient, run: RunData) {
   await addRunUser(prisma, run, { companyId, name: n.viewerName, email: n.viewerEmail, roleIds: [roleId] })
 
   return { email: n.viewerEmail }
+}
+
+// Test Audit Viewer B inside Test Company B: reads the audit log and every
+// opportunity, and opens Settings, but can't undo or restore. Made for this
+// run, password in memory only.
+async function ensureAuditViewerFixture(prisma: PrismaClient, run: RunData) {
+  const n = run.companies.B.names
+  const companyId = run.companies.B.ids.companyId
+  const permissions = { pages: { opportunities: true, settings: true }, opportunities: { viewAll: true }, auditLog: { view: true } }
+
+  const roleId = await addRunRole(prisma, run, { companyId, name: n.auditViewerRole, rank: 2, permissions })
+  await addRunUser(prisma, run, { companyId, name: n.auditViewerName, email: n.auditViewerEmail, roleIds: [roleId] })
+
+  return { email: n.auditViewerEmail }
 }
 
 // Test Manager B inside Test Company B: manages users (Manage Users) but
@@ -2475,6 +2540,238 @@ async function checkRecordButtonList(prisma: PrismaClient, admin: Session, oppVi
   }
 }
 
+// ─── Audit log steps ─────────────────────────────────────────────────────────
+// All three work on one opportunity Test Admin B creates through the API
+// (unassigned, in General, so Test Opp Viewer B can open it too), and remove
+// it at the end. Its audit entries stay until the run's teardown.
+
+type AuditRow = { id: string; action: string; field: string | null; before: unknown; after: unknown; undoneAt: Date | null; undoOfId: string | null }
+
+function auditHelpers(prisma: PrismaClient, ctx: AttemptContext, opportunityId: string) {
+  const entries = (): Promise<AuditRow[]> =>
+    prisma.auditLogEntry.findMany({
+      where: { companyId: ctx.b.companyId, recordType: "OPPORTUNITY", recordId: opportunityId },
+      orderBy: [{ createdAt: "asc" }, { id: "asc" }],
+      select: { id: true, action: true, field: true, before: true, after: true, undoneAt: true, undoOfId: true },
+    })
+  // The entries one request added, by running it between two reads
+  const added = async <T>(run: () => Promise<T>): Promise<{ result: T; rows: AuditRow[] }> => {
+    const before = new Set((await entries()).map((e) => e.id))
+    const result = await run()
+    return { result, rows: (await entries()).filter((e) => !before.has(e.id)) }
+  }
+  const describe = (rows: AuditRow[]) => rows.map((r) => (r.field ? `${r.action}:${r.field}` : r.action)).join(", ") || "none"
+  return { entries, added, describe }
+}
+
+const textOf = (value: unknown) => (value && typeof value === "object" ? String((value as { text?: unknown }).text ?? "") : "")
+const idOf = (value: unknown) => (value && typeof value === "object" ? String((value as { id?: unknown }).id ?? "") : "")
+
+// Every recorded action writes the right entries, and a PATCH that changes
+// nothing writes none. Returns the opportunity it created, or null.
+async function checkAuditRecording(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]): Promise<string | null> {
+  const label = (name: string) => `[Admin B] Audit log: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+
+  const create = await admin.request("POST", "/api/opportunities", {
+    json: { initialNote: OPP_NOTE, title: "Dev check audit opportunity", clientId: ctx.b.clientId, contactId: ctx.b.contactId },
+  })
+  const opportunityId = create.status === 200 ? ((JSON.parse(create.text) as { id?: string }).id ?? null) : null
+  if (!opportunityId) {
+    push("create an opportunity for the audit steps", "200", String(create.status), `got ${create.status}: ${errorText(create.text)}`)
+    return null
+  }
+  const { entries, added, describe } = auditHelpers(prisma, ctx, opportunityId)
+  const base = `/api/opportunities/${opportunityId}`
+
+  const created = await entries()
+  push("create records one created entry", "created", describe(created), created.length !== 1 || created[0].action !== "created" ? `got ${describe(created)}` : null)
+
+  const title = await added(() => admin.request("PATCH", base, { json: { title: "Dev check audit renamed" } }))
+  const titleRow = title.rows[0]
+  push("a title change records one field_changed entry with before and after", "field_changed:title", describe(title.rows),
+    title.result.status !== 200 ? `got ${title.result.status}: ${errorText(title.result.text)}`
+      : title.rows.length !== 1 || titleRow.field !== "title" ? `got ${describe(title.rows)}`
+        : titleRow.before !== "Dev check audit opportunity" || titleRow.after !== "Dev check audit renamed" ? "wrong before or after" : null)
+
+  const same = await added(() => admin.request("PATCH", base, { json: { title: "Dev check audit renamed" } }))
+  push("a PATCH that changes nothing records nothing", "none", describe(same.rows),
+    same.result.status !== 200 ? `got ${same.result.status}` : same.rows.length !== 0 ? `got ${describe(same.rows)}` : null)
+
+  const otherStage = ctx.fx.opportunityStageIds[1]
+  const stage = await added(() => admin.request("PATCH", base, { json: { stageId: otherStage } }))
+  push("a stage change records field_changed with the stage names", "field_changed:stageId", describe(stage.rows),
+    stage.result.status !== 200 ? `got ${stage.result.status}` : stage.rows.length !== 1 || stage.rows[0].field !== "stageId" || idOf(stage.rows[0].after) !== otherStage ? `got ${describe(stage.rows)}` : null)
+
+  const note = await added(() => admin.request("POST", `${base}/timeline`, { json: { body: "<p>Dev check audit note</p>" } }))
+  const noteId = note.result.status === 200 ? ((JSON.parse(note.result.text) as { id?: string }).id ?? null) : null
+  push("a note records note_added with its text", "note_added", describe(note.rows),
+    !noteId ? `got ${note.result.status}` : note.rows.length !== 1 || note.rows[0].action !== "note_added" || !textOf(note.rows[0].after).includes("Dev check audit note") ? `got ${describe(note.rows)}` : null)
+
+  const firstStage = ctx.fx.opportunityStageIds[0]
+  const stageNote = await added(() => admin.request("POST", `${base}/timeline`, { json: { body: "<p>Dev check audit stage note</p>", stageId: firstStage } }))
+  const stageNoteActions = stageNote.rows.map((r) => r.action).sort().join(",")
+  push("a note that moves the stage records the stage change and the note", "field_changed:stageId, note_added", describe(stageNote.rows),
+    stageNote.result.status !== 200 ? `got ${stageNote.result.status}` : stageNoteActions !== "field_changed,note_added" ? `got ${describe(stageNote.rows)}` : null)
+
+  if (noteId) {
+    const edit = await added(() => admin.request("PATCH", `${base}/timeline/${noteId}`, { json: { body: "<p>Dev check audit note, edited</p>" } }))
+    push("editing a note records note_edited with the text before and after", "note_edited", describe(edit.rows),
+      edit.result.status !== 200 ? `got ${edit.result.status}`
+        : edit.rows.length !== 1 || edit.rows[0].action !== "note_edited" || !textOf(edit.rows[0].before).includes("Dev check audit note") || !textOf(edit.rows[0].after).includes("edited")
+          ? `got ${describe(edit.rows)}` : null)
+
+    const del = await added(() => admin.request("DELETE", `${base}/timeline/${noteId}`))
+    push("deleting a note records note_deleted with its text", "note_deleted", describe(del.rows),
+      del.result.status !== 200 ? `got ${del.result.status}` : del.rows.length !== 1 || del.rows[0].action !== "note_deleted" || !textOf(del.rows[0].before).includes("edited") ? `got ${describe(del.rows)}` : null)
+  }
+  return opportunityId
+}
+
+// A deleted opportunity disappears from the list, the opportunity (for
+// users without auditLog.view), the sidebar counts, and its timeline,
+// related, attachments, and email routes; restore brings it back. The
+// email attempt is refused before anything is read or sent (404).
+async function checkSoftDelete(prisma: PrismaClient, admin: Session, oppViewer: Session, ctx: AttemptContext, rows: Row[], opportunityId: string) {
+  const label = (name: string) => `[Admin B] Soft delete: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const { added, describe, entries } = auditHelpers(prisma, ctx, opportunityId)
+  const base = `/api/opportunities/${opportunityId}`
+  const sidebarTotal = async () => {
+    const res = await admin.request("GET", "/api/opportunities/sidebar-counts")
+    return res.status === 200 ? ((JSON.parse(res.text) as { total?: number }).total ?? -1) : -1
+  }
+  const inList = async (session: Session) => (await session.request("GET", "/api/opportunities")).text.includes(opportunityId)
+
+  // Open, so the sidebar counts it
+  await admin.request("PATCH", base, { json: { stageId: ctx.fx.opportunityStageIds[0] } })
+  const totalBefore = await sidebarTotal()
+  const viewerBefore = await oppViewer.request("GET", base)
+  push("before: Test Opp Viewer B can open it", "200", String(viewerBefore.status), viewerBefore.status !== 200 ? `got ${viewerBefore.status}` : null)
+  const titleEntry = (await entries()).find((e) => e.action === "field_changed" && e.field === "title" && !e.undoneAt)
+
+  const del = await added(() => admin.request("DELETE", base))
+  const row = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { deletedAt: true, deletedById: true } })
+  push("delete hides the row and records deleted", "200, row kept, deleted entry", `${del.result.status}, ${describe(del.rows)}`,
+    del.result.status !== 200 ? `got ${del.result.status}: ${errorText(del.result.text)}`
+      : !row ? "the row was erased"
+        : !row.deletedAt || row.deletedById !== ctx.b.adminId ? "deletedAt or deletedById not set"
+          : del.rows.length !== 1 || del.rows[0].action !== "deleted" ? `got ${describe(del.rows)}` : null)
+
+  const gone: { name: string; session: Session; method: Method; path: string; json?: unknown }[] = [
+    { name: "the opportunity (no audit access)", session: oppViewer, method: "GET", path: base },
+    { name: "its timeline", session: admin, method: "GET", path: `${base}/timeline` },
+    { name: "its related records", session: admin, method: "GET", path: `${base}/related` },
+    { name: "its attachments", session: admin, method: "GET", path: `${base}/attachments` },
+    { name: "its email options", session: admin, method: "GET", path: `${base}/email-options` },
+    { name: "an email from it", session: admin, method: "POST", path: `${base}/email`, json: { to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>" } },
+    { name: "a note on it", session: admin, method: "POST", path: `${base}/timeline`, json: { body: "<p>Should not exist</p>" } },
+    { name: "an edit", session: admin, method: "PATCH", path: base, json: { title: "Should not change" } },
+  ]
+  for (const g of gone) {
+    const res = await g.session.request(g.method, g.path, { json: g.json })
+    push(`deleted: ${g.name} is not found`, "404", String(res.status), res.status !== 404 ? `got ${res.status}` : null)
+  }
+  push("deleted: the list leaves it out", "absent", "", (await inList(admin)) || (await inList(oppViewer)) ? "still listed" : null)
+  const totalAfter = await sidebarTotal()
+  push("deleted: the sidebar counts one fewer", `${totalBefore - 1}`, String(totalAfter), totalAfter !== totalBefore - 1 ? `was ${totalBefore}, now ${totalAfter}` : null)
+  const adminGet = await admin.request("GET", base)
+  push("deleted: an audit log viewer still opens it, marked deleted", "200, deletedAt set", String(adminGet.status),
+    adminGet.status !== 200 ? `got ${adminGet.status}` : !(JSON.parse(adminGet.text) as { deletedAt?: string | null }).deletedAt ? "deletedAt missing" : null)
+  if (titleEntry) {
+    const undo = await admin.request("POST", `/api/audit-log/${titleEntry.id}/undo`)
+    push("deleted: undo is refused until it is restored", "409", String(undo.status), undo.status !== 409 || !undo.text.includes("Restore it first") ? `got ${undo.status}: ${errorText(undo.text)}` : null)
+  }
+
+  const restore = await added(() => admin.request("POST", `${base}/restore`))
+  const restoredRow = await prisma.opportunity.findUnique({ where: { id: opportunityId }, select: { deletedAt: true } })
+  const restoredAction = await prisma.timelineEntry.count({ where: { opportunityId, action: "restored" } })
+  push("restore brings it back with a restored entry and timeline action", "200, restored", `${restore.result.status}, ${describe(restore.rows)}`,
+    restore.result.status !== 200 ? `got ${restore.result.status}: ${errorText(restore.result.text)}`
+      : restoredRow?.deletedAt ? "still deleted"
+        : restore.rows.length !== 1 || restore.rows[0].action !== "restored" ? `got ${describe(restore.rows)}`
+          : restoredAction !== 1 ? `${restoredAction} restored timeline actions` : null)
+  const viewerAfter = await oppViewer.request("GET", base)
+  push("restored: listed and open again", "listed, 200", String(viewerAfter.status),
+    viewerAfter.status !== 200 ? `got ${viewerAfter.status}` : !(await inList(admin)) ? "not listed" : (await sidebarTotal()) !== totalBefore ? "the sidebar count didn't come back" : null)
+  const again = await admin.request("POST", `${base}/restore`)
+  push("restoring twice is refused", "409", String(again.status), again.status !== 409 ? `got ${again.status}` : null)
+}
+
+// Undo works once, is refused after a later change to the same field, and
+// is refused when a rule fails (the old owner is no longer in the team).
+// Test Rep B's General membership is put back in every case.
+async function checkAuditUndo(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[], opportunityId: string) {
+  const label = (name: string) => `[Admin B] Undo: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const { added, describe } = auditHelpers(prisma, ctx, opportunityId)
+  const base = `/api/opportunities/${opportunityId}`
+  const latest = async (field: string) =>
+    prisma.auditLogEntry.findFirst({ where: { recordId: opportunityId, action: "field_changed", field }, orderBy: [{ createdAt: "desc" }, { id: "desc" }], select: { id: true } })
+  const listed = async (entryId: string) => {
+    const res = await admin.request("GET", `${base}/audit`)
+    const page = res.status === 200 ? (JSON.parse(res.text) as { entries: { id: string; canUndo: boolean }[] }) : { entries: [] }
+    return page.entries.find((e) => e.id === entryId) ?? null
+  }
+
+  const before = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { title: true } })
+  await admin.request("PATCH", base, { json: { title: "Dev check undo A" } })
+  const first = await latest("title")
+  if (!first) {
+    push("fixture", "a title change entry", "missing", "the title change wasn't recorded")
+    return
+  }
+  push("the list offers undo on the latest change", "canUndo true", "", (await listed(first.id))?.canUndo ? null : "canUndo is not true")
+  const timelineBefore = await prisma.timelineEntry.count({ where: { opportunityId, action: "title_changed" } })
+  const undo = await added(() => admin.request("POST", `/api/audit-log/${first.id}/undo`))
+  const after = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { title: true } })
+  const original = await prisma.auditLogEntry.findUniqueOrThrow({ where: { id: first.id }, select: { undoneAt: true, undoneById: true } })
+  const timelineAdded = (await prisma.timelineEntry.count({ where: { opportunityId, action: "title_changed" } })) - timelineBefore
+  push("undo puts the old value back with one undone entry", "200, title back, undone entry", `${undo.result.status}, ${describe(undo.rows)}`,
+    undo.result.status !== 200 ? `got ${undo.result.status}: ${errorText(undo.result.text)}`
+      : after.title !== before.title ? "the title didn't go back"
+        : undo.rows.length !== 1 || undo.rows[0].action !== "undone" || undo.rows[0].undoOfId !== first.id ? `got ${describe(undo.rows)}`
+          : !original.undoneAt || original.undoneById !== ctx.b.adminId ? "the original isn't marked undone"
+            : timelineAdded !== 1 ? `${timelineAdded} title_changed timeline actions` : null)
+  const twice = await admin.request("POST", `/api/audit-log/${first.id}/undo`)
+  push("undoing it again is refused", "409", String(twice.status), twice.status !== 409 || !twice.text.includes("already undone") ? `got ${twice.status}: ${errorText(twice.text)}` : null)
+
+  await admin.request("PATCH", base, { json: { title: "Dev check undo B" } })
+  const older = await latest("title")
+  await admin.request("PATCH", base, { json: { title: "Dev check undo C" } })
+  if (older) {
+    const stale = await admin.request("POST", `/api/audit-log/${older.id}/undo`)
+    push("undo after a later change to the same field is refused", "409", String(stale.status),
+      stale.status !== 409 || !stale.text.includes("changed since") ? `got ${stale.status}: ${errorText(stale.text)}` : (await listed(older.id))?.canUndo ? "the list still offers it" : null)
+  }
+
+  // Owner Test Rep B, then Test Opp Viewer B; with Test Rep B out of General
+  // the undo back to Test Rep B is refused, then allowed once it is back
+  await admin.request("PATCH", base, { json: { ownerId: ctx.repUserId } })
+  await admin.request("PATCH", base, { json: { ownerId: ctx.fx.oppViewerUserId } })
+  const ownerChange = await latest("ownerId")
+  const membership = { teamId: ctx.b.generalTeamId, userId: ctx.repUserId }
+  try {
+    await prisma.teamMember.deleteMany({ where: membership })
+    if (ownerChange) {
+      const refused = await admin.request("POST", `/api/audit-log/${ownerChange.id}/undo`)
+      push("undo is refused when the old owner left the team", "409", String(refused.status),
+        refused.status !== 409 || !refused.text.includes("no longer in the team") ? `got ${refused.status}: ${errorText(refused.text)}` : null)
+    }
+  } finally {
+    await prisma.teamMember.upsert({ where: { teamId_userId: membership }, create: membership, update: {} })
+  }
+  if (ownerChange) {
+    const allowed = await admin.request("POST", `/api/audit-log/${ownerChange.id}/undo`)
+    const owner = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { ownerId: true } })
+    push("undo goes through once the owner is back in the team", "200, owner back", String(allowed.status),
+      allowed.status !== 200 ? `got ${allowed.status}: ${errorText(allowed.text)}` : owner.ownerId !== ctx.repUserId ? "the owner didn't go back" : null)
+  }
+}
+
 const COPIED_LINE_FIELDS = [
   "catalogItemId", "section", "sortOrder", "name", "description", "sku", "quantity", "unitPrice", "cost", "discount", "taxable",
   "isRecurring", "recurringInterval", "isOptional", "optionalSelected", "quantityAdjustable", "choiceGroup", "isTextBlock",
@@ -2659,6 +2956,7 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     const sender = await ensureSenderFixture(prisma, run)
     const viewer = await ensureViewerFixture(prisma, run)
     const manager = await ensureManagerFixture(prisma, run)
+    const auditViewer = await ensureAuditViewerFixture(prisma, run)
     const untrackedPoLineId = await ensureUntrackedPoLine(prisma, fx, names)
     const ctx: AttemptContext = {
       b,
@@ -2690,6 +2988,7 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
       teamBasic: new Session("Test Team Basic B", baseUrl),
       teamViewer: new Session("Test Team Viewer B", baseUrl),
       teamManager: new Session("Test Team Manager B", baseUrl),
+      auditViewer: new Session("Test Audit Viewer B", baseUrl),
     }
     await run.credentials.signIn(sessions.admin, names.adminEmail)
     await run.credentials.signIn(sessions.rep, names.repEmail)
@@ -2705,8 +3004,9 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await run.credentials.signIn(sessions.teamBasic, names.teamBasicEmail)
     await run.credentials.signIn(sessions.teamViewer, names.teamViewerEmail)
     await run.credentials.signIn(sessions.teamManager, names.teamManagerEmail)
+    await run.credentials.signIn(sessions.auditViewer, auditViewer.email)
     console.log(
-      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, Test Manager B, Test Opp Viewer B, Test Opp Settings B, Test Team Basic B, Test Team Viewer B, and Test Team Manager B.`
+      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, Test Manager B, Test Opp Viewer B, Test Opp Settings B, Test Team Basic B, Test Team Viewer B, Test Team Manager B, and Test Audit Viewer B.`
     )
 
     const ACTOR_LABEL: Record<Actor, string> = {
@@ -2724,6 +3024,7 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
       teamBasic: "Team Basic B",
       teamViewer: "Team Viewer B",
       teamManager: "Team Manager B",
+      auditViewer: "Audit Viewer B",
     }
     const label = (a: Attempt) => `[${a.kind === "control" ? "control " : ""}${ACTOR_LABEL[a.actor]}] ${a.name}`
 
@@ -2807,6 +3108,17 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // and hidden or unavailable buttons stay off records
     await checkActionButtonNotes(prisma, sessions.admin, ctx, rows)
     await checkRecordButtonList(prisma, sessions.admin, sessions.oppViewer, ctx, rows)
+
+    // Audit log: every action recorded, soft delete and restore, and undo
+    const auditOpportunityId = await checkAuditRecording(prisma, sessions.admin, ctx, rows)
+    if (auditOpportunityId) {
+      try {
+        await checkSoftDelete(prisma, sessions.admin, sessions.oppViewer, ctx, rows, auditOpportunityId)
+        await checkAuditUndo(prisma, sessions.admin, ctx, rows, auditOpportunityId)
+      } finally {
+        await prisma.opportunity.deleteMany({ where: { id: auditOpportunityId } })
+      }
+    }
 
     // Teams: default roles applied on the next request, and team changes
     await checkTeamDefaultRoles(prisma, sessions.admin, sessions.everyone, ctx, rows)

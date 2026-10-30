@@ -135,9 +135,19 @@ export function linkedRecordsMessage(counts: { quotes: number; salesOrders: numb
   return `This opportunity is linked to ${list}, so it can't be deleted. Remove those links first.`
 }
 
-// count is null when the database refused the delete and no count was taken
-export function stageInUseMessage(count: number | null): string {
-  return `This stage is used by ${count === null ? "opportunities" : plural(count, "opportunity", "opportunities")}, so it can't be deleted. Move them to another stage first.`
+// Added to an in use message when some of those opportunities are deleted:
+// a deleted opportunity keeps its row (so it can be restored), so it still
+// holds its team, stage, and type
+export function deletedOpportunitiesNote(deleted: number): string {
+  if (deleted <= 0) return ""
+  const them = deleted === 1 ? "it" : "them"
+  return ` ${deleted === 1 ? "One of them is" : `${deleted} of them are`} deleted. Deleted opportunities still count because they can be restored: restore ${them} from the audit log and change ${them} first.`
+}
+
+// count is null when the database refused the delete and no count was
+// taken; deleted is how many of them are deleted
+export function stageInUseMessage(count: number | null, deleted = 0): string {
+  return `This stage is used by ${count === null ? "opportunities" : plural(count, "opportunity", "opportunities")}, so it can't be deleted. Move them to another stage first.${deletedOpportunitiesNote(deleted)}`
 }
 
 export function lastStageMessage(category: OpportunityStageCategory, action: "deleted" | "moved"): string {
@@ -151,8 +161,8 @@ export const QUOTE_SENT_STAGE_DELETE_MESSAGE =
 export const QUOTE_SENT_STAGE_CATEGORY_MESSAGE =
   "This is the stage a sent quote moves its opportunity to, so it must stay Open. Choose another stage in Opportunity Settings first."
 
-export function typeInUseMessage(count: number | null): string {
-  return `This type is used by ${count === null ? "opportunities" : plural(count, "opportunity", "opportunities")}, so it can't be deleted.`
+export function typeInUseMessage(count: number | null, deleted = 0): string {
+  return `This type is used by ${count === null ? "opportunities" : plural(count, "opportunity", "opportunities")}, so it can't be deleted.${deletedOpportunitiesNote(deleted)}`
 }
 
 // True for a Prisma error with this code, for example P2003 when a row

@@ -52,6 +52,7 @@ model Company {
   timelineEntries         TimelineEntry[]
   teams                   Team[]
   actionButtons           ActionButton[]
+  auditLogEntries         AuditLogEntry[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -163,6 +164,9 @@ model User {
   opportunityAttachments      OpportunityAttachment[]
   timelineEntries             TimelineEntry[]
   teamMemberships             TeamMember[]
+  deletedOpportunities        Opportunity[]              @relation("OpportunityDeletedBy")
+  auditLogEntries             AuditLogEntry[]            @relation("AuditLogActor")
+  undoneAuditLogEntries       AuditLogEntry[]            @relation("AuditLogUndoneBy")
 }
 
 // ─── SESSION (Auth.js) ───────────────────────────────────────────────────────
@@ -1678,6 +1682,13 @@ model Opportunity {
   createdBy         User              @relation("OpportunityCreatedBy", fields: [createdById], references: [id])
   createdAt         DateTime          @default(now())
   updatedAt         DateTime          @updatedAt
+  // Set when the opportunity is deleted. Deleting only hides it: the row,
+  // its attachments, and its timeline are kept so an admin can restore it
+  // from the audit log. Every opportunity query leaves deleted ones out
+  // (NOT_DELETED_OPPORTUNITY in src/lib/scoped-loaders.ts).
+  deletedAt         DateTime?
+  deletedById       String?
+  deletedBy         User?             @relation("OpportunityDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
 
   attachments    OpportunityAttachment[]
   timeline       TimelineEntry[]
@@ -1692,6 +1703,7 @@ model Opportunity {
   @@index([clientId])
   @@index([clientLocationId])
   @@index([teamId])
+  @@index([companyId, deletedAt])
 }
 
 // ─── OPPORTUNITY ATTACHMENTS ──────────────────────────────────────────────
@@ -1822,4 +1834,53 @@ model ActionButton {
   updatedAt        DateTime          @updatedAt
 
   @@index([companyId])
+}
+
+// ─── AUDIT LOG ───────────────────────────────────────────────────────────────
+// The kind of record an audit entry is about. Only OPPORTUNITY is recorded
+// so far; later branches record tickets, quotes, sales orders, and
+// purchase orders with the other values.
+enum AuditRecordType {
+  OPPORTUNITY
+  TICKET
+  QUOTE
+  SALES_ORDER
+  PURCHASE_ORDER
+}
+
+// The admin record of every change, kept forever (src/lib/audit-log.ts).
+// Written with recordAudit inside the same transaction as the change it
+// describes. recordId has no relation, so entries outlive their records,
+// and every name is stored next to its id (recordLabel, actorName, and the
+// refs in before and after), so an entry reads correctly after a rename or
+// delete.
+model AuditLogEntry {
+  id          String          @id @default(cuid())
+  companyId   String
+  company     Company         @relation(fields: [companyId], references: [id])
+  recordType  AuditRecordType
+  recordId    String
+  // A snapshot of the record's name, for example "OPP-2026-0007 New laptops"
+  recordLabel String
+  // What happened, for example created, field_changed, deleted, restored,
+  // note_added, undone (AUDIT_ACTIONS in src/lib/audit-values.ts)
+  action      String
+  // The field a field_changed or undone entry is about (its PATCH body key)
+  field       String?
+  before      Json?
+  after       Json?
+  // Null is the system (or a user since deleted)
+  actorId     String?
+  actor       User?           @relation("AuditLogActor", fields: [actorId], references: [id], onDelete: SetNull)
+  actorName   String
+  // Set on a field_changed entry once it has been undone
+  undoneAt    DateTime?
+  undoneById  String?
+  undoneBy    User?           @relation("AuditLogUndoneBy", fields: [undoneById], references: [id], onDelete: SetNull)
+  // On an undone entry, the entry it reverses
+  undoOfId    String?
+  createdAt   DateTime        @default(now())
+
+  @@index([companyId, createdAt])
+  @@index([companyId, recordType, recordId, createdAt])
 }

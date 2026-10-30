@@ -69,6 +69,7 @@ interface RolePermissions {
     actionButtons: boolean
   }
   dashboards: { manage: boolean }
+  auditLog: { view: boolean; restore: boolean }
 }
 
 interface Role {
@@ -162,6 +163,11 @@ const SETTINGS_LABELS: [keyof RolePermissions["settingsSections"], string][] = [
 
 const DASHBOARD_LABELS: [keyof RolePermissions["dashboards"], string][] = [
   ["manage", "Edit the company's Default dashboard"],
+]
+
+const AUDIT_LOG_LABELS: [keyof RolePermissions["auditLog"], string][] = [
+  ["view", "View audit log"],
+  ["restore", "Restore from audit log"],
 ]
 
 // One row in the role list. Rows that can be dragged get a grip handle in
@@ -481,6 +487,10 @@ export function RolesPermissionsPanel() {
   function updateDashboardsPerm(key: keyof RolePermissions["dashboards"], value: boolean) {
     if (!draft) return
     setDraft({ ...draft, permissions: { ...draft.permissions, dashboards: { ...draft.permissions.dashboards, [key]: value } } })
+  }
+  function updateAuditLogPerm(key: keyof RolePermissions["auditLog"], value: boolean) {
+    if (!draft) return
+    setDraft({ ...draft, permissions: { ...draft.permissions, auditLog: { ...draft.permissions.auditLog, [key]: value } } })
   }
 
   if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
@@ -813,6 +823,23 @@ export function RolesPermissionsPanel() {
                       checked={draft.isGlobalAdmin ? true : draft.permissions.dashboards?.[key] ?? false}
                       disabled={isLocked}
                       onChange={(e) => updateDashboardsPerm(key, e.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold text-sm mb-2">Audit Log</h3>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {AUDIT_LOG_LABELS.map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.auditLog?.[key] ?? false}
+                      disabled={isLocked}
+                      onChange={(e) => updateAuditLogPerm(key, e.target.checked)}
                     />
                     {label}
                   </label>

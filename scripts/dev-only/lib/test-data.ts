@@ -123,6 +123,11 @@ export function testNames(letter: TestLetter, marker: string) {
     approverRole: `${marker} Test Approver Role ${letter}`,
     approverName: `${marker} Test Approver ${letter}`,
     approverEmail: email("approver"),
+    // Only created by the permission check: reads the audit log (and every
+    // opportunity) but can't undo or restore
+    auditViewerRole: `${marker} Test Audit Viewer Role ${letter}`,
+    auditViewerName: `${marker} Test Audit Viewer ${letter}`,
+    auditViewerEmail: email("auditviewer"),
     // The quote copy checks: a second client with its own contact, payment
     // terms, and shipping location, so a copy can be made for a different
     // client and a contact of the wrong client can be refused, and an admin
@@ -320,6 +325,8 @@ export interface SampleIds {
   // On the admin's opportunity: its created action and the admin's note
   timelineActionId: string
   timelineNoteId: string
+  // On the admin's opportunity: its field_changed (stage) audit entry
+  auditEntryId: string
   // The General team and the Sales team (which gives Team Grant)
   generalTeamId: string
   salesTeamId: string

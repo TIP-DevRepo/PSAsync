@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
-import { loadTeam, teamWhere } from "@/lib/scoped-loaders"
+import { DELETED_OPPORTUNITY, loadTeam, teamWhere } from "@/lib/scoped-loaders"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { teamSelect } from "@/lib/team-selects"
 import { DEFAULT_TEAM_DELETE_MESSAGE, TEAM_DESCRIPTION_MAX, TEAM_NAME_MAX, TEAM_NAME_TAKEN_MESSAGE, teamInUseMessage } from "@/lib/team-rules"
@@ -57,8 +57,8 @@ export async function PATCH(
   }
 }
 
-// General can't be deleted, and neither can a team any opportunity is in
-// (409). Its memberships and default roles go with it, so its members lose
+// General can't be deleted, and neither can a team any opportunity is in,
+// deleted ones included (409). Its memberships and default roles go with it, so its members lose
 // those roles unless they hold them some other way.
 export async function DELETE(
   req: NextRequest,
@@ -79,7 +79,9 @@ export async function DELETE(
   })
   if (!team) return notFound()
   if (team.isDefault) return apiError(409, DEFAULT_TEAM_DELETE_MESSAGE, "DEFAULT_TEAM")
-  if (team._count.opportunities > 0) return apiError(409, teamInUseMessage(team._count.opportunities), "TEAM_IN_USE")
+  // Deleted opportunities still belong to the team (their rows are kept)
+  const deletedInTeam = () => prisma.opportunity.count({ where: { teamId: team.id, companyId: ctx.companyId, ...DELETED_OPPORTUNITY } })
+  if (team._count.opportunities > 0) return apiError(409, teamInUseMessage(team._count.opportunities, await deletedInTeam()), "TEAM_IN_USE")
 
   try {
     await prisma.team.delete({ where: teamWhere(ctx, team.id) })
@@ -87,7 +89,7 @@ export async function DELETE(
     // An opportunity moved into it since the check above
     if (isPrismaError(err, "P2003")) {
       const count = await prisma.opportunity.count({ where: { teamId: team.id, companyId: ctx.companyId } })
-      return apiError(409, teamInUseMessage(count), "TEAM_IN_USE")
+      return apiError(409, teamInUseMessage(count, await deletedInTeam()), "TEAM_IN_USE")
     }
     const { message, status } = userFacingError(err, "Deleting a team")
     return apiError(status, message)

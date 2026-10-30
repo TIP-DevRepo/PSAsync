@@ -6,6 +6,8 @@ import { NOTE_EMPTY_MESSAGE, readNoteBody, recordTimelineActions } from "@/lib/t
 import { opportunityCreatedAction } from "@/lib/opportunity-timeline"
 import { UserError } from "@/lib/user-error"
 import { loadDefaultTeamId } from "@/lib/team-defaults"
+import { recordAudit } from "@/lib/audit-log"
+import { opportunityCreatedAudit } from "@/lib/opportunity-audit"
 
 // Creating an opportunity, shared by POST /api/opportunities (a person) and
 // a later branch that creates one automatically (from a sent quote). Every
@@ -50,10 +52,11 @@ export function initialNoteHtml(note: InitialNote): string {
   return read.value
 }
 
-// Creates the opportunity, its "created" timeline entry, and the initial
-// note a moment after it (so the note reads first, newest first), all in
-// one transaction that also takes the number. The created entry and the
-// note are by the person, or by the system (no author) for a system note.
+// Creates the opportunity, its "created" timeline and audit entries, and
+// the initial note a moment after it (so the note reads first, newest
+// first), all in one transaction that also takes the number. The created
+// entries and the note are by the person, or by the system (no author) for
+// a system note.
 export async function createOpportunity(db: Pick<PrismaClient, "$transaction">, input: NewOpportunity, now = new Date()) {
   const noteHtml = initialNoteHtml(input.initialNote)
   const authorId = input.initialNote.by === "person" ? input.initialNote.userId : null
@@ -86,6 +89,7 @@ export async function createOpportunity(db: Pick<PrismaClient, "$transaction">, 
 
     const subject = { opportunityId: created.id }
     await recordTimelineActions(tx, { companyId: input.companyId, authorId, subject, actions: [opportunityCreatedAction(created)], at: now })
+    await recordAudit(tx, { companyId: input.companyId, actorId: authorId, entries: [opportunityCreatedAudit(created)], at: now })
     await tx.timelineEntry.create({
       data: { companyId: input.companyId, ...subject, kind: "NOTE", authorId, body: noteHtml, createdAt: new Date(now.getTime() + 1) },
       select: { id: true },
