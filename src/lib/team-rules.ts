@@ -3,6 +3,7 @@
 // database imports, so pages, routes, and checks can all use them.
 
 import { sortUsersByName } from "@/lib/user-picker"
+import { deletedOpportunitiesNote } from "@/lib/opportunity-rules"
 
 export const TEAM_NAME_MAX = 100
 export const TEAM_DESCRIPTION_MAX = 500
@@ -12,8 +13,9 @@ export const DEFAULT_TEAM_DELETE_MESSAGE = "The General team can't be deleted. Y
 export const TEAM_ORDER_MESSAGE = "Invalid team order"
 export const TEAM_ORDER_STALE_MESSAGE = "The team list changed since you loaded it. Refresh and try again."
 
-export function teamInUseMessage(count: number): string {
-  return `This team has ${count} ${count === 1 ? "opportunity" : "opportunities"}. Move ${count === 1 ? "it" : "them"} to another team before deleting it.`
+// deleted is how many of them are deleted (they still belong to the team)
+export function teamInUseMessage(count: number, deleted = 0): string {
+  return `This team has ${count} ${count === 1 ? "opportunity" : "opportunities"}. Move ${count === 1 ? "it" : "them"} to another team before deleting it.${deletedOpportunitiesNote(deleted)}`
 }
 
 // What the viewer may do with opportunities, from their permissions

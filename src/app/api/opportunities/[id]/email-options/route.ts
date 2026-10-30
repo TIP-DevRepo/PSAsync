@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { notFound, requireAccess } from "@/lib/api-access"
-import { loadViewableOpportunity } from "@/lib/scoped-loaders"
+import { loadViewableOpportunity, opportunityWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { ownSenderOptions } from "@/lib/quote-sender"
@@ -34,7 +34,7 @@ export async function GET(
     ownSenderOptions(ctx),
     prisma.companySettings.findUnique({ where: { companyId: ctx.companyId }, select: { emailSignature: true } }),
     prisma.opportunity.findFirst({
-      where: { id: opportunity.id, companyId: ctx.companyId },
+      where: opportunityWhere(ctx, opportunity.id),
       select: {
         client: {
           select: {

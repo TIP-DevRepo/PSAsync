@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { readUploadFromRequest, storeUpload } from "@/lib/uploads"
 import { requireAccess, notFound } from "@/lib/api-access"
-import { loadViewableOpportunity } from "@/lib/scoped-loaders"
+import { loadViewableOpportunity, opportunityAttachmentsWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { opportunityAttachmentSelect } from "@/lib/opportunity-selects"
@@ -29,7 +29,7 @@ export async function GET(
   if (!opportunity) return notFound()
 
   const attachments = await prisma.opportunityAttachment.findMany({
-    where: { opportunityId: opportunity.id, opportunity: { companyId: ctx.companyId } },
+    where: opportunityAttachmentsWhere(ctx, opportunity.id),
     select: opportunityAttachmentSelect,
     orderBy: { createdAt: "desc" },
   })

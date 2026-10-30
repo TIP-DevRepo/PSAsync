@@ -52,6 +52,9 @@ export const opportunityDetailSelect = {
   contact: { select: { id: true, firstName: true, lastName: true, title: true, email: true, phone: true, mobile: true } },
   sourceTicketId: true,
   createdBy: userName,
+  // Set only on a deleted opportunity, which only auditLog.view holders open
+  deletedAt: true,
+  deletedBy: userName,
   _count: { select: { attachments: true, quotes: true, salesOrders: true, purchaseOrders: true } },
 } satisfies Prisma.OpportunitySelect
 

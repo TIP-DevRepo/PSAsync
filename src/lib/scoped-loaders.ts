@@ -345,6 +345,17 @@ type OpportunityViewer = Pick<AccessContext, "companyId" | "userId" | "can">
 // Matches no row, for callers who may not open any opportunity
 const NO_OPPORTUNITIES = { id: { in: [] as string[] } } satisfies Prisma.OpportunityWhereInput
 
+// Deleting an opportunity only hides it (deletedAt), so admins can restore
+// it from the audit log. This is the one "not deleted" condition: every
+// opportunity query uses it through the builders below (opportunityWhere,
+// viewableOpportunityWhere, opportunityListWhere, and the loaders and
+// assertRefs keys built on them), and any new opportunity query must too.
+// Only the audit log, restore, and an auditLog.view holder opening a
+// deleted opportunity read deleted ones, through the *IncludingDeleted and
+// deleted builders.
+export const NOT_DELETED_OPPORTUNITY = { deletedAt: null } satisfies Prisma.OpportunityWhereInput
+export const DELETED_OPPORTUNITY = { deletedAt: { not: null } } satisfies Prisma.OpportunityWhereInput
+
 // Which of the company's opportunities a user may open (VOP). They need the
 // Opportunities page, and then one of three levels:
 //   basic: their own, plus unassigned ones in teams they belong to
@@ -385,28 +396,53 @@ export function mayUseOpportunityTeam(ctx: Pick<AccessContext, "can">, actorInTe
   return actorInTeam || ctx.can("opportunities.viewAll")
 }
 
-// The list filter for every opportunity the user may open
+// The list filter for every opportunity the user may open (never deleted ones)
 export const opportunityListWhere = (ctx: OpportunityViewer) =>
-  ({ companyId: ctx.companyId, AND: [opportunityVisibilityWhere(ctx)] }) satisfies Prisma.OpportunityWhereInput
+  ({ companyId: ctx.companyId, ...NOT_DELETED_OPPORTUNITY, AND: [opportunityVisibilityWhere(ctx)] }) satisfies Prisma.OpportunityWhereInput
 
-// Company scoping only, for writes after loadViewableOpportunity has passed
+// Company scoping only, for writes after loadViewableOpportunity has passed.
+// A deleted opportunity is never matched.
 export const opportunityWhere = (ctx: Scope, opportunityId: string) =>
-  ({ id: opportunityId, companyId: ctx.companyId }) satisfies Prisma.OpportunityWhereUniqueInput
+  ({ id: opportunityId, companyId: ctx.companyId, ...NOT_DELETED_OPPORTUNITY }) satisfies Prisma.OpportunityWhereUniqueInput
 
 // One opportunity the user may open, for reads that need their own select
 export const viewableOpportunityWhere = (ctx: OpportunityViewer, opportunityId: string) =>
   ({
     id: opportunityId,
     companyId: ctx.companyId,
+    ...NOT_DELETED_OPPORTUNITY,
     AND: [opportunityVisibilityWhere(ctx)],
   }) satisfies Prisma.OpportunityWhereUniqueInput
+
+// The same view check (VOP) with deleted ones included: only for the
+// opportunity's audit log, restore, undo, and an auditLog.view holder
+// opening a deleted opportunity's page
+export const viewableOpportunityIncludingDeletedWhere = (ctx: OpportunityViewer, opportunityId: string) =>
+  ({ id: opportunityId, companyId: ctx.companyId, AND: [opportunityVisibilityWhere(ctx)] }) satisfies Prisma.OpportunityWhereUniqueInput
+
+// A deleted opportunity of the company, for the restore write
+export const deletedOpportunityWhere = (ctx: Scope, opportunityId: string) =>
+  ({ id: opportunityId, companyId: ctx.companyId, ...DELETED_OPPORTUNITY }) satisfies Prisma.OpportunityWhereUniqueInput
+
+// The company's opportunities with these ids, deleted ones included, for
+// the audit log's record states (deleted or not)
+export const opportunityRecordStatesWhere = (ctx: Scope, opportunityIds: string[]) =>
+  ({ companyId: ctx.companyId, id: { in: opportunityIds } }) satisfies Prisma.OpportunityWhereInput
 
 export const opportunityAttachmentWhere = (ctx: Scope, opportunityId: string, attachmentId: string) =>
   ({
     id: attachmentId,
     opportunityId,
-    opportunity: { id: opportunityId, companyId: ctx.companyId },
+    opportunity: opportunityWhere(ctx, opportunityId),
   }) satisfies Prisma.OpportunityAttachmentWhereUniqueInput
+
+// Every attachment of one opportunity (not deleted), for lists
+export const opportunityAttachmentsWhere = (ctx: Scope, opportunityId: string) =>
+  ({ opportunityId, opportunity: opportunityWhere(ctx, opportunityId) }) satisfies Prisma.OpportunityAttachmentWhereInput
+
+// Every timeline entry of one opportunity (not deleted), for its timeline
+export const opportunityTimelineWhere = (ctx: Scope, opportunityId: string) =>
+  ({ companyId: ctx.companyId, opportunityId, opportunity: opportunityWhere(ctx, opportunityId) }) satisfies Prisma.TimelineEntryWhereInput
 
 // The opportunity view check (VOP) every opportunity route runs on its URL
 // id. One the user can't open is a miss, same as one that doesn't exist.
@@ -430,7 +466,7 @@ export function loadOpportunityAttachment(ctx: OpportunityViewer, opportunityId:
 // A timeline entry of one opportunity, company scoped, for writes after
 // loadOpportunityTimelineEntry has passed
 export const opportunityTimelineEntryWhere = (ctx: Scope, opportunityId: string, entryId: string) =>
-  ({ id: entryId, companyId: ctx.companyId, opportunityId }) satisfies Prisma.TimelineEntryWhereUniqueInput
+  ({ id: entryId, companyId: ctx.companyId, opportunityId, opportunity: opportunityWhere(ctx, opportunityId) }) satisfies Prisma.TimelineEntryWhereUniqueInput
 
 // A timeline entry by its URL id (or a paging cursor), only under the
 // opportunity it belongs to, with the VOP check on that opportunity
@@ -662,7 +698,9 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
       return prisma.opportunity.count({ where: whereIds(opportunityWhere(ctx, first), ids) })
     case "opportunityAttachmentId":
       return prisma.opportunityAttachment.count({
-        where: opportunityId ? whereIds(opportunityAttachmentWhere(ctx, opportunityId, first), ids) : { id: { in: ids }, opportunity: company },
+        where: opportunityId
+          ? whereIds(opportunityAttachmentWhere(ctx, opportunityId, first), ids)
+          : { id: { in: ids }, opportunity: { ...company, ...NOT_DELETED_OPPORTUNITY } },
       })
   }
 }

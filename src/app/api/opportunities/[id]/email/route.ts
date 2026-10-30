@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
-import { assertRefs, loadViewableOpportunity, opportunityWhere } from "@/lib/scoped-loaders"
+import { assertRefs, loadViewableOpportunity, opportunityAttachmentsWhere, opportunityWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { readJsonObject, stageChangeData, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
@@ -82,7 +82,7 @@ export async function POST(
   if (!sender.ok) return apiError(sender.status, sender.error, sender.code)
 
   const attachments = await prisma.opportunityAttachment.findMany({
-    where: { id: { in: attachmentIds.value }, opportunityId: opportunity.id, opportunity: { companyId: ctx.companyId } },
+    where: { id: { in: attachmentIds.value }, ...opportunityAttachmentsWhere(ctx, opportunity.id) },
     select: { id: true, fileName: true, fileUrl: true, fileSize: true },
     orderBy: { createdAt: "asc" },
   })

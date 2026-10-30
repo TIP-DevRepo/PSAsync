@@ -1,14 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
-import { opportunityWhere, viewableOpportunityWhere } from "@/lib/scoped-loaders"
+import { opportunityWhere, viewableOpportunityIncludingDeletedWhere, viewableOpportunityWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { opportunityDetailSelect } from "@/lib/opportunity-selects"
-import { INVALID_BODY_MESSAGE, isPrismaError, linkedRecordsMessage, readJsonObject } from "@/lib/opportunity-rules"
-import { deleteStoredObjects } from "@/lib/uploads"
+import { INVALID_BODY_MESSAGE, linkedRecordsMessage, readJsonObject } from "@/lib/opportunity-rules"
 import { applyOpportunityUpdate, opportunityUpdateExistingSelect, planOpportunityUpdate } from "@/lib/opportunity-update"
 import { userFacingError } from "@/lib/user-error"
+import { recordAudit } from "@/lib/audit-log"
+import { opportunityDeletedAudit } from "@/lib/opportunity-audit"
+
+// Thrown inside the delete transaction when a link appeared since the check
+class LinkedRefusal extends Error {
+  constructor(readonly linkMessage: string) {
+    super("Opportunity linked")
+  }
+}
 
 export async function GET(
   req: NextRequest,
@@ -28,9 +36,16 @@ export async function GET(
     where: viewableOpportunityWhere(ctx, id),
     select: opportunityDetailSelect,
   })
-  if (!opportunity) return notFound()
+  if (opportunity) return NextResponse.json(opportunity)
 
-  return NextResponse.json(opportunity)
+  // A deleted opportunity opens only for audit log viewers (from the audit
+  // log), with deletedAt and deletedBy set; everyone else gets the 404
+  if (!ctx.can("auditLog.view")) return notFound()
+  const deleted = await prisma.opportunity.findFirst({
+    where: viewableOpportunityIncludingDeletedWhere(ctx, id),
+    select: opportunityDetailSelect,
+  })
+  return deleted ? NextResponse.json(deleted) : notFound()
 }
 
 // Changes only the fields the body includes, and records a timeline ACTION
@@ -75,7 +90,10 @@ export async function PATCH(
 }
 
 // Refused while any quote, sales order, or purchase order links to it.
-// Otherwise its attachments go with it, rows and stored files.
+// Otherwise the opportunity is hidden, not erased (deletedAt and
+// deletedById, with a deleted audit entry, in one transaction): its
+// attachments, their stored files, and its timeline are kept, and an admin
+// with auditLog.restore can restore it from the audit log.
 export async function DELETE(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -90,39 +108,38 @@ export async function DELETE(
   await ensureTeamDefaults(ctx.companyId)
 
   const { id } = await params
+  const linkCounts = { select: { quotes: true, salesOrders: true, purchaseOrders: true } } as const
   const opportunity = await prisma.opportunity.findFirst({
     where: viewableOpportunityWhere(ctx, id),
-    select: { id: true, _count: { select: { quotes: true, salesOrders: true, purchaseOrders: true } } },
+    select: { id: true, number: true, title: true, _count: linkCounts },
   })
   if (!opportunity) return notFound()
 
   const blocked = linkedRecordsMessage(opportunity._count)
   if (blocked) return apiError(409, blocked, "OPPORTUNITY_LINKED")
 
-  // The attachment rows cascade with the opportunity, so their files are
-  // collected first and removed (best effort) once the delete succeeds
-  const attachments = await prisma.opportunityAttachment.findMany({
-    where: { opportunityId: opportunity.id, opportunity: { companyId: ctx.companyId } },
-    select: { fileUrl: true },
-  })
-
   try {
-    await prisma.opportunity.delete({ where: opportunityWhere(ctx, opportunity.id) })
-  } catch (err) {
-    // A link added since the check above (the database refuses the delete)
-    if (isPrismaError(err, "P2003")) {
-      const counts = await prisma.opportunity.findFirst({
+    const deleted = await prisma.$transaction(async (tx) => {
+      // A link added since the check above still refuses the delete
+      const counts = await tx.opportunity.findFirst({ where: opportunityWhere(ctx, opportunity.id), select: { _count: linkCounts } })
+      if (!counts) return false
+      const linked = linkedRecordsMessage(counts._count)
+      if (linked) throw new LinkedRefusal(linked)
+      const { count } = await tx.opportunity.updateMany({
         where: opportunityWhere(ctx, opportunity.id),
-        select: { _count: { select: { quotes: true, salesOrders: true, purchaseOrders: true } } },
+        data: { deletedAt: new Date(), deletedById: ctx.userId },
       })
-      const message = counts ? linkedRecordsMessage(counts._count) : null
-      return apiError(409, message ?? "This opportunity is linked to other records, so it can't be deleted.", "OPPORTUNITY_LINKED")
-    }
+      if (count === 0) return false
+      await recordAudit(tx, { companyId: ctx.companyId, actorId: ctx.userId, entries: [opportunityDeletedAudit(opportunity)] })
+      return true
+    })
+    // Deleted by someone else since the check
+    if (!deleted) return notFound()
+  } catch (err) {
+    if (err instanceof LinkedRefusal) return apiError(409, err.linkMessage, "OPPORTUNITY_LINKED")
     const { message, status } = userFacingError(err, "Deleting an opportunity")
     return apiError(status, message)
   }
-
-  await deleteStoredObjects(attachments.map((a) => a.fileUrl), `opportunities/${opportunity.id}/`)
 
   return NextResponse.json({ deleted: true })
 }

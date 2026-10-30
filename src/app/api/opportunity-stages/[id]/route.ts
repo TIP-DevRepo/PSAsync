@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { apiError, isEnumValue, notFound, requireAccess } from "@/lib/api-access"
-import { opportunityStageWhere } from "@/lib/scoped-loaders"
+import { DELETED_OPPORTUNITY, opportunityStageWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults, isRefusal, refuse, withOpportunitySettingsLock, type Refusal } from "@/lib/opportunity-defaults"
 import { opportunityStageSelect } from "@/lib/opportunity-selects"
 import {
@@ -144,8 +144,12 @@ export async function DELETE(
       const stage = await tx.opportunityStage.findFirst({ where: opportunityStageWhere(ctx, id), select: { id: true, category: true } })
       if (!stage) return refuse(404, "Not found")
 
+      // Deleted opportunities count too: their rows are kept, so they still hold the stage
       const inUse = await tx.opportunity.count({ where: { companyId, stageId: stage.id } })
-      if (inUse > 0) return refuse(409, stageInUseMessage(inUse), "STAGE_IN_USE")
+      if (inUse > 0) {
+        const deleted = await tx.opportunity.count({ where: { companyId, stageId: stage.id, ...DELETED_OPPORTUNITY } })
+        return refuse(409, stageInUseMessage(inUse, deleted), "STAGE_IN_USE")
+      }
       const button = await tx.actionButton.findFirst({
         where: { companyId, fixedStageId: stage.id },
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],

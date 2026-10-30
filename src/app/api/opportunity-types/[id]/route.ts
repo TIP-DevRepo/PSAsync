@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
-import { opportunityTypeWhere } from "@/lib/scoped-loaders"
+import { DELETED_OPPORTUNITY, opportunityTypeWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { opportunityTypeSelect } from "@/lib/opportunity-selects"
 import {
@@ -68,8 +68,12 @@ export async function DELETE(
   const type = await prisma.opportunityType.findFirst({ where: opportunityTypeWhere(ctx, id), select: { id: true } })
   if (!type) return notFound()
 
+  // Deleted opportunities count too: their rows are kept, so they still hold the type
   const inUse = await prisma.opportunity.count({ where: { companyId: ctx.companyId, typeId: type.id } })
-  if (inUse > 0) return apiError(409, typeInUseMessage(inUse), "TYPE_IN_USE")
+  if (inUse > 0) {
+    const deleted = await prisma.opportunity.count({ where: { companyId: ctx.companyId, typeId: type.id, ...DELETED_OPPORTUNITY } })
+    return apiError(409, typeInUseMessage(inUse, deleted), "TYPE_IN_USE")
+  }
 
   try {
     await prisma.opportunityType.delete({ where: opportunityTypeWhere(ctx, type.id) })

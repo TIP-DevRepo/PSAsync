@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
-import { loadOpportunityTimelineEntry, loadViewableOpportunity, opportunityWhere } from "@/lib/scoped-loaders"
+import { loadOpportunityTimelineEntry, loadViewableOpportunity, opportunityTimelineWhere, opportunityWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { readJsonObject, stageChangeData, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
@@ -45,7 +45,7 @@ export async function GET(
     return apiError(400, INVALID_CURSOR_MESSAGE)
   }
 
-  const page = await readTimelinePage(prisma, { companyId: ctx.companyId, opportunityId: opportunity.id }, cursor)
+  const page = await readTimelinePage(prisma, opportunityTimelineWhere(ctx, opportunity.id), cursor)
   return NextResponse.json(page)
 }
 
