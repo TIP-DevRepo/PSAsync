@@ -9,8 +9,12 @@ import { COLUMN_FILTER_MAX, hasColumnFilters, readColumnFilters, writeColumnFilt
 // HaloPSA style column filters for a list table (rules in
 // src/lib/column-filters.ts). A table puts ColumnFilterToggle in its header
 // row and ColumnFilterRow right under the column names; useColumnFilters
-// keeps the filters in the URL. Shared by the opportunities list and,
-// later, the tickets list.
+// keeps the filters in the URL. Shared by the opportunities list, the
+// audit log, and later the tickets list.
+//
+// Server mode, for a paged list (the audit log): filter on the server with
+// applied, the filters the URL holds, which follow the boxes once typing
+// pauses; the boxes, the toggle, and the URL parameters work the same.
 
 // The filters for a list's columns: what the boxes hold (applied to the
 // rows as the user types) and whether the filter row is open. The URL
@@ -53,6 +57,8 @@ export function useColumnFilters(keys: readonly string[]) {
 
   return {
     filters,
+    // The filters in the URL, for a list that filters on the server
+    applied: fromUrl,
     open,
     active: hasColumnFilters(filters),
     setOpen,
@@ -92,7 +98,8 @@ export function ColumnFilterToggle({ open, active, onToggle, rowId }: { open: bo
 // The row of text boxes under the column names, one per column, each as
 // wide as its column (the table's own fixed widths), scrolling sideways
 // with the table. leadingCells are the cells before the first column (the
-// toggle's column).
+// toggle's column). A column with filterable false gets an empty cell, so
+// the boxes stay under their columns.
 export function ColumnFilterRow({
   id,
   columns,
@@ -102,7 +109,7 @@ export function ColumnFilterRow({
   cellClassName,
 }: {
   id: string
-  columns: readonly { key: string; label: string }[]
+  columns: readonly { key: string; label: string; filterable?: boolean }[]
   filters: ColumnFilters
   onChange: (key: string, value: string) => void
   leadingCells?: number
@@ -113,19 +120,23 @@ export function ColumnFilterRow({
       {Array.from({ length: leadingCells }, (_, i) => (
         <th key={`lead-${i}`} aria-hidden="true" />
       ))}
-      {columns.map((column) => (
-        <th key={column.key} scope="col" className={cn("py-1.5 pr-3 font-normal", cellClassName)}>
-          <input
-            type="search"
-            value={filters[column.key] ?? ""}
-            onChange={(e) => onChange(column.key, e.target.value)}
-            maxLength={COLUMN_FILTER_MAX}
-            aria-label={`Filter ${column.label}`}
-            placeholder="Filter"
-            className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          />
-        </th>
-      ))}
+      {columns.map((column) =>
+        column.filterable === false ? (
+          <th key={column.key} aria-hidden="true" />
+        ) : (
+          <th key={column.key} scope="col" className={cn("py-1.5 pr-3 font-normal", cellClassName)}>
+            <input
+              type="search"
+              value={filters[column.key] ?? ""}
+              onChange={(e) => onChange(column.key, e.target.value)}
+              maxLength={COLUMN_FILTER_MAX}
+              aria-label={`Filter ${column.label}`}
+              placeholder="Filter"
+              className="w-full min-w-0 rounded-md border border-border bg-background px-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            />
+          </th>
+        )
+      )}
     </tr>
   )
 }

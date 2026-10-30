@@ -7,7 +7,8 @@
 // React and no database imports.
 //
 // Filtering runs on the rows already loaded, since those lists aren't
-// paged; a list that becomes paged moves this matching to the server.
+// paged; a paged list (the audit log) sends the URL's filters to the
+// server instead and keeps the same f_<column key> parameters.
 
 export const COLUMN_FILTER_PREFIX = "f_"
 // Characters a column filter keeps from the URL
