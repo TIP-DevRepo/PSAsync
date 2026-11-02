@@ -1000,7 +1000,10 @@ const ATTEMPTS: Attempt[] = [
     kind: "control",
     method: "PATCH",
     path: (c) => `/api/clients/${c.b.clientId}/contacts/${c.b.contactId}`,
-    body: (c) => ({ firstName: c.names.contactFirstName, lastName: c.names.contactLastName, email: c.names.contactEmail, locationId: c.b.clientLocationId, isPrimary: true }),
+    // Every field the run data stores: the contact PATCH saves the whole
+    // form, so a field left out is cleared (the mobile included, which the
+    // opportunity client details controls below look for)
+    body: (c) => ({ firstName: c.names.contactFirstName, lastName: c.names.contactLastName, email: c.names.contactEmail, mobile: c.names.contactMobile, locationId: c.b.clientLocationId, isPrimary: true }),
     expect: 200,
     contains: (c) => [c.b.contactId],
   },
