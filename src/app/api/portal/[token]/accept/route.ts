@@ -5,6 +5,7 @@ import { alreadyRespondedResponse, AWAITING_RESPONSE_STATUSES, linkInvalidRespon
 import { checkAcceptBody, readPortalBody } from "@/lib/portal-input"
 import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
+import { applyQuoteEvent } from "@/lib/opportunity-quotes"
 
 export async function POST(
   req: NextRequest,
@@ -31,24 +32,29 @@ export async function POST(
   // The decision is one conditional write on the quote still waiting on
   // the customer, so of an accept and a decline (or two accepts) sent at
   // the same time exactly one wins. Only the winner notifies and creates
-  // the sales order.
-  const decided = await prisma.quote.updateMany({
-    where: { id: quote.id, status: { in: [...AWAITING_RESPONSE_STATUSES] } },
-    data: {
-      status: "ACCEPTED",
-      acceptedAt: new Date(),
-      signatureType: input.signatureType,
-      signatureData: input.signatureData,
-      signerName: input.signerName,
-      termsAgreedAt: new Date(),
-      clientPoNumber: input.clientPoNumber || quote.clientPoNumber,
-      shipAddress: keep(input.shipAddress, quote.shipAddress),
-      shipCity: keep(input.shipCity, quote.shipCity),
-      shipState: keep(input.shipState, quote.shipState),
-      shipZip: keep(input.shipZip, quote.shipZip),
-      shipCountry: keep(input.shipCountry, quote.shipCountry),
-      shipContactName: keep(input.shipContactName, quote.shipContactName),
-    },
+  // the sales order. The winner's opportunity moves to Won in the same
+  // transaction, recorded as the system's.
+  const decided = await prisma.$transaction(async (tx) => {
+    const won = await tx.quote.updateMany({
+      where: { id: quote.id, status: { in: [...AWAITING_RESPONSE_STATUSES] } },
+      data: {
+        status: "ACCEPTED",
+        acceptedAt: new Date(),
+        signatureType: input.signatureType,
+        signatureData: input.signatureData,
+        signerName: input.signerName,
+        termsAgreedAt: new Date(),
+        clientPoNumber: input.clientPoNumber || quote.clientPoNumber,
+        shipAddress: keep(input.shipAddress, quote.shipAddress),
+        shipCity: keep(input.shipCity, quote.shipCity),
+        shipState: keep(input.shipState, quote.shipState),
+        shipZip: keep(input.shipZip, quote.shipZip),
+        shipCountry: keep(input.shipCountry, quote.shipCountry),
+        shipContactName: keep(input.shipContactName, quote.shipContactName),
+      },
+    })
+    if (won.count === 1) await applyQuoteEvent(tx, { companyId: quote.companyId, quoteId: quote.id, event: "accepted", actorId: null })
+    return won
   })
   if (decided.count !== 1) return alreadyRespondedResponse()
 

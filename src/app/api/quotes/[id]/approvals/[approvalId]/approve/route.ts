@@ -64,7 +64,7 @@ export async function POST(
   const remaining = await prisma.quoteApproval.count({
     where: { quoteId: id, status: "PENDING" },
   })
-  const completion = remaining === 0 ? await completeApprovedQuote(id, companyId) : null
+  const completion = remaining === 0 ? await completeApprovedQuote(id, companyId, undefined, ctx.userId) : null
 
   const updatedQuote = await prisma.quote.findUnique({ where: { id } })
   return NextResponse.json({

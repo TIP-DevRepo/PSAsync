@@ -9,13 +9,16 @@ import { clientDefaultsSelect, clientQuoteDefaults } from "@/lib/quote-client-de
 import { DEFAULT_QUOTE_EXPIRY_DAYS, expiryDateFromToday } from "@/lib/quote-expiry"
 import { userFacingError } from "@/lib/user-error"
 import { isNumberCollision, NUMBER_TAKEN_MESSAGE, takeRecordNumber } from "@/lib/record-number"
+import { setQuoteFamilyOpportunity } from "@/lib/opportunity-quotes"
+import { readOptionalId } from "@/lib/opportunity-rules"
 
 // A copy takes only the quote's details and items: its title, intro, terms,
 // sections, and line items. The rep picks the client and contact for the
 // copy, which then gets that client's payment terms and ship to address the
 // way a new quote does, a new number, new links, and a new expiry. Nothing
 // about the original customer or its progress (status, sends, approvals,
-// comments, signature, PO number, internal notes) comes along.
+// comments, signature, PO number, internal notes) comes along, and neither
+// does its opportunity: the copy dialog may name one for the copy instead.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -50,7 +53,12 @@ export async function POST(
   if (typeof body.contactId !== "string") return apiError(400, "Invalid contact", "INVALID_REFERENCE")
   const clientId: string = body.clientId
   const contactId: string = body.contactId
-  const invalid = await assertRefs(ctx, { clientId, contactId })
+  // An optional opportunity for the copy: an OPEN one of the chosen client
+  // and contact the user may open
+  const linkRef = readOptionalId(body.opportunityId)
+  if (linkRef.error !== undefined) return apiError(400, "Invalid opportunity", "INVALID_REFERENCE")
+  const opportunityId = linkRef.value
+  const invalid = await assertRefs(ctx, { clientId, contactId, quoteOpportunityId: opportunityId })
   if (invalid) return invalid
 
   const client = await prisma.client.findFirst({ where: clientWhere(ctx, clientId), select: clientDefaultsSelect })
@@ -73,7 +81,7 @@ export async function POST(
   try {
     copy = await prisma.$transaction(async (tx) => {
       const quoteNumber = await takeRecordNumber(tx, companyId, "quote", prefix)
-      return tx.quote.create({
+      const created = await tx.quote.create({
         data: {
           companyId,
           clientId,
@@ -104,6 +112,8 @@ export async function POST(
           lineItems: { create: source.lineItems.map(copiedLineData) },
         },
       })
+      await setQuoteFamilyOpportunity(tx, { companyId, actorId: ctx.userId, quoteNumber, from: null, to: opportunityId })
+      return { ...created, opportunityId }
     })
   } catch (err) {
     if (isNumberCollision(err)) return apiError(409, NUMBER_TAKEN_MESSAGE, "NUMBER_TAKEN")

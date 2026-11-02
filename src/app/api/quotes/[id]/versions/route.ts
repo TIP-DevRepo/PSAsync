@@ -89,6 +89,8 @@ export async function POST(
         taxRate: current.taxRate,
         // The section list keeps the order and any section with no lines yet
         sections: current.sections,
+        // The link belongs to the quote family, so every version shares it
+        opportunityId: current.opportunityId,
         lineItems: { create: current.lineItems.map(copiedLineData) },
       },
     })

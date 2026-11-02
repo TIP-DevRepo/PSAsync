@@ -7,6 +7,8 @@ import { assertRefs, mayAssignQuoteTo, quoteListWhere, SELF_ASSIGN_ONLY_MESSAGE 
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
 import { termsForStorage } from "@/lib/sanitize-terms"
 import { copiedLineData, COPY_SOURCE_LINE_ORDER } from "@/lib/quote-line-copy"
+import { setQuoteFamilyOpportunity } from "@/lib/opportunity-quotes"
+import { readOptionalId } from "@/lib/opportunity-rules"
 import type { Prisma } from "@/generated/prisma"
 
 export async function GET() {
@@ -108,8 +110,18 @@ export async function POST(req: NextRequest) {
   }
 
   // The contact must belong to the quote's client, and the Assigned Rep has
-  // to be an active user here.
-  const invalid = await assertRefs(ctx, { clientId: body.clientId, contactId: body.contactId, userId: body.userId })
+  // to be an active user here. An optional opportunity (the Raise Quote
+  // action, or the form's Opportunity picker) must be an OPEN one of that
+  // client and contact the user may open.
+  const linkRef = readOptionalId(body.opportunityId)
+  if (linkRef.error !== undefined) return apiError(400, "Invalid opportunity", "INVALID_REFERENCE")
+  const opportunityId = linkRef.value
+  const invalid = await assertRefs(ctx, {
+    clientId: body.clientId,
+    contactId: body.contactId,
+    userId: body.userId,
+    quoteOpportunityId: opportunityId,
+  })
   if (invalid) return invalid
 
   const companyId = ctx.companyId
@@ -174,7 +186,7 @@ export async function POST(req: NextRequest) {
   try {
     quote = await prisma.$transaction(async (tx) => {
       const quoteNumber = await takeRecordNumber(tx, companyId, "quote", prefix)
-      return tx.quote.create({
+      const created = await tx.quote.create({
         data: {
           companyId,
           clientId: body.clientId,
@@ -203,6 +215,8 @@ export async function POST(req: NextRequest) {
           },
         },
       })
+      await setQuoteFamilyOpportunity(tx, { companyId, actorId: ctx.userId, quoteNumber, from: null, to: opportunityId })
+      return { ...created, opportunityId }
     })
   } catch (err) {
     if (isNumberCollision(err)) return apiError(409, NUMBER_TAKEN_MESSAGE, "NUMBER_TAKEN")

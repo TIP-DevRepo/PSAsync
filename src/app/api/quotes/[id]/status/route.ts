@@ -6,6 +6,8 @@ import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
 import { applyTermsFreeze, isFrozenStatus, loadCompanyDefaultTerms, termsFreezeFor, UNFROZEN_STATUSES } from "@/lib/quote-terms"
 import { approvalsStillGranted, loadMatchingWorkflows } from "@/lib/approval-workflows"
+import { prepareQuoteStatusChange, runQuoteStatusChange } from "@/lib/opportunity-quotes"
+import type { QuoteStatus } from "@/generated/prisma"
 
 // The statuses that put a quote in front of the customer (or record their
 // acceptance), so reaching them from DRAFT or PENDING_APPROVAL needs every
@@ -60,6 +62,15 @@ export async function POST(
     }
   }
 
+  // A quote leaving Draft without an opportunity gets one (planned here, so
+  // one that can't have one is refused before anything changes), and the
+  // change's quote event (sent, accepted, declined, expired) moves the
+  // opportunity's stage, both in the transaction that changes the status
+  const to = body.status as QuoteStatus
+  const prepared = await prepareQuoteStatusChange(companyId, quote, to)
+  if (prepared.error !== undefined) return apiError(400, prepared.error)
+  const automation = { companyId, quoteId: id, from: quote.status, to, actorId: ctx.userId, plan: prepared.plan }
+
   const data: Record<string, unknown> = { status: body.status }
   if (body.status === "SENT" && !quote.sentAt) data.sentAt = new Date()
   if (body.status === "ACCEPTED" && !quote.acceptedAt) data.acceptedAt = new Date()
@@ -80,19 +91,23 @@ export async function POST(
         where: { companyId, quoteNumber: quote.quoteNumber, id: { not: id } },
         data: { isActive: false },
       })
-      return tx.quote.update({ where: { id }, data: { ...data, isActive: true } })
+      const saved = await tx.quote.update({ where: { id }, data: { ...data, isActive: true } })
+      await runQuoteStatusChange(tx, automation)
+      return saved
     })
     return NextResponse.json(withoutPortalTokens(updated))
   }
 
   const updated = await prisma.$transaction(async (tx) => {
     await applyTermsFreeze(tx, id, freeze)
-    return tx.quote.update({ where: { id }, data })
+    const saved = await tx.quote.update({ where: { id }, data })
+    await runQuoteStatusChange(tx, automation)
+    return saved
   })
 
   if (body.status === "ACCEPTED") {
     try {
-      await createSalesOrderFromAcceptedQuote(id)
+      await createSalesOrderFromAcceptedQuote(id, ctx.userId)
     } catch (err) {
       console.error("createSalesOrderFromAcceptedQuote failed:", err)
     }

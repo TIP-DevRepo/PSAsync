@@ -8,6 +8,7 @@ import {
 } from "@/lib/portal-access"
 import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
+import { applyQuoteEvent } from "@/lib/opportunity-quotes"
 
 export async function GET(
   req: NextRequest,
@@ -19,13 +20,18 @@ export async function GET(
   if (!access.ok) {
     // An expired link shows only the company's branding. A quote still
     // waiting on the customer is recorded as expired the first time its
-    // link is opened after the date, so staff lists show it.
+    // link is opened after the date, so staff lists show it. That is the
+    // quote's expired event, applied to its opportunity in the same
+    // transaction, as the system.
     if (access.expiredQuote) {
       const expired = access.expiredQuote
       if (AWAITING_RESPONSE_STATUSES.includes(expired.status)) {
-        await prisma.quote.updateMany({
-          where: { id: expired.id, status: { in: [...AWAITING_RESPONSE_STATUSES] } },
-          data: { status: "EXPIRED" },
+        await prisma.$transaction(async (tx) => {
+          const marked = await tx.quote.updateMany({
+            where: { id: expired.id, status: { in: [...AWAITING_RESPONSE_STATUSES] } },
+            data: { status: "EXPIRED" },
+          })
+          if (marked.count === 1) await applyQuoteEvent(tx, { companyId: expired.companyId, quoteId: expired.id, event: "expired", actorId: null })
         })
       }
       return expiredBrandingResponse(expired.companyId)
