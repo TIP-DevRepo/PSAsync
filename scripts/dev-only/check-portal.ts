@@ -71,9 +71,10 @@
 // Every run makes new quotes with new customer links, so running it again
 // within the hour starts from zero.
 //
-// Marking Company B's sample quote sent, and the statusFreeze scene's
-// DECLINED, make the app create an opportunity for it (a quote leaving Draft
-// without one gets one), which the later scenes' accepts and declines move.
+// Marking Company B's sample quote sent makes the app create an opportunity
+// for it (a quote sent or accepted without one gets one), which the later
+// scenes' accepts and declines move. The statusFreeze scene's DECLINED
+// creates none.
 // Every opportunity added during the run is unlinked and removed at the end
 // (lib/quote-opportunities.ts), so the other checks see the run's data as
 // it was set up.
@@ -703,8 +704,8 @@ export async function checkPortal(prisma: PrismaClient, run: RunData, baseUrl: s
   })
   // Company B's default terms, changed by the default terms scenes
   const originalSettings = await prisma.companySettings.findUnique({ where: { companyId: b.companyId }, select: { quoteTerms: true } })
-  // Marking Company B's sample quote sent (and the DECLINED status scene)
-  // makes the app create an opportunity for it, removed at the end
+  // Marking Company B's sample quote sent makes the app create an
+  // opportunity for it, removed at the end
   const opportunitiesBefore = await opportunityIdsOf(prisma, [b.companyId, c.companyId])
   if (familyRows.length !== 3) {
     throw new HarnessBroken("The sample quotes have extra versions, so this run's data isn't as it was set up.")

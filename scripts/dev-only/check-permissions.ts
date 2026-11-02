@@ -206,6 +206,17 @@
 // opportunities the app created included. The sample quote steps above
 // (status approval, stale approval) put back the sample quote's link and
 // remove any opportunity a send created (saveSampleQuote).
+//
+// Opportunity rules (checkQuoteOpportunityRules): contactless drafts move to
+// Declined and Expired, one at a time and several at once (the bulk actions
+// call the status route per quote), creating no opportunity, and sending
+// one through the status menu or Mark as sent is refused. Create
+// opportunity on an accepted, a declined, and a sent quote lands on the
+// first Won stage, the first Lost stage, and the quote sent stage (the
+// accepted and sent statuses are written straight to the database, since
+// the route would create the opportunity itself). An opportunity with a
+// linked quote refuses a new client with 409 and takes a new contact of its
+// client (a second contact this step adds and removes).
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -1830,7 +1841,7 @@ const SAMPLE_QUOTE_FIELDS = {
   opportunityId: true,
 } as const
 
-// Also takes the company's opportunity ids: moving the quote out of Draft
+// Also takes the company's opportunity ids: sending or accepting the quote
 // makes the app create an opportunity for it, which the restore removes
 async function saveSampleQuote(prisma: PrismaClient, quoteId: string) {
   const q = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { companyId: true, quoteNumber: true } })
@@ -2805,6 +2816,145 @@ async function checkQuoteOpportunities(prisma: PrismaClient, sessions: Record<Ac
   }
 }
 
+// When an opportunity is created, and the client change rule. Test Admin B
+// makes its own quotes (contactless ones included) and opportunities
+// through the API and changes statuses only through the status route and
+// Mark as sent with no email. A contactless draft moves to Declined and
+// Expired, one at a time and several at once (the bulk Mark Lost and Mark
+// Expired actions call the status route per quote), creating no
+// opportunity; sending one is refused. Create opportunity on an accepted,
+// a declined, and a sent quote lands on the first Won stage, the first Lost
+// stage, and the quote sent stage. An opportunity with a linked quote
+// refuses a new client (409) and takes a new contact of its client. The
+// accepted and sent statuses are written to the database directly, since
+// moving an unlinked quote there through the route would create its
+// opportunity. Everything it made is removed at the end.
+async function checkQuoteOpportunityRules(prisma: PrismaClient, sessions: Record<Actor, Session>, ctx: AttemptContext, rows: Row[]) {
+  const admin = sessions.admin
+  const companyId = ctx.b.companyId
+  const label = (name: string) => `[Admin B] Opportunity rules: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const idOf = (text: string) => {
+    try {
+      const id = (JSON.parse(text) as { id?: unknown }).id
+      return typeof id === "string" ? id : null
+    } catch {
+      return null
+    }
+  }
+  const opportunitiesBefore = await opportunityIdsOf(prisma, [companyId])
+  const added = async () => (await opportunityIdsOf(prisma, [companyId])).filter((id) => !opportunitiesBefore.includes(id))
+  const quoteIds: string[] = []
+  let extraContactId: string | null = null
+  const newQuote = async (withContact: boolean) => {
+    const res = await admin.request("POST", "/api/quotes", {
+      json: { clientId: ctx.b.clientId, ...(withContact ? { contactId: ctx.b.contactId } : {}), title: "Dev check opportunity rules" },
+    })
+    const id = idOf(res.text)
+    if (!id) throw new HarnessBroken(`couldn't create a quote: ${res.status} ${errorText(res.text)}`)
+    quoteIds.push(id)
+    return id
+  }
+  const status = (quoteId: string, s: string) => admin.request("POST", `/api/quotes/${quoteId}/status`, { json: { status: s } })
+  const quoteState = (id: string) => prisma.quote.findUniqueOrThrow({ where: { id }, select: { status: true, opportunityId: true } })
+
+  try {
+    // ── Contactless drafts close without an opportunity ──
+    const single = [await newQuote(false), await newQuote(false)]
+    const singleRes = [await status(single[0], "DECLINED"), await status(single[1], "EXPIRED")]
+    const bulk = [await newQuote(false), await newQuote(false), await newQuote(false)]
+    const bulkRes = await Promise.all([status(bulk[0], "DECLINED"), status(bulk[1], "DECLINED"), status(bulk[2], "EXPIRED")])
+    const closed = await Promise.all([...single, ...bulk].map(quoteState))
+    const wanted = ["DECLINED", "EXPIRED", "DECLINED", "DECLINED", "EXPIRED"]
+    const madeAfterClose = (await added()).length
+    push("a contactless draft moves to Declined and Expired, one at a time", "200, 200", singleRes.map((r) => r.status).join(", "),
+      singleRes.some((r) => r.status !== 200) ? `got ${singleRes.map((r) => `${r.status} ${errorText(r.text)}`).join("; ")}` : null)
+    push("contactless drafts move to Declined and Expired in bulk", "200 each", bulkRes.map((r) => r.status).join(", "),
+      bulkRes.some((r) => r.status !== 200) ? `got ${bulkRes.map((r) => `${r.status} ${errorText(r.text)}`).join("; ")}` : null)
+    push("closing drafts creates no opportunity", "statuses saved, none linked, none new", `${madeAfterClose} new`,
+      closed.some((q, i) => q.status !== wanted[i])
+        ? `statuses are ${closed.map((q) => q.status).join(", ")}`
+        : closed.some((q) => q.opportunityId) || madeAfterClose > 0
+          ? "an opportunity was created"
+          : null)
+
+    // ── Sending a contactless quote is refused ──
+    const contactless = await newQuote(false)
+    const viaStatus = await status(contactless, "SENT")
+    const viaSend = await admin.request("POST", `/api/quotes/${contactless}/send`)
+    const afterRefusal = await quoteState(contactless)
+    for (const [name, res] of [["the status menu", viaStatus], ["Mark as sent", viaSend]] as const) {
+      push(`sending a contactless quote through ${name} is refused`, '400 "Add a contact before sending"', String(res.status),
+        res.status === 400 && errorText(res.text).includes("Add a contact before sending") ? null : `got ${res.status}: ${errorText(res.text)}`)
+    }
+    push("the refused sends changed nothing", "still DRAFT, no opportunity", afterRefusal.status,
+      afterRefusal.status !== "DRAFT" || afterRefusal.opportunityId || (await added()).length > 0 ? "the quote or an opportunity changed" : null)
+
+    // ── Create opportunity follows the quote's status ──
+    const stages = await prisma.opportunityStage.findMany({ where: { companyId }, select: { id: true, category: true }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] })
+    const settings = await prisma.opportunitySettings.findUnique({ where: { companyId }, select: { quoteSentStageId: true } })
+    const firstWon = stages.find((s) => s.category === "WON")?.id
+    const firstLost = stages.find((s) => s.category === "LOST")?.id
+    const accepted = await newQuote(true)
+    await prisma.quote.update({ where: { id: accepted }, data: { status: "ACCEPTED", sentAt: new Date(), acceptedAt: new Date() } })
+    const declined = await newQuote(true)
+    await status(declined, "DECLINED")
+    const sent = await newQuote(true)
+    await prisma.quote.update({ where: { id: sent }, data: { status: "SENT", sentAt: new Date() } })
+    const cases: [string, string, string | null | undefined, boolean][] = [
+      ["an accepted quote", accepted, firstWon, true],
+      ["a declined quote", declined, firstLost, true],
+      ["a sent quote", sent, settings?.quoteSentStageId, false],
+    ]
+    for (const [name, quoteId, stageId, closesIt] of cases) {
+      const res = await admin.request("POST", `/api/quotes/${quoteId}/opportunity`)
+      const linked = await quoteState(quoteId)
+      const o = linked.opportunityId
+        ? await prisma.opportunity.findUnique({ where: { id: linked.opportunityId }, select: { stageId: true, closedAt: true } })
+        : null
+      push(`Create opportunity on ${name} lands on its stage`, closesIt ? "the matching closed stage, closedAt set" : "the quote sent stage", String(res.status),
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : !o
+            ? "the quote isn't linked"
+            : o.stageId !== stageId
+              ? "wrong stage"
+              : !!o.closedAt !== closesIt
+                ? "closedAt doesn't match the stage"
+                : null)
+    }
+
+    // ── The client can't change while records are linked ──
+    const oppRes = await admin.request("POST", "/api/opportunities", {
+      json: { title: "Dev check client lock", clientId: ctx.b.clientId, contactId: ctx.b.contactId, initialNote: OPP_NOTE },
+    })
+    const lockedId = idOf(oppRes.text)
+    if (!lockedId) throw new HarnessBroken(`couldn't create an opportunity: ${oppRes.status} ${errorText(oppRes.text)}`)
+    const linkedQuote = await newQuote(true)
+    await admin.request("PATCH", `/api/quotes/${linkedQuote}`, { json: { opportunityId: lockedId } })
+    const clientChange = await admin.request("PATCH", `/api/opportunities/${lockedId}`, { json: { clientId: ctx.fx.copyClientId, contactId: ctx.fx.copyContactId } })
+    push("changing the client of an opportunity with a linked quote is refused", '409 "Unlink this opportunity\'s quotes and orders"', String(clientChange.status),
+      clientChange.status === 409 && errorText(clientChange.text).includes("Unlink this opportunity's quotes and orders before changing its client")
+        ? null
+        : `got ${clientChange.status}: ${errorText(clientChange.text)}`)
+    const extra = await prisma.contact.create({ data: { clientId: ctx.b.clientId, firstName: "Dev check", lastName: "Second contact" }, select: { id: true } })
+    extraContactId = extra.id
+    const contactChange = await admin.request("PATCH", `/api/opportunities/${lockedId}`, { json: { contactId: extra.id } })
+    const lockedRow = await prisma.opportunity.findUniqueOrThrow({ where: { id: lockedId }, select: { clientId: true, contactId: true } })
+    push("changing its contact within the client works", "200, new contact, same client", String(contactChange.status),
+      contactChange.status !== 200
+        ? `got ${contactChange.status}: ${errorText(contactChange.text)}`
+        : lockedRow.contactId !== extra.id || lockedRow.clientId !== ctx.b.clientId
+          ? "the contact or client is wrong"
+          : null)
+  } finally {
+    await prisma.quote.deleteMany({ where: { id: { in: quoteIds } } })
+    await removeOpportunitiesAddedSince(prisma, [companyId], opportunitiesBefore)
+    if (extraContactId) await prisma.contact.deleteMany({ where: { id: extraContactId } })
+  }
+}
+
 // ─── Audit log steps ─────────────────────────────────────────────────────────
 // All three work on one opportunity Test Admin B creates through the API
 // (unassigned, in General, so Test Opp Viewer B can open it too), and remove
@@ -3377,6 +3527,10 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // Quotes linked to opportunities: linking, the automatic opportunity,
     // stage events, the value, and links carried to orders
     await checkQuoteOpportunities(prisma, sessions, ctx, rows)
+
+    // When an opportunity is created, Create opportunity stages, and the
+    // client change rule
+    await checkQuoteOpportunityRules(prisma, sessions, ctx, rows)
 
     // Audit log: every action recorded, soft delete and restore, and undo
     const auditOpportunityId = await checkAuditRecording(prisma, sessions.admin, ctx, rows)
