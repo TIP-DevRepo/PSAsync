@@ -1,6 +1,8 @@
 "use client"
 
 import { useState, type ReactNode } from "react"
+import Link from "next/link"
+import { useAccess } from "@/components/AccessProvider"
 import { Button } from "@/components/ui/button"
 import { ClientContactPicker } from "@/components/ClientContactPicker"
 import { InlineEditField, InlineFieldLink, InlineInput, InlineListbox } from "@/components/inline-edit/InlineEditField"
@@ -119,6 +121,9 @@ export function OpportunityInfoPanel({
   const [partyDraft, setPartyDraft] = useState<ClientContactValue | null>(null)
   const [partySaving, setPartySaving] = useState(false)
   const { locations, mainId } = useClientLocations(canEdit ? o.client.id : null)
+  // The value's quote is linked for users who can open quotes; the quote
+  // page still runs its own view check
+  const canOpenQuotes = useAccess().can("pages.quotes")
 
   const field = (key: FieldKey) => ({
     canEdit,
@@ -321,23 +326,41 @@ export function OpportunityInfoPanel({
           renderEditor={({ value, commit, cancel }) => <InlineListbox ariaLabel="Type" value={value} options={typeOptions} commit={commit} cancel={cancel} />}
           {...field("type")}
         />
-        <InlineEditField
-          label="Expected value"
-          value={o.expectedValue ?? ""}
-          renderValue={(v) => (v ? <span className="tabular-nums">{formatCents(valueCents(v))}</span> : DASH)}
-          onSave={async (text) => {
-            const value = readExpectedValue(text)
-            if (value.error !== undefined) {
-              toast.error("Couldn't save the expected value", value.error)
-              return false
-            }
-            return save({ expectedValue: value.value }, "expected value")
-          }}
-          renderEditor={({ value, commit, cancel }) => (
-            <InlineInput ariaLabel="Expected value" value={value} inputMode="decimal" placeholder="0.00" prefix="$" commit={commit} cancel={cancel} />
-          )}
-          {...field("value")}
-        />
+        {o.quoteValue ? (
+          // While quotes are linked the value follows the latest one and
+          // can't be edited here
+          <ReadOnly label="Expected value">
+            <span className="block tabular-nums">{formatCents(valueCents(o.quoteValue.value))}</span>
+            <span className="block text-xs text-muted-foreground">
+              From quote{" "}
+              {canOpenQuotes ? (
+                <Link href={`/dashboard/quotes/${o.quoteValue.quoteId}`} className={LINK}>
+                  {o.quoteValue.label}
+                </Link>
+              ) : (
+                o.quoteValue.label
+              )}
+            </span>
+          </ReadOnly>
+        ) : (
+          <InlineEditField
+            label="Expected value"
+            value={o.expectedValue ?? ""}
+            renderValue={(v) => (v ? <span className="tabular-nums">{formatCents(valueCents(v))}</span> : DASH)}
+            onSave={async (text) => {
+              const value = readExpectedValue(text)
+              if (value.error !== undefined) {
+                toast.error("Couldn't save the expected value", value.error)
+                return false
+              }
+              return save({ expectedValue: value.value }, "expected value")
+            }}
+            renderEditor={({ value, commit, cancel }) => (
+              <InlineInput ariaLabel="Expected value" value={value} inputMode="decimal" placeholder="0.00" prefix="$" commit={commit} cancel={cancel} />
+            )}
+            {...field("value")}
+          />
+        )}
         <InlineEditField
           label="Expected close date"
           value={o.expectedCloseDate ? o.expectedCloseDate.slice(0, 10) : ""}

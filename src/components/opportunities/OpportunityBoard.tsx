@@ -32,6 +32,7 @@ import {
   type OpportunityRow,
   type StageOption,
 } from "@/lib/opportunity-view"
+import { opportunityDisplayValue } from "@/lib/opportunity-value"
 import { CategoryPill } from "./StagePill"
 
 // The pointer picks the column under it; the keyboard (no pointer) falls
@@ -259,8 +260,9 @@ function BoardCard({
 }
 
 function CardBody({ card, link = false }: { card: OpportunityRow; link?: boolean }) {
-  // Value is expectedValue for now. Branch 3 switches it to the latest quote total.
-  const value = card.expectedValue === null ? "-" : formatCents(valueCents(card.expectedValue))
+  // The latest linked quote's total, else the expected value
+  const shown = opportunityDisplayValue(card)
+  const value = shown === null ? "-" : formatCents(valueCents(shown))
   return (
     <article className="space-y-1.5 rounded-lg border border-border bg-card p-3 pr-9 text-sm shadow-card transition-shadow duration-200 ease-out hover:shadow-elevated">
       <p className="text-xs font-medium tabular-nums text-muted-foreground">{card.number}</p>

@@ -63,6 +63,10 @@ export function latestQuoteValue(quotes: readonly LinkedQuoteForValue[]): Opport
   return { quoteId: quote.id, label: quoteLabel(quote), value: moneyText(quoteSellTotal(quote.lineItems)) }
 }
 
+// The opportunity PATCH refuses a manual value while quotes are linked
+export const EXPECTED_VALUE_FROM_QUOTE_MESSAGE =
+  "The expected value follows the latest linked quote. Change the quote, or unlink it, to change the value."
+
 // The value every screen shows (board cards and column totals, the list, the
 // opportunity page): the latest quote's total while there is one, otherwise
 // the manual expected value

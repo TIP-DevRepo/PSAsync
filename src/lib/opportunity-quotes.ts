@@ -368,9 +368,6 @@ export async function withQuoteValue<T extends { id: string }>(companyId: string
   return (await withQuoteValues(companyId, [row]))[0]
 }
 
-export const EXPECTED_VALUE_FROM_QUOTE_MESSAGE =
-  "The expected value follows the latest linked quote. Change the quote, or unlink it, to change the value."
-
 // ─── Pickers and panels ─────────────────────────────────────────────────────
 
 type Viewer = Pick<AccessContext, "companyId" | "userId" | "access" | "can">

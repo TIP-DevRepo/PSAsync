@@ -10,6 +10,7 @@ import { applyOpportunityUpdate, opportunityUpdateExistingSelect, planOpportunit
 import { userFacingError } from "@/lib/user-error"
 import { recordAudit } from "@/lib/audit-log"
 import { opportunityDeletedAudit } from "@/lib/opportunity-audit"
+import { withQuoteValue } from "@/lib/opportunity-quotes"
 
 // Thrown inside the delete transaction when a link appeared since the check
 class LinkedRefusal extends Error {
@@ -36,7 +37,8 @@ export async function GET(
     where: viewableOpportunityWhere(ctx, id),
     select: opportunityDetailSelect,
   })
-  if (opportunity) return NextResponse.json(opportunity)
+  // quoteValue: the latest linked quote's total, while it has linked quotes
+  if (opportunity) return NextResponse.json(await withQuoteValue(ctx.companyId, opportunity))
 
   // A deleted opportunity opens only for audit log viewers (from the audit
   // log), with deletedAt and deletedBy set; everyone else gets the 404
@@ -45,7 +47,7 @@ export async function GET(
     where: viewableOpportunityIncludingDeletedWhere(ctx, id),
     select: opportunityDetailSelect,
   })
-  return deleted ? NextResponse.json(deleted) : notFound()
+  return deleted ? NextResponse.json(await withQuoteValue(ctx.companyId, deleted)) : notFound()
 }
 
 // Changes only the fields the body includes, and records a timeline ACTION
@@ -82,7 +84,7 @@ export async function PATCH(
     // The change, its timeline entries, and its audit entries are saved
     // together (nothing is recorded when the PATCH changed nothing)
     const opportunity = await prisma.$transaction(async (tx) => (await applyOpportunityUpdate(tx, ctx, existing.id, plan.data)).saved)
-    return NextResponse.json(opportunity)
+    return NextResponse.json(await withQuoteValue(ctx.companyId, opportunity))
   } catch (err) {
     const { message, status } = userFacingError(err, "Editing an opportunity")
     return apiError(status, message)

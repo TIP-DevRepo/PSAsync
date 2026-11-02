@@ -20,6 +20,7 @@ import { opportunityChangeActions, opportunityTimelineSnapshotSelect } from "@/l
 import { recordAudit, type AuditEntryInput } from "@/lib/audit-log"
 import { opportunityFieldAudits } from "@/lib/opportunity-audit"
 import type { TimelineAction } from "@/lib/timeline-actions"
+import { EXPECTED_VALUE_FROM_QUOTE_MESSAGE } from "@/lib/opportunity-value"
 import type { Prisma } from "@/generated/prisma"
 
 // Changing an opportunity's fields, shared by PATCH /api/opportunities/[id]
@@ -64,6 +65,10 @@ export async function planOpportunityUpdate(
   if ("expectedValue" in body) {
     const expectedValue = readExpectedValue(body.expectedValue)
     if (expectedValue.error !== undefined) return refuse(apiError(400, expectedValue.error))
+    // While quotes are linked the value follows the latest one, so the
+    // manual value can't be changed
+    const linkedQuotes = await prisma.quote.count({ where: { companyId: ctx.companyId, opportunityId: existing.id } })
+    if (linkedQuotes > 0) return refuse(apiError(400, EXPECTED_VALUE_FROM_QUOTE_MESSAGE, "VALUE_FROM_QUOTE"))
     data.expectedValue = expectedValue.value
   }
   if ("expectedCloseDate" in body) {
