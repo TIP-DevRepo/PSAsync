@@ -21,6 +21,19 @@ export const TIMELINE_ACTIONS = [
   "attachment_added",
   "attachment_removed",
   "restored",
+  // Quotes, sales orders, and purchase orders linked to or unlinked from
+  // the record, and the quote events that can move its stage
+  // (src/lib/opportunity-quotes.ts)
+  "quote_linked",
+  "quote_unlinked",
+  "quote_sent",
+  "quote_accepted",
+  "quote_declined",
+  "quote_expired",
+  "sales_order_linked",
+  "sales_order_unlinked",
+  "purchase_order_linked",
+  "purchase_order_unlinked",
 ] as const
 
 export type TimelineActionKey = (typeof TIMELINE_ACTIONS)[number]
@@ -33,9 +46,18 @@ export interface TimelineRef {
 
 // What each key's data holds. from and to are null for "nothing" (unassigned,
 // no type, no value, no date).
+// A linked record, by id and its number ("Q-2026-0042", "SO-2026-0007").
+// deleted is set when the link went because the record was deleted.
+export interface RecordLinkData {
+  record: TimelineRef
+  deleted?: boolean
+}
+
 export interface TimelineActionData {
   created: { label: string; number: string; title: string; stage: TimelineRef | null }
-  stage_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  // reason is set on a move a quote event made, for example "Quote
+  // Q-2026-0042 accepted"
+  stage_changed: { from: TimelineRef | null; to: TimelineRef | null; reason?: string }
   team_changed: { from: TimelineRef | null; to: TimelineRef | null }
   owner_changed: { from: TimelineRef | null; to: TimelineRef | null }
   type_changed: { from: TimelineRef | null; to: TimelineRef | null }
@@ -51,6 +73,16 @@ export interface TimelineActionData {
   attachment_removed: { attachmentId: string; fileName: string }
   // A deleted record restored from the audit log
   restored: { label: string }
+  quote_linked: RecordLinkData
+  quote_unlinked: RecordLinkData
+  quote_sent: RecordLinkData
+  quote_accepted: RecordLinkData
+  quote_declined: RecordLinkData
+  quote_expired: RecordLinkData
+  sales_order_linked: RecordLinkData
+  sales_order_unlinked: RecordLinkData
+  purchase_order_linked: RecordLinkData
+  purchase_order_unlinked: RecordLinkData
 }
 
 // A NOTE posted with a stage change stores the move in its data as
@@ -140,6 +172,15 @@ function dateOnly(value: unknown): string {
   return new Date(`${value}T00:00:00.000Z`).toLocaleDateString(undefined, { timeZone: "UTC" })
 }
 
+const LINK_ACTION_WORDS: Record<string, [string, "linked" | "unlinked"]> = {
+  quote_linked: ["Quote", "linked"],
+  quote_unlinked: ["Quote", "unlinked"],
+  sales_order_linked: ["Sales order", "linked"],
+  sales_order_unlinked: ["Sales order", "unlinked"],
+  purchase_order_linked: ["Purchase order", "linked"],
+  purchase_order_unlinked: ["Purchase order", "unlinked"],
+}
+
 // One plain sentence for an ACTION entry, for example "Stage changed from
 // New to Qualified". Reads whatever data is stored without trusting its shape.
 export function describeTimelineAction(action: string | null, data: unknown): string {
@@ -150,7 +191,9 @@ export function describeTimelineAction(action: string | null, data: unknown): st
         d.stage ? ` in ${refName(d.stage, "a stage")}` : ""
       }`
     case "stage_changed":
-      return `Stage changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
+      return `Stage changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}${
+        typeof d.reason === "string" && d.reason ? ` (${d.reason})` : ""
+      }`
     case "team_changed":
       return `Team changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
     case "owner_changed":
@@ -175,6 +218,21 @@ export function describeTimelineAction(action: string | null, data: unknown): st
       return `Attachment removed: ${text(d.fileName, "a file")}`
     case "restored":
       return `${text(d.label, "Record")} restored after being deleted`
+    case "quote_linked":
+    case "quote_unlinked":
+    case "sales_order_linked":
+    case "sales_order_unlinked":
+    case "purchase_order_linked":
+    case "purchase_order_unlinked": {
+      const [kind, change] = LINK_ACTION_WORDS[action]
+      const name = `${kind} ${refName(d.record, "")}`.trim()
+      return change === "unlinked" && d.deleted === true ? `${name} deleted, so it is no longer linked` : `${name} ${change}`
+    }
+    case "quote_sent":
+    case "quote_accepted":
+    case "quote_declined":
+    case "quote_expired":
+      return `Quote ${refName(d.record, "")} ${action.slice("quote_".length)}`
     default:
       return "Updated"
   }

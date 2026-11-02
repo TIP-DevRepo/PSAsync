@@ -42,6 +42,18 @@ export const AUDIT_ACTIONS = [
   "email_sent",
   // A field_changed entry reversed from the audit log (undoOfId)
   "undone",
+  // Links to quotes, sales orders, and purchase orders ({ id, name } with
+  // the record's number), and the quote events that can move the stage
+  "quote_linked",
+  "quote_unlinked",
+  "quote_sent",
+  "quote_accepted",
+  "quote_declined",
+  "quote_expired",
+  "sales_order_linked",
+  "sales_order_unlinked",
+  "purchase_order_linked",
+  "purchase_order_unlinked",
 ] as const
 export type AuditActionKey = (typeof AUDIT_ACTIONS)[number]
 
@@ -59,6 +71,16 @@ export const AUDIT_ACTION_LABELS: Record<AuditActionKey, string> = {
   attachment_removed: "Attachment removed",
   email_sent: "Email sent",
   undone: "Change undone",
+  quote_linked: "Quote linked",
+  quote_unlinked: "Quote unlinked",
+  quote_sent: "Quote sent",
+  quote_accepted: "Quote accepted",
+  quote_declined: "Quote declined",
+  quote_expired: "Quote expired",
+  sales_order_linked: "Sales order linked",
+  sales_order_unlinked: "Sales order unlinked",
+  purchase_order_linked: "Purchase order linked",
+  purchase_order_unlinked: "Purchase order unlinked",
 }
 
 export function auditActionLabel(action: string): string {
