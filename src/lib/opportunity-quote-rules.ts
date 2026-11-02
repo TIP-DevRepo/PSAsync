@@ -179,6 +179,14 @@ export function offersSalesOrderAfterMove(opts: {
   return opts.to === "WON" && opts.from !== "WON" && !opts.hasLinkedQuote && opts.canCreateSalesOrders
 }
 
+// The prompt's words, the same from every place that shows it
+export const WON_SALES_ORDER_PROMPT = {
+  title: "Create a sales order for this opportunity?",
+  description: "It opens the New Sales Order form for this client, linked to this opportunity.",
+  confirmLabel: "Create",
+  cancelLabel: "Not now",
+} as const
+
 // Where the prompt's Create, and the Related tab's buttons, open their forms
 export function newSalesOrderHref(opportunityId: string): string {
   return `/dashboard/sales-orders/new?opportunity=${encodeURIComponent(opportunityId)}`

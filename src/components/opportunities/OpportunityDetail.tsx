@@ -22,6 +22,7 @@ import type { ActionButtonDefinition } from "@/lib/timeline-buttons"
 import { opportunityTabHref, readOpportunityTab, tabLabel, visibleOpportunityTabs, type OpportunityTabKey } from "@/lib/opportunity-tabs"
 import { noteStageChange } from "@/lib/timeline-actions"
 import { defaultEmailSubject } from "@/lib/record-email"
+import { newSalesOrderHref, offersSalesOrderAfterMove, raiseQuoteHref, WON_SALES_ORDER_PROMPT, type StageCategoryName } from "@/lib/opportunity-quote-rules"
 import { StagePill } from "./StagePill"
 import { OpportunityRelatedPanel, relatedCount, useOpportunityRelated } from "./OpportunityRelatedPanel"
 import { OpportunityAttachments } from "./OpportunityAttachments"
@@ -32,6 +33,8 @@ const breadcrumbItems = [{ label: "Opportunities", href: "/dashboard/opportuniti
 
 const NEEDS_EDIT_MESSAGE = "You need edit access to use this"
 const DELETED_MESSAGE = "This opportunity is deleted"
+const NEEDS_QUOTE_CREATE_MESSAGE = "You need permission to create quotes to use this"
+const CLOSED_FOR_QUOTES_MESSAGE = "Quotes can only be raised on an open opportunity"
 
 // Laid out like HaloPSA: the client and number large on the first line
 // (Delete at the top right), the title under it, the action buttons on their
@@ -52,6 +55,7 @@ export function OpportunityDetail({ id }: { id: string }) {
   const canEdit = can("opportunities.edit")
   const canDelete = can("opportunities.delete")
   const canViewAll = can("opportunities.viewAll")
+  const canCreateSalesOrders = can("pages.salesOrders") && can("salesOrders.create")
 
   const [opportunity, setOpportunity] = useState<OpportunityDetailData | null>(null)
   const [loading, setLoading] = useState(true)
@@ -104,19 +108,42 @@ export function OpportunityDetail({ id }: { id: string }) {
   // Everyone who can open the opportunity sees its buttons; without edit
   // access they are dimmed and say why. Email also needs a mailbox to send
   // from.
+  // Raise Quote also needs quotes.create, and an OPEN opportunity (a quote
+  // only links to an open one).
+  const stageCategory = opportunity?.stage.category ?? null
   const unavailableReason = useCallback(
     (button: ActionButtonDefinition): string | null => {
       if (deleted) return DELETED_MESSAGE
       if (!canEdit) return NEEDS_EDIT_MESSAGE
+      if (button.opens.kind === "quote") {
+        if (!can("pages.quotes") || !can("quotes.create")) return NEEDS_QUOTE_CREATE_MESSAGE
+        return stageCategory === "OPEN" ? null : CLOSED_FOR_QUOTES_MESSAGE
+      }
       return button.opens.kind === "email" ? emailUnavailableReason(emailOptions) : null
     },
-    [canEdit, deleted, emailOptions]
+    [canEdit, deleted, emailOptions, can, stageCategory]
+  )
+
+  // After a user moves it into a WON stage, an opportunity with no linked
+  // quote offers a sales order (never made automatically)
+  const offerSalesOrder = useCallback(
+    async (from: StageCategoryName | undefined, to: StageCategoryName | undefined, hasLinkedQuote: boolean) => {
+      if (!from || !to || !offersSalesOrderAfterMove({ from, to, hasLinkedQuote, canCreateSalesOrders })) return
+      const create = await confirmDialog(WON_SALES_ORDER_PROMPT)
+      if (create) router.push(newSalesOrderHref(id))
+    },
+    [canCreateSalesOrders, id, router]
   )
 
   // A header button opens the composer at the top of the timeline, on the
-  // Details tab
+  // Details tab. Raise Quote opens the New Quote form (through the template
+  // picker) with this opportunity's client, contact, and link.
   function openFromHeader(button: ActionButtonDefinition) {
     if (unavailableReason(button)) return
+    if (button.opens.kind === "quote") {
+      router.push(raiseQuoteHref(id))
+      return
+    }
     if (tab !== "details") setTab("details")
     timelineRef.current?.openComposer(button)
   }
@@ -179,10 +206,12 @@ export function OpportunityDetail({ id }: { id: string }) {
       toast.error(`Couldn't save the ${what}`, data.error)
       return false
     }
+    const before = opportunity
     setOpportunity(data)
     setTimelineKey((k) => k + 1)
     // The sidebar counts open opportunities by team and owner
     if ("stageId" in patch || "ownerId" in patch || "teamId" in patch) notifyOpportunitiesChanged()
+    if ("stageId" in patch && before) offerSalesOrder(before.stage.category, data.stage?.category, data._count?.quotes > 0)
     return true
   }
 
@@ -376,9 +405,11 @@ export function OpportunityDetail({ id }: { id: string }) {
                 }}
                 // A note or email that moved the stage changed the opportunity too
                 onPosted={(entry) => {
-                  if (noteStageChange(entry.data)) {
+                  const moved = noteStageChange(entry.data)
+                  if (moved) {
                     load()
                     notifyOpportunitiesChanged()
+                    offerSalesOrder(moved.from.category as StageCategoryName | undefined, moved.to.category as StageCategoryName | undefined, o._count.quotes > 0)
                   }
                 }}
               />
@@ -399,7 +430,7 @@ export function OpportunityDetail({ id }: { id: string }) {
           )}
           {activeTab === "related" && (
             <div role="tabpanel" id="tabpanel-related" aria-labelledby="tab-related">
-              <OpportunityRelatedPanel related={related} failed={relatedFailed} linkedCount={linkedCount} />
+              <OpportunityRelatedPanel related={related} failed={relatedFailed} linkedCount={linkedCount} opportunityId={o.id} />
             </div>
           )}
           {activeTab === "audit" && (

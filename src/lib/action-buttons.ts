@@ -48,9 +48,11 @@ const BRAND_ACCENT_FALLBACK = "#2E86AB"
 
 type Db = Pick<PrismaClient, "actionButton" | "$transaction">
 
-// Creates the four starting buttons (Note, Email, Won, Lost, in that order)
-// the first time any action button route, or a note or email naming a
-// button, runs for the company. Never at company creation and never by a
+// Creates the five starting buttons (Note, Email, Raise Quote, Won, Lost, in
+// that order) the first time any action button route, or a note or email
+// naming a button, runs for the company. A company that already had its
+// buttons before Raise Quote existed keeps them as they are; an admin adds
+// a Raise Quote button in Settings > Action Buttons. Never at company creation and never by a
 // data migration. Once a company has a button it is one small read; the
 // last button can't be deleted (it can be hidden), so the defaults never
 // come back.
@@ -104,6 +106,16 @@ async function defaultButtons(tx: Prisma.TransactionClient, companyId: string): 
       kind: "EMAIL",
       stageMode: "NONE",
       noteMode: "REQUIRED",
+    },
+    {
+      label: "Raise Quote",
+      icon: "quote",
+      color: hex(settings?.primaryColor, BRAND_PRIMARY_FALLBACK),
+      forOpportunities: true,
+      forTickets: true,
+      kind: "RAISE_QUOTE",
+      stageMode: "NONE",
+      noteMode: "OPTIONAL",
     },
     {
       label: "Won",
