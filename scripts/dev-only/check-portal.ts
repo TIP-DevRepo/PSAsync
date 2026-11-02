@@ -629,6 +629,9 @@ async function checkResponseRace(
     where: { id: quoteId },
     select: { signatureType: true, signatureData: true, signerName: true, termsAgreedAt: true, clientPoNumber: true },
   })
+  // The customer link as it is now: the regenerate scene, which runs
+  // before this, replaced the one the scenes started with
+  const { accessToken: link } = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { accessToken: true } })
   const rounds: [string, [string, unknown][]][] = [
     ["accept and decline at once", [["/accept", SIGNED], ["/decline", { reason: "dev only" }]]],
     ["two accepts at once", [["/accept", SIGNED], ["/accept", SIGNED]]],
@@ -637,7 +640,7 @@ async function checkResponseRace(
     await setScene(prisma, "awaiting", { b: quoteId, rep: repQuoteId, c: cQuoteId, companyB: b.companyId })
     try {
       const results = await Promise.all(
-        requests.map(([path, body]) => anonymous.request("POST", `/api/portal/${ctx.bClient}${path}`, { json: body }))
+        requests.map(([path, body]) => anonymous.request("POST", `/api/portal/${link}${path}`, { json: body }))
       )
       const won = results.filter((r) => r.status === 200).length
       const lost = results.filter((r) => r.status === 400 && errorText(r.text).includes("already been responded to")).length
