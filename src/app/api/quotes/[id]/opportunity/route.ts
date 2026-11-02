@@ -3,7 +3,7 @@ import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { isTermsFrozen } from "@/lib/quote-terms"
-import { createLinkedOpportunity, loadRecordOpportunityPanel, planAutoOpportunity } from "@/lib/opportunity-quotes"
+import { createLinkedOpportunity, loadRecordOpportunityPanel, moveToQuoteStatusStage, planAutoOpportunity } from "@/lib/opportunity-quotes"
 import { userFacingError } from "@/lib/user-error"
 
 // The quote page's Opportunity panel: the opportunity its family is linked
@@ -28,8 +28,11 @@ const QUOTE_NOT_SENT_MESSAGE = "Only a sent or closed quote can have its opportu
 
 // The "Create opportunity" button on a sent or closed quote that has none
 // (one sent before quotes were linked): creates it the way sending does
-// (planAutoOpportunity) and links the quote's family, without changing the
-// quote's status. Needs quotes.edit and the quote view check.
+// (planAutoOpportunity), links the quote's family, and puts it in the stage
+// the quote's status calls for (moveToQuoteStatusStage: Accepted the first
+// WON stage, Declined or Expired the first LOST stage, Sent or Viewed the
+// quote sent stage), all in one transaction, without changing the quote's
+// status. Needs quotes.edit and the quote view check.
 export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -40,7 +43,7 @@ export async function POST(
   const { id } = await params
   const quote = await prisma.quote.findFirst({
     where: viewableQuoteWhere(ctx, id),
-    select: { id: true, status: true, sentAt: true, opportunityId: true },
+    select: { id: true, status: true, sentAt: true, opportunityId: true, quoteNumber: true, version: true },
   })
   if (!quote) return notFound()
   if (quote.opportunityId) return apiError(409, QUOTE_HAS_OPPORTUNITY_MESSAGE, "HAS_OPPORTUNITY")
@@ -52,7 +55,11 @@ export async function POST(
   const plan = planned.plan
 
   try {
-    const created = await prisma.$transaction((tx) => createLinkedOpportunity(tx, { companyId: ctx.companyId, quoteId: quote.id, plan, actorId: ctx.userId }))
+    const created = await prisma.$transaction(async (tx) => {
+      const made = await createLinkedOpportunity(tx, { companyId: ctx.companyId, quoteId: quote.id, plan, actorId: ctx.userId })
+      if (made) await moveToQuoteStatusStage(tx, { companyId: ctx.companyId, opportunityId: made.id, quote, actorId: ctx.userId })
+      return made
+    })
     // Another request linked it first
     if (!created) return apiError(409, QUOTE_HAS_OPPORTUNITY_MESSAGE, "HAS_OPPORTUNITY")
     return NextResponse.json({ opportunityId: created.id, number: created.number })

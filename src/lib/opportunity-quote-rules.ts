@@ -28,10 +28,12 @@ export function quoteEventFor(from: QuoteStatusName, to: QuoteStatusName): Quote
   return null
 }
 
-// A quote leaving Draft (sent, or moved through the status menu to any
-// status past Draft and Pending Approval) gets an opportunity when it has none
-export function leavesDraft(from: QuoteStatusName, to: QuoteStatusName): boolean {
-  return NOT_YET_OUT.includes(from) && !NOT_YET_OUT.includes(to)
+// Only a quote that is sent (SENT or VIEWED) or accepted gets an
+// opportunity automatically when it has none. Moving one straight to
+// Declined, Expired, or back to Draft never creates one.
+export function createsOpportunity(from: QuoteStatusName, to: QuoteStatusName): "sent" | "accepted" | null {
+  const event = quoteEventFor(from, to)
+  return event === "sent" || event === "accepted" ? event : null
 }
 
 // A quote's own number as people read it: "Q-2026-0042", or "Q-2026-0042 v2"
@@ -117,8 +119,13 @@ export function otherQuotesState(linked: readonly LinkedQuoteState[], quote: { i
 
 // ─── The automatic opportunity ──────────────────────────────────────────────
 
-export const QUOTE_NEEDS_CONTACT_MESSAGE =
-  "Choose a contact for this quote first. Sending it creates its opportunity, which needs a contact."
+// Sending or accepting a quote with no contact and no opportunity is refused,
+// since the opportunity it creates needs a contact
+export const QUOTE_NEEDS_CONTACT_MESSAGES = {
+  sent: "Add a contact before sending this quote. Sending it creates its opportunity, which needs a contact.",
+  accepted: "Add a contact before accepting this quote. Accepting it creates its opportunity, which needs a contact.",
+  button: "Add a contact to this quote first. Its opportunity needs a contact.",
+} as const
 
 // The team and owner of an opportunity made from a quote: the quote owner's
 // first team by sortOrder (ownerTeamIds in that order), otherwise General,
@@ -140,8 +147,27 @@ export function autoOpportunityTitle(quote: { title: string | null; quoteNumber:
 }
 
 // The note the system writes as its first timeline entry
-export function autoOpportunityNote(label: string, how: "sent" | "button"): string {
-  return how === "sent" ? `<p>Created automatically when quote ${label} was sent</p>` : `<p>Created from quote ${label}</p>`
+export function autoOpportunityNote(label: string, how: "sent" | "accepted" | "button"): string {
+  return how === "button" ? `<p>Created from quote ${label}</p>` : `<p>Created automatically when quote ${label} was ${how}</p>`
+}
+
+// The stage the Create opportunity button puts an opportunity in, by the
+// quote's status: Accepted the first WON stage, Declined or Expired the first
+// LOST stage, otherwise (Sent, Viewed) the quote sent stage. Also the event
+// the move is recorded under.
+export function buttonStageFor(status: QuoteStatusName): { target: "sent" | "won" | "lost"; event: QuoteEvent } {
+  if (status === "ACCEPTED") return { target: "won", event: "accepted" }
+  if (status === "DECLINED") return { target: "lost", event: "declined" }
+  if (status === "EXPIRED") return { target: "lost", event: "expired" }
+  return { target: "sent", event: "sent" }
+}
+
+// The opportunity PATCH (and undo) refuses a new client while any quote,
+// sales order, or purchase order is linked; the contact can still change
+export const CLIENT_LOCKED_MESSAGE = "Unlink this opportunity's quotes and orders before changing its client"
+
+export function hasLinkedRecords(counts: { quotes: number; salesOrders: number; purchaseOrders: number }): boolean {
+  return counts.quotes + counts.salesOrders + counts.purchaseOrders > 0
 }
 
 // ─── Linking ────────────────────────────────────────────────────────────────

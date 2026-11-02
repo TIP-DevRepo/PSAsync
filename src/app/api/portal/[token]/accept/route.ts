@@ -5,7 +5,7 @@ import { alreadyRespondedResponse, AWAITING_RESPONSE_STATUSES, linkInvalidRespon
 import { checkAcceptBody, readPortalBody } from "@/lib/portal-input"
 import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
-import { applyQuoteEvent } from "@/lib/opportunity-quotes"
+import { prepareQuoteStatusChange, runQuoteStatusChange } from "@/lib/opportunity-quotes"
 
 export async function POST(
   req: NextRequest,
@@ -33,7 +33,11 @@ export async function POST(
   // the customer, so of an accept and a decline (or two accepts) sent at
   // the same time exactly one wins. Only the winner notifies and creates
   // the sales order. The winner's opportunity moves to Won in the same
-  // transaction, recorded as the system's.
+  // transaction, recorded as the system's; a quote accepted without one gets
+  // one (planned first). A customer's acceptance is never refused for it: a
+  // quote that can't have one (no contact) is accepted without one.
+  const prepared = await prepareQuoteStatusChange(quote.companyId, quote, "ACCEPTED")
+  const plan = prepared.plan ?? null
   const decided = await prisma.$transaction(async (tx) => {
     const won = await tx.quote.updateMany({
       where: { id: quote.id, status: { in: [...AWAITING_RESPONSE_STATUSES] } },
@@ -53,7 +57,9 @@ export async function POST(
         shipContactName: keep(input.shipContactName, quote.shipContactName),
       },
     })
-    if (won.count === 1) await applyQuoteEvent(tx, { companyId: quote.companyId, quoteId: quote.id, event: "accepted", actorId: null })
+    if (won.count === 1) {
+      await runQuoteStatusChange(tx, { companyId: quote.companyId, quoteId: quote.id, from: quote.status, to: "ACCEPTED", actorId: null, plan })
+    }
     return won
   })
   if (decided.count !== 1) return alreadyRespondedResponse()

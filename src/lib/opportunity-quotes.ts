@@ -14,11 +14,12 @@ import { loadOpportunityRelated, type OpportunityRelated } from "@/lib/opportuni
 import { expiryDateFromToday, isDateOnly } from "@/lib/quote-expiry"
 import type { TimelineAction } from "@/lib/timeline-actions"
 import {
-  QUOTE_NEEDS_CONTACT_MESSAGE,
+  QUOTE_NEEDS_CONTACT_MESSAGES,
   autoOpportunityNote,
   autoOpportunityTeamAndOwner,
   autoOpportunityTitle,
-  leavesDraft,
+  buttonStageFor,
+  createsOpportunity,
   otherQuotesState,
   quoteEventFor,
   quoteEventReason,
@@ -170,23 +171,70 @@ export async function applyQuoteEvent(
   const eventAction = `quote_${opts.event}` as const
   const actions: TimelineAction[] = [{ action: eventAction, data: { record } }]
   const audits: AuditEntryInput[] = [opportunityRecordAudit(opportunity, eventAction, record)]
-  if (target) {
-    // Only while it is still in the stage read above, so a move another
-    // request made in the meantime is never overwritten
-    const { count } = await tx.opportunity.updateMany({
-      where: { ...opportunityWhere(opts, opportunity.id), stageId: opportunity.stage.id },
-      data: stageChangeData(opportunity.stage, target, now),
-    })
-    if (count === 1) {
-      const ref = (s: StageChoice) => ({ id: s.id, name: s.name })
-      actions.push({ action: "stage_changed", data: { from: ref(opportunity.stage), to: ref(target), reason: quoteEventReason(opts.event, label) } })
-      audits.push(opportunityStageAudit(opportunity, opportunity.stage, target))
-    }
+  const move = target ? await moveStage(tx, opts, opportunity, target, quoteEventReason(opts.event, label), now) : null
+  if (move) {
+    actions.push(move.action)
+    audits.push(move.audit)
   }
-  const moved = actions.length > 1 ? target : null
   await recordTimelineActions(tx, { companyId: opts.companyId, authorId: opts.actorId, subject: { opportunityId: opportunity.id }, actions, at: now })
   await recordAudit(tx, { companyId: opts.companyId, actorId: opts.actorId, entries: audits, at: now })
-  return { opportunityId: opportunity.id, movedTo: moved }
+  return { opportunityId: opportunity.id, movedTo: move ? target : null }
+}
+
+// Moves an opportunity to a stage for a quote, through stageChangeData (the
+// write a manual move makes: stageChangedAt, and closedAt set into WON or
+// LOST, cleared into OPEN), as one conditional write on the stage it was
+// read in, so a move another request made in the meantime is never
+// overwritten. Returns the stage_changed action (with the reason) and the
+// field_changed audit entry for the caller to record, or null when nothing
+// moved.
+async function moveStage(
+  tx: Tx,
+  scope: { companyId: string },
+  opportunity: { id: string; number: string; title: string; stage: StageChoice },
+  target: StageChoice,
+  reason: string,
+  now: Date
+): Promise<{ action: TimelineAction; audit: AuditEntryInput } | null> {
+  if (target.id === opportunity.stage.id) return null
+  const { count } = await tx.opportunity.updateMany({
+    where: { ...opportunityWhere(scope, opportunity.id), stageId: opportunity.stage.id },
+    data: stageChangeData(opportunity.stage, target, now),
+  })
+  if (count !== 1) return null
+  const ref = (s: StageChoice) => ({ id: s.id, name: s.name })
+  return {
+    action: { action: "stage_changed", data: { from: ref(opportunity.stage), to: ref(target), reason } },
+    audit: opportunityStageAudit(opportunity, opportunity.stage, target),
+  }
+}
+
+// The Create opportunity button: the new opportunity (created at the quote
+// sent stage) moves to the stage the quote's status calls for
+// (buttonStageFor: Accepted to the first WON stage, Declined or Expired to
+// the first LOST stage, Sent or Viewed stays at the quote sent stage), with
+// a stage_changed entry and an audit entry. No quote event is recorded: the
+// quote's status doesn't change.
+export async function moveToQuoteStatusStage(
+  tx: Tx,
+  opts: { companyId: string; opportunityId: string; quote: { quoteNumber: string; version: number; status: QuoteStatusName }; actorId: string | null }
+): Promise<StageChoice | null> {
+  const opportunity = await tx.opportunity.findFirst({
+    where: opportunityWhere(opts, opts.opportunityId),
+    select: { ...opportunityRefSelect, stage: { select: stageSelect } },
+  })
+  if (!opportunity) return null
+  const { target: kind, event } = buttonStageFor(opts.quote.status)
+  const targets = await eventTargets(tx, opts.companyId)
+  const target = kind === "won" ? targets.firstWon : kind === "lost" ? targets.firstLost : null
+  if (!target) return null
+  const now = new Date()
+  const move = await moveStage(tx, opts, opportunity, target, quoteEventReason(event, quoteLabel(opts.quote)), now)
+  if (!move) return null
+  const subject = { opportunityId: opportunity.id }
+  await recordTimelineActions(tx, { companyId: opts.companyId, authorId: opts.actorId, subject, actions: [move.action], at: now })
+  await recordAudit(tx, { companyId: opts.companyId, actorId: opts.actorId, entries: [move.audit], at: now })
+  return target
 }
 
 // ─── The automatic opportunity ──────────────────────────────────────────────
@@ -215,7 +263,9 @@ function closeDateFrom(expiresAt: Date | null): Date | null {
 // company's quote sent stage (else the first OPEN stage), source QUOTE, the
 // Valid until date as the expected close date, and a system written note.
 // A quote without a contact is refused, since an opportunity needs one.
-export async function planAutoOpportunity(companyId: string, quoteId: string, how: "sent" | "button"): Promise<AutoPlanResult> {
+// how is what creates it: a send, an acceptance, or the Create opportunity
+// button (it picks the note and the refusal's wording).
+export async function planAutoOpportunity(companyId: string, quoteId: string, how: "sent" | "accepted" | "button"): Promise<AutoPlanResult> {
   const quote = await prisma.quote.findFirst({
     where: { id: quoteId, companyId },
     select: {
@@ -231,7 +281,7 @@ export async function planAutoOpportunity(companyId: string, quoteId: string, ho
   })
   if (!quote) return { error: "Quote not found" }
   if (quote.opportunityId) return { plan: null }
-  if (!quote.contactId) return { error: QUOTE_NEEDS_CONTACT_MESSAGE }
+  if (!quote.contactId) return { error: QUOTE_NEEDS_CONTACT_MESSAGES[how] }
 
   await ensureOpportunityDefaults(companyId)
   await ensureTeamDefaults(companyId)
@@ -294,20 +344,23 @@ export async function createLinkedOpportunity(
   return { id: created.id, number: created.number }
 }
 
-// Before a status change: the opportunity it needs to create, when the
-// quote leaves Draft without one. Run before the change's transaction (and
-// before an email is sent); an error refuses the change with a 400.
+// Before a status change: the opportunity it needs to create, when a quote
+// without one is sent (SENT or VIEWED) or accepted (createsOpportunity).
+// Moving one to Declined, Expired, or Draft plans nothing and needs no
+// contact. Run before the change's transaction (and before an email is
+// sent); an error (no contact) refuses the change with a 400.
 export async function prepareQuoteStatusChange(
   companyId: string,
   quote: { id: string; status: QuoteStatusName; opportunityId: string | null },
   to: QuoteStatusName
 ): Promise<AutoPlanResult> {
-  if (!leavesDraft(quote.status, to) || quote.opportunityId) return { plan: null }
-  return planAutoOpportunity(companyId, quote.id, "sent")
+  const how = createsOpportunity(quote.status, to)
+  if (!how || quote.opportunityId) return { plan: null }
+  return planAutoOpportunity(companyId, quote.id, how)
 }
 
 // Inside the status change's transaction, after the quote is written: a
-// quote leaving Draft without an opportunity gets the planned one, then the
+// quote sent or accepted without an opportunity gets the planned one, then the
 // change's event (if it is one, quoteEventFor) is applied. Every path that
 // changes a quote's status calls this: send, send-email, the status route
 // (and the bulk actions through it), the approval completion, the
@@ -317,7 +370,7 @@ export async function runQuoteStatusChange(
   opts: { companyId: string; quoteId: string; from: QuoteStatusName; to: QuoteStatusName; actorId: string | null; plan: AutoOpportunityPlan | null }
 ): Promise<QuoteEventResult | null> {
   const event = quoteEventFor(opts.from, opts.to)
-  if (opts.plan && leavesDraft(opts.from, opts.to)) {
+  if (opts.plan && createsOpportunity(opts.from, opts.to)) {
     await createLinkedOpportunity(tx, { companyId: opts.companyId, quoteId: opts.quoteId, plan: opts.plan, actorId: opts.actorId })
   }
   if (!event) return null
