@@ -70,12 +70,20 @@
 // requests too: a run downloads Company B's customer PDF about four times.
 // Every run makes new quotes with new customer links, so running it again
 // within the hour starts from zero.
+//
+// Marking Company B's sample quote sent, and the statusFreeze scene's
+// DECLINED, make the app create an opportunity for it (a quote leaving Draft
+// without one gets one), which the later scenes' accepts and declines move.
+// Every opportunity added during the run is unlinked and removed at the end
+// (lib/quote-opportunities.ts), so the other checks see the run's data as
+// it was set up.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import type { SampleIds, TestNames } from "./lib/test-data"
 import { HarnessBroken, ServerUnreachable, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
 import { isEntryScript, withRunData, type RunData } from "./lib/run-data"
+import { opportunityIdsOf, removeOpportunitiesAddedSince } from "./lib/quote-opportunities"
 
 // Must stay first: nothing below may run before the guard has passed
 enforceDevGuard("check-portal")
@@ -695,6 +703,9 @@ export async function checkPortal(prisma: PrismaClient, run: RunData, baseUrl: s
   })
   // Company B's default terms, changed by the default terms scenes
   const originalSettings = await prisma.companySettings.findUnique({ where: { companyId: b.companyId }, select: { quoteTerms: true } })
+  // Marking Company B's sample quote sent (and the DECLINED status scene)
+  // makes the app create an opportunity for it, removed at the end
+  const opportunitiesBefore = await opportunityIdsOf(prisma, [b.companyId, c.companyId])
   if (familyRows.length !== 3) {
     throw new HarnessBroken("The sample quotes have extra versions, so this run's data isn't as it was set up.")
   }
@@ -832,6 +843,9 @@ export async function checkPortal(prisma: PrismaClient, run: RunData, baseUrl: s
         await prisma.quoteLineItem.update({ where: { id: li.id }, data: { quantity: li.quantity, optionalSelected: li.optionalSelected } })
       }
     }
+    // The opportunities the app created for the sample quotes, unlinked and
+    // removed with their timeline and audit entries
+    await removeOpportunitiesAddedSince(prisma, [b.companyId, c.companyId], opportunitiesBefore)
     // Nothing above should create these; if a broken rule did, remove them
     await prisma.quoteComment.deleteMany({ where: { quoteId: { in: familyIds }, createdAt: { gte: startedAt } } })
     await prisma.notification.deleteMany({

@@ -168,10 +168,10 @@
 // checkActionButtonNotes posts an empty note through Won and a note
 // through the custom button, checking each moves to the button's stage
 // with one NOTE entry holding the move and the button's label, and puts
-// everything back. checkRecordButtonList adds a hidden button and a Raise
-// Quote button through the API, checks the record list leaves both out
-// while the admin list has them, refuses a note through the hidden one,
-// and deletes both.
+// everything back. checkRecordButtonList adds a hidden button and an
+// Appointment button through the API, checks the record list leaves both
+// out while the admin list has them, refuses a note through the hidden
+// one, and deletes both.
 //
 // The Email action is only ever called with input it refuses before
 // anything is sent: without opportunities.edit (403), on an opportunity the
@@ -186,6 +186,26 @@
 // year, and four digit format, and one after another. Deleting the newest
 // one and creating another must not reuse its number. Every record it
 // makes is deleted at the end; the counters stay until teardown.
+//
+// Quotes linked to opportunities (checkQuoteOpportunities): Test Admin B
+// makes its own quotes and opportunities through the API and changes quote
+// statuses only through the status route, so nothing is ever emailed. A
+// draft links to an open opportunity of its client and contact (every
+// version, and a new version keeps it), and links to a closed, deleted, or
+// other client's opportunity are refused, as are Test Rep B linking to a
+// Sales opportunity it can't see and Test Opp Viewer B without quote edit
+// rights. Sending an unlinked quote creates one opportunity (the owner's
+// first team, Ops, with the owner, the quote sent stage, source QUOTE, and a
+// system note); accepting moves it to the first Won stage, and the sales
+// order and the purchase order generated from it carry the link. Declined
+// waits while another linked quote is a draft, then moves to Lost; a manual
+// move stays after a status change that isn't an event; the value follows
+// the latest sent quote (123.456 shows as 123.46) and the manual value is
+// refused; manual orders take the link; and each link and event is on the
+// timeline and in the audit log. Everything it made is removed, the
+// opportunities the app created included. The sample quote steps above
+// (status approval, stale approval) put back the sample quote's link and
+// remove any opportunity a send created (saveSampleQuote).
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
@@ -194,6 +214,7 @@ import { HarnessBroken, ServerUnreachable, Session, checkResult, errorText, isJs
 import { addRunMailbox, addRunRole, addRunUser, isEntryScript, withRunData, type RunData } from "./lib/run-data"
 // Only imports Prisma types, so loading it can't reach the database
 import { setUserRoles } from "@/lib/user-roles"
+import { opportunityIdsOf, removeOpportunitiesAddedSince } from "./lib/quote-opportunities"
 
 // Must stay first: nothing below may run before the guard has passed
 enforceDevGuard("check-permissions")
@@ -1806,20 +1827,25 @@ const SAMPLE_QUOTE_FIELDS = {
   useDefaultTerms: true,
   internalNotes: true,
   pendingEmailPayload: true,
+  opportunityId: true,
 } as const
 
+// Also takes the company's opportunity ids: moving the quote out of Draft
+// makes the app create an opportunity for it, which the restore removes
 async function saveSampleQuote(prisma: PrismaClient, quoteId: string) {
   const q = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { companyId: true, quoteNumber: true } })
-  return prisma.quote.findMany({ where: { companyId: q.companyId, quoteNumber: q.quoteNumber }, select: SAMPLE_QUOTE_FIELDS })
+  const quotes = await prisma.quote.findMany({ where: { companyId: q.companyId, quoteNumber: q.quoteNumber }, select: SAMPLE_QUOTE_FIELDS })
+  return { companyId: q.companyId, quotes, opportunityIds: await opportunityIdsOf(prisma, [q.companyId]) }
 }
 
 async function restoreSampleQuote(prisma: PrismaClient, saved: Awaited<ReturnType<typeof saveSampleQuote>>) {
-  for (const { id, pendingEmailPayload, ...fields } of saved) {
+  for (const { id, pendingEmailPayload, ...fields } of saved.quotes) {
     await prisma.quote.update({
       where: { id },
       data: { ...fields, pendingEmailPayload: pendingEmailPayload === null ? Prisma.DbNull : (pendingEmailPayload as Prisma.InputJsonValue) },
     })
   }
+  await removeOpportunitiesAddedSince(prisma, [saved.companyId], saved.opportunityIds)
 }
 
 // Round two, N-1: changing a draft quote's status by hand runs the same
@@ -2488,9 +2514,9 @@ async function checkActionButtonNotes(prisma: PrismaClient, admin: Session, ctx:
   }
 }
 
-// Test Admin B adds a hidden Note button and a Raise Quote button (a kind
+// Test Admin B adds a hidden Note button and an Appointment button (a kind
 // not built yet) through the API. The record list Test Opp Viewer B reads
-// leaves both out, the admin list has both (Raise Quote marked not
+// leaves both out, the admin list has both (Appointment marked not
 // available), and a note through the hidden one is refused. Both are then
 // deleted through the API (and by id afterwards, whatever happened).
 async function checkRecordButtonList(prisma: PrismaClient, admin: Session, oppViewer: Session, ctx: AttemptContext, rows: Row[]) {
@@ -2507,8 +2533,9 @@ async function checkRecordButtonList(prisma: PrismaClient, admin: Session, oppVi
     }
     const hidden = await create(buttonBody({ label: "Dev check hidden", isHidden: true }))
     push("a hidden button is created", "201", String(hidden.res.status), hidden.id ? null : `got ${hidden.res.status}: ${errorText(hidden.res.text)}`)
-    const later = await create(buttonBody({ label: "Dev check quote", kind: "RAISE_QUOTE" }))
-    push("a Raise Quote button is created", "201", String(later.res.status), later.id ? null : `got ${later.res.status}: ${errorText(later.res.text)}`)
+    // Appointment is configurable but not built yet (Raise Quote now is)
+    const later = await create(buttonBody({ label: "Dev check appointment", kind: "APPOINTMENT" }))
+    push("an Appointment button is created", "201", String(later.res.status), later.id ? null : `got ${later.res.status}: ${errorText(later.res.text)}`)
     if (!hidden.id || !later.id) return
 
     const record = await oppViewer.request("GET", "/api/action-buttons?for=opportunity")
@@ -2518,20 +2545,20 @@ async function checkRecordButtonList(prisma: PrismaClient, admin: Session, oppVi
         : record.text.includes(hidden.id)
           ? "the hidden button is listed"
           : record.text.includes(later.id)
-            ? "the Raise Quote button is listed"
+            ? "the Appointment button is listed"
             : !record.text.includes(ctx.fx.noteButtonId)
               ? "the Note button is missing"
               : null)
 
     const all = await admin.request("GET", "/api/action-buttons")
     const listed = all.status === 200 ? (JSON.parse(all.text) as { id: string; available?: boolean }[]) : []
-    push("the admin list has both, Raise Quote not available", "200, both listed", String(all.status),
+    push("the admin list has both, Appointment not available", "200, both listed", String(all.status),
       all.status !== 200
         ? `got ${all.status}: ${errorText(all.text)}`
         : !listed.some((b) => b.id === hidden.id)
           ? "the hidden button is missing"
           : listed.find((b) => b.id === later.id)?.available !== false
-            ? "the Raise Quote button isn't marked unavailable"
+            ? "the Appointment button isn't marked unavailable"
             : null)
 
     const note = await admin.request("POST", `/api/opportunities/${ctx.fx.unassignedOpportunityId}/timeline`, { json: { body: "<p>Should not exist</p>", actionButtonId: hidden.id } })
@@ -2544,6 +2571,237 @@ async function checkRecordButtonList(prisma: PrismaClient, admin: Session, oppVi
     }
   } finally {
     if (createdIds.length > 0) await prisma.actionButton.deleteMany({ where: { id: { in: createdIds } } })
+  }
+}
+
+// ─── Quotes linked to opportunities ──────────────────────────────────────────
+// Test Admin B makes its own quotes through the API (never the run's sample
+// quotes) and only ever changes their status through the status route, so
+// no email can go out. It checks linking (and the refusals: no quote edit
+// rights, a closed, deleted, or mismatched opportunity, and another team's
+// opportunity Test Rep B can't see), that sending an unlinked quote creates
+// one opportunity with the right team, owner, stage, source, and system
+// note, that each quote event moves the stage by its rule (declined waits
+// while another linked quote is still open), that a manual move isn't
+// pulled back by a status change that isn't an event, that the value
+// follows the latest quote, that sales orders and the purchase orders made
+// from them carry the link, and that each step lands on the timeline and in
+// the audit log. Everything it made is removed at the end, the
+// opportunities the app created included.
+async function checkQuoteOpportunities(prisma: PrismaClient, sessions: Record<Actor, Session>, ctx: AttemptContext, rows: Row[]) {
+  const admin = sessions.admin
+  const companyId = ctx.b.companyId
+  const label = (name: string) => `[Admin B] Quote and opportunity: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const json = (text: string) => {
+    try {
+      return JSON.parse(text) as Record<string, unknown>
+    } catch {
+      return {}
+    }
+  }
+  const startedAt = new Date()
+  const opportunitiesBefore = await opportunityIdsOf(prisma, [companyId])
+  const quoteIds: string[] = []
+  const salesOrderIds: string[] = []
+  const purchaseOrderIds: string[] = []
+  const stageIds = ctx.fx.opportunityStageIds
+  const stages = await prisma.opportunityStage.findMany({ where: { id: { in: stageIds } }, select: { id: true, category: true, sortOrder: true }, orderBy: { sortOrder: "asc" } })
+  const firstWon = stages.find((s) => s.category === "WON")?.id
+  const firstLost = stages.find((s) => s.category === "LOST")?.id
+  const settings = await prisma.opportunitySettings.findUnique({ where: { companyId }, select: { quoteSentStageId: true } })
+  const sentStage = settings?.quoteSentStageId
+  if (!firstWon || !firstLost || !sentStage) throw new HarnessBroken("Test Company B's opportunity stages aren't as the run set them up")
+  const stageOf = async (id: string) => (await prisma.opportunity.findUniqueOrThrow({ where: { id }, select: { stageId: true } })).stageId
+  const entriesOn = (opportunityId: string) =>
+    prisma.timelineEntry.findMany({ where: { opportunityId, createdAt: { gte: startedAt } }, select: { action: true, data: true, authorId: true, kind: true, body: true } })
+  const auditActionsOn = async (opportunityId: string) =>
+    (await prisma.auditLogEntry.findMany({ where: { companyId, recordId: opportunityId, createdAt: { gte: startedAt } }, select: { action: true } })).map((a) => a.action)
+  const newQuote = async (lines: number[] = []) => {
+    const res = await admin.request("POST", "/api/quotes", { json: { clientId: ctx.b.clientId, contactId: ctx.b.contactId, title: "Dev check linked quote" } })
+    const id = typeof json(res.text).id === "string" ? (json(res.text).id as string) : null
+    if (!id) throw new HarnessBroken(`couldn't create a quote: ${res.status} ${errorText(res.text)}`)
+    quoteIds.push(id)
+    for (const unitPrice of lines) {
+      await admin.request("POST", `/api/quotes/${id}/line-items`, { json: { name: "Dev check line", quantity: 1, unitPrice, catalogItemId: ctx.b.catalogItemId } })
+    }
+    return id
+  }
+  const newOpportunity = async (extra: Record<string, unknown> = {}) => {
+    const res = await admin.request("POST", "/api/opportunities", {
+      json: { title: "Dev check quote link", clientId: ctx.b.clientId, contactId: ctx.b.contactId, initialNote: OPP_NOTE, ...extra },
+    })
+    const id = typeof json(res.text).id === "string" ? (json(res.text).id as string) : null
+    if (!id) throw new HarnessBroken(`couldn't create an opportunity: ${res.status} ${errorText(res.text)}`)
+    return id
+  }
+  const status = (quoteId: string, s: string) => admin.request("POST", `/api/quotes/${quoteId}/status`, { json: { status: s } })
+  const refusedAs = (res: { status: number; text: string }, code: number, text: string) =>
+    res.status === code && errorText(res.text).includes(text) ? null : `got ${res.status}: ${errorText(res.text)}`
+
+  try {
+    // ── Linking ──
+    const openId = await newOpportunity()
+    const quoteA = await newQuote()
+    const linked = await admin.request("PATCH", `/api/quotes/${quoteA}`, { json: { opportunityId: openId } })
+    const versionRes = await admin.request("POST", `/api/quotes/${quoteA}/versions`)
+    const versionId = typeof json(versionRes.text).id === "string" ? (json(versionRes.text).id as string) : null
+    if (versionId) quoteIds.push(versionId)
+    const family = await prisma.quote.findMany({ where: { id: { in: versionId ? [quoteA, versionId] : [quoteA] } }, select: { opportunityId: true } })
+    const linkEntries = await entriesOn(openId)
+    push("a draft links to an open opportunity of its client and contact, and a new version keeps it", "200, both versions linked", String(linked.status),
+      linked.status !== 200
+        ? `got ${linked.status}: ${errorText(linked.text)}`
+        : family.length !== 2 || family.some((q) => q.opportunityId !== openId)
+          ? "a version isn't linked"
+          : !linkEntries.some((e) => e.action === "quote_linked") || !(await auditActionsOn(openId)).includes("quote_linked")
+            ? "no quote_linked timeline or audit entry"
+            : null)
+
+    const wonId = await newOpportunity({ stageId: firstWon })
+    const deletedId = await newOpportunity()
+    await admin.request("DELETE", `/api/opportunities/${deletedId}`)
+    const otherClientId = await newOpportunity({ clientId: ctx.fx.copyClientId, contactId: ctx.fx.copyContactId })
+    const quoteB = await newQuote([250])
+    const refusals: [string, string][] = [
+      ["a closed opportunity", wonId],
+      ["a deleted opportunity", deletedId],
+      ["another client's opportunity", otherClientId],
+    ]
+    for (const [name, opportunityId] of refusals) {
+      const res = await admin.request("PATCH", `/api/quotes/${quoteB}`, { json: { opportunityId } })
+      push(`linking to ${name} is refused`, '400 "Invalid opportunity"', String(res.status), refusedAs(res, 400, "Invalid opportunity"))
+    }
+    const hidden = await sessions.rep.request("PATCH", `/api/quotes/${ctx.fx.repQuoteId}`, { json: { opportunityId: ctx.fx.salesViewerOpportunityId } })
+    push("Test Rep B can't link its quote to another team's opportunity it can't see", '400 "Invalid opportunity"', String(hidden.status), refusedAs(hidden, 400, "Invalid opportunity"))
+    const noEdit = await sessions.oppViewer.request("PATCH", `/api/quotes/${ctx.fx.repQuoteId}`, { json: { opportunityId: ctx.fx.unassignedOpportunityId } })
+    push("linking needs quote edit rights", "403", String(noEdit.status), noEdit.status === 403 ? null : `got ${noEdit.status}: ${errorText(noEdit.text)}`)
+    const repQuote = await prisma.quote.findUniqueOrThrow({ where: { id: ctx.fx.repQuoteId }, select: { opportunityId: true } })
+    const quoteBBefore = await prisma.quote.findUniqueOrThrow({ where: { id: quoteB }, select: { opportunityId: true } })
+    push("the refused links changed nothing", "not linked", repQuote.opportunityId || quoteBBefore.opportunityId ? "linked" : "none",
+      repQuote.opportunityId || quoteBBefore.opportunityId ? "a refused link was saved" : null)
+
+    // ── Sending an unlinked quote ──
+    const sent = await status(quoteB, "SENT")
+    const quoteBRow = await prisma.quote.findUniqueOrThrow({ where: { id: quoteB }, select: { opportunityId: true, quoteNumber: true } })
+    const autoId = quoteBRow.opportunityId
+    const auto = autoId
+      ? await prisma.opportunity.findUniqueOrThrow({ where: { id: autoId }, select: { teamId: true, ownerId: true, stageId: true, source: true, clientId: true, contactId: true } })
+      : null
+    const autoNote = autoId ? (await entriesOn(autoId)).find((e) => e.kind === "NOTE") : undefined
+    push("sending an unlinked quote creates its opportunity", "Ops team, Test Admin B, quote sent stage, QUOTE, system note", String(sent.status),
+      sent.status !== 200
+        ? `got ${sent.status}: ${errorText(sent.text)}`
+        : !auto
+          ? "no opportunity was linked"
+          : auto.teamId !== ctx.fx.opsTeamId || auto.ownerId !== ctx.b.adminId
+            ? "wrong team or owner (the owner's first team, with the owner)"
+            : auto.stageId !== sentStage || auto.source !== "QUOTE" || auto.clientId !== ctx.b.clientId || auto.contactId !== ctx.b.contactId
+              ? "wrong stage, source, client, or contact"
+              : autoNote?.authorId !== null || !autoNote?.body?.includes(`Created automatically when quote ${quoteBRow.quoteNumber} was sent`)
+                ? "no system written initial note"
+                : null)
+    // Four made above by hand, and one by the send
+    const madeCount = (await opportunityIdsOf(prisma, [companyId])).filter((id) => !opportunitiesBefore.includes(id)).length
+    push("sending made exactly one opportunity", "5 new (4 by hand, 1 by the send)", String(madeCount), madeCount === 5 ? null : `${madeCount} new opportunities`)
+
+    // ── Events ──
+    if (autoId) {
+      const accepted = await status(quoteB, "ACCEPTED")
+      const so = await prisma.salesOrder.findFirst({ where: { quoteId: quoteB }, select: { id: true, opportunityId: true, lineItems: { select: { id: true } } } })
+      if (so) salesOrderIds.push(so.id)
+      const entries = await entriesOn(autoId)
+      const move = entries.find((e) => e.action === "stage_changed")
+      const reason = move?.data && typeof move.data === "object" ? String((move.data as { reason?: unknown }).reason ?? "") : ""
+      push("accepted moves to the first Won stage and the sales order carries the link", "Won, sales order linked", String(accepted.status),
+        accepted.status !== 200
+          ? `got ${accepted.status}: ${errorText(accepted.text)}`
+          : (await stageOf(autoId)) !== firstWon
+            ? "not in the first Won stage"
+            : !reason.includes("accepted")
+              ? "no stage_changed entry naming the quote event"
+              : so?.opportunityId !== autoId
+                ? "the sales order isn't linked"
+                : !entries.some((e) => e.action === "sales_order_linked")
+                  ? "no sales_order_linked entry"
+                  : null)
+      const audit = await auditActionsOn(autoId)
+      const wanted = ["created", "quote_linked", "quote_sent", "quote_accepted", "field_changed", "sales_order_linked"]
+      push("the automatic steps are in the audit log", wanted.join(", "), String(audit.length), wanted.every((a) => audit.includes(a)) ? null : `has ${[...new Set(audit)].join(", ")}`)
+
+      if (so && so.lineItems.length > 0) {
+        const po = await admin.request("POST", "/api/purchase-orders", { json: { vendorId: ctx.b.vendorId, salesOrderId: so.id, soLineItemIds: so.lineItems.map((l) => l.id) } })
+        const poId = typeof json(po.text).id === "string" ? (json(po.text).id as string) : null
+        if (poId) purchaseOrderIds.push(poId)
+        const poRow = poId ? await prisma.purchaseOrder.findUnique({ where: { id: poId }, select: { opportunityId: true } }) : null
+        push("a purchase order generated from the sales order carries its link", "linked", String(po.status),
+          !poId
+            ? `got ${po.status}: ${errorText(po.text)}`
+            : poRow?.opportunityId !== autoId
+              ? "not linked"
+              : !(await entriesOn(autoId)).some((e) => e.action === "purchase_order_linked")
+                ? "no purchase_order_linked entry"
+                : null)
+      } else {
+        push("a purchase order generated from the sales order carries its link", "a sales order with lines", "none", "the accepted quote made no sales order with lines")
+      }
+    }
+
+    // Declined waits while another linked quote is open
+    const dealId = await newOpportunity()
+    const quoteC = await newQuote([123.456])
+    const quoteD = await newQuote()
+    await admin.request("PATCH", `/api/quotes/${quoteC}`, { json: { opportunityId: dealId } })
+    await admin.request("PATCH", `/api/quotes/${quoteD}`, { json: { opportunityId: dealId } })
+    await status(quoteC, "SENT")
+    const afterSend = await stageOf(dealId)
+    await status(quoteC, "DECLINED")
+    const afterFirstDecline = await stageOf(dealId)
+    await status(quoteD, "DECLINED")
+    const afterSecondDecline = await stageOf(dealId)
+    push("sent moves an open opportunity to the quote sent stage", "quote sent stage", afterSend === sentStage ? "moved" : "not moved", afterSend === sentStage ? null : "not in the quote sent stage")
+    push("declined waits while another linked quote is still open", "unchanged, then Lost",
+      `${afterFirstDecline === sentStage ? "unchanged" : "moved"}, then ${afterSecondDecline === firstLost ? "Lost" : "not Lost"}`,
+      afterFirstDecline !== sentStage ? "moved while a draft was still open" : afterSecondDecline !== firstLost ? "didn't move to Lost once nothing was open" : null)
+
+    // A manual move isn't pulled back by a change that isn't an event
+    await admin.request("PATCH", `/api/opportunities/${dealId}`, { json: { stageId: stageIds[0] } })
+    await status(quoteC, "DRAFT")
+    const afterNonEvent = await stageOf(dealId)
+    push("a manual move stays after a status change that isn't an event", "first stage", afterNonEvent === stageIds[0] ? "kept" : "moved", afterNonEvent === stageIds[0] ? null : "the stage was pulled back")
+
+    // The value follows the latest quote: C is the only one ever sent
+    const read = await admin.request("GET", `/api/opportunities/${dealId}`)
+    const quoteValue = json(read.text).quoteValue as { quoteId?: string; value?: string } | null | undefined
+    push("the value follows the latest sent quote, rounded to cents", "123.46 from the sent quote", quoteValue?.value ?? "none",
+      quoteValue?.quoteId !== quoteC ? "not the most recently sent quote" : quoteValue?.value !== "123.46" ? `value ${quoteValue?.value}` : null)
+    const manual = await admin.request("PATCH", `/api/opportunities/${dealId}`, { json: { expectedValue: "10" } })
+    push("the manual value is refused while quotes are linked", "400 VALUE_FROM_QUOTE", String(manual.status),
+      manual.status === 400 && manual.text.includes("VALUE_FROM_QUOTE") ? null : `got ${manual.status}: ${errorText(manual.text)}`)
+
+    // Manual orders take an opportunity of their client
+    const soRes = await admin.request("POST", "/api/sales-orders", { json: { clientId: ctx.b.clientId, opportunityId: dealId } })
+    const manualSoId = typeof json(soRes.text).id === "string" ? (json(soRes.text).id as string) : null
+    if (manualSoId) salesOrderIds.push(manualSoId)
+    const poRes = await admin.request("POST", "/api/purchase-orders", { json: { vendorId: ctx.b.vendorId, opportunityId: dealId } })
+    const manualPoId = typeof json(poRes.text).id === "string" ? (json(poRes.text).id as string) : null
+    if (manualPoId) purchaseOrderIds.push(manualPoId)
+    const [manualSo, manualPo] = await Promise.all([
+      manualSoId ? prisma.salesOrder.findUnique({ where: { id: manualSoId }, select: { opportunityId: true } }) : null,
+      manualPoId ? prisma.purchaseOrder.findUnique({ where: { id: manualPoId }, select: { opportunityId: true } }) : null,
+    ])
+    push("manual sales and purchase orders carry the link", "both linked", `${soRes.status}, ${poRes.status}`,
+      manualSo?.opportunityId !== dealId || manualPo?.opportunityId !== dealId ? "an order isn't linked" : null)
+    const dealActions = (await entriesOn(dealId)).map((e) => e.action)
+    const wantedActions = ["quote_linked", "quote_sent", "quote_declined", "stage_changed", "sales_order_linked", "purchase_order_linked"]
+    push("every link and event is on the timeline", wantedActions.join(", "), String(dealActions.length),
+      wantedActions.every((a) => dealActions.includes(a)) ? null : `has ${[...new Set(dealActions)].join(", ")}`)
+  } finally {
+    await prisma.purchaseOrder.deleteMany({ where: { id: { in: purchaseOrderIds } } })
+    await prisma.salesOrder.deleteMany({ where: { id: { in: salesOrderIds } } })
+    await prisma.quote.deleteMany({ where: { id: { in: quoteIds } } })
+    await removeOpportunitiesAddedSince(prisma, [companyId], opportunitiesBefore)
   }
 }
 
@@ -3115,6 +3373,10 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // and hidden or unavailable buttons stay off records
     await checkActionButtonNotes(prisma, sessions.admin, ctx, rows)
     await checkRecordButtonList(prisma, sessions.admin, sessions.oppViewer, ctx, rows)
+
+    // Quotes linked to opportunities: linking, the automatic opportunity,
+    // stage events, the value, and links carried to orders
+    await checkQuoteOpportunities(prisma, sessions, ctx, rows)
 
     // Audit log: every action recorded, soft delete and restore, and undo
     const auditOpportunityId = await checkAuditRecording(prisma, sessions.admin, ctx, rows)
