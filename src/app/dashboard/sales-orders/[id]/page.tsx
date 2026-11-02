@@ -14,6 +14,8 @@ import { FileUploadZone } from "@/components/attachments/FileUploadZone"
 import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
+import { OpportunityPicker } from "@/components/opportunities/OpportunityPicker"
+import { RecordOpportunityPanel, useRecordOpportunityPanel } from "@/components/opportunities/RecordOpportunityPanel"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface SOLineItem {
@@ -86,6 +88,8 @@ interface SalesOrderDetail {
   client: { id: string; name: string }
   user: { id: string; name: string }
   quote: { id: string; quoteNumber: string } | null
+  // The opportunity it is linked to, if any
+  opportunityId: string | null
   lineItems: SOLineItem[]
   // Only the linked purchase orders this user may open
   purchaseOrders: PurchaseOrderSummary[]
@@ -208,6 +212,7 @@ function SalesOrderDetail({ params }: { params: Promise<{ id: string }> }) {
 
   const [catalog, setCatalog] = useState<SOCatalogOption[]>([])
   const [vendors, setVendors] = useState<SOVendorOption[]>([])
+  const opportunityPanel = useRecordOpportunityPanel(`/api/sales-orders/${id}/opportunity`)
 
   function loadSO() {
     fetch(`/api/sales-orders/${id}`)
@@ -797,8 +802,37 @@ function SalesOrderDetail({ params }: { params: Promise<{ id: string }> }) {
               </div>
             </div>
 
-            {/* Right: Purchase Orders */}
+            {/* Right: the Opportunity panel, then Purchase Orders */}
             <div className="space-y-3">
+              <RecordOpportunityPanel
+                data={opportunityPanel.data}
+                failed={opportunityPanel.failed}
+                loading={opportunityPanel.loading}
+                currentId={so.id}
+              >
+                {canEdit && (
+                  <OpportunityPicker
+                    record="order"
+                    clientId={so.client.id}
+                    value={so.opportunityId}
+                    onChange={async (opportunityId) => {
+                      await handleUpdateField("opportunityId", opportunityId)
+                      opportunityPanel.reload()
+                    }}
+                    current={
+                      so.opportunityId
+                        ? {
+                            id: so.opportunityId,
+                            label: opportunityPanel.data?.opportunity
+                              ? `${opportunityPanel.data.opportunity.number} ${opportunityPanel.data.opportunity.title}`
+                              : "The linked opportunity",
+                          }
+                        : null
+                    }
+                    label="Link to opportunity"
+                  />
+                )}
+              </RecordOpportunityPanel>
               <h2 className="font-semibold text-sm text-foreground">Purchase Orders</h2>
               {so.purchaseOrders.length === 0 && (
                 <p className="text-sm text-muted-foreground">

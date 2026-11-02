@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { OpportunityPicker } from "@/components/opportunities/OpportunityPicker"
+import { readOpportunityParam } from "@/lib/opportunity-quote-rules"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
@@ -51,6 +53,9 @@ function NewPurchaseOrderForm() {
   // location if no Sales Order is linked.
   const [shipClientId, setShipClientId] = useState("")
   const [shipClientLocationId, setShipClientLocationId] = useState("")
+  // The opportunity it belongs to. A purchase order linked to a sales order
+  // takes the sales order's instead.
+  const [opportunityId, setOpportunityId] = useState<string | null>(null)
 
   // Ship-to-own-company resolution: locations belonging to whichever
   // client is flagged isInternal.
@@ -92,6 +97,19 @@ function NewPurchaseOrderForm() {
         }
         setInternalClientId(internal.id)
       })
+    // Opened from an opportunity's Related tab with ?opportunity=<id>: it
+    // ships to the opportunity's client, with the opportunity linked
+    const fromOpportunityId = readOpportunityParam(new URLSearchParams(window.location.search).get("opportunity"))
+    if (fromOpportunityId) {
+      fetch(`/api/opportunities/${fromOpportunityId}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((o: { id: string; client: { id: string } } | null) => {
+          if (!o) return
+          setShipClientId(o.client.id)
+          setOpportunityId(o.id)
+        })
+        .catch(() => undefined)
+    }
   }, [])
 
   function update(field: string, value: string | boolean) {
@@ -123,6 +141,8 @@ function NewPurchaseOrderForm() {
   function handleShipClientSelect(clientId: string) {
     setShipClientId(clientId)
     setShipClientLocationId("")
+    // An opportunity of another client no longer fits
+    setOpportunityId(null)
   }
 
   function applyShipClientLocation(locationId: string, address: ClientLocationAddress | null) {
@@ -171,6 +191,8 @@ function NewPurchaseOrderForm() {
         ...form,
         shipClientId: form.salesOrderId ? undefined : shipClientId,
         shipClientLocationId: form.salesOrderId ? undefined : shipClientLocationId,
+        // Left out with a sales order, which brings its own
+        ...(opportunityId && !form.salesOrderId ? { opportunityId } : {}),
       }),
     })
 
@@ -251,6 +273,17 @@ function NewPurchaseOrderForm() {
             className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           />
         </div>
+
+        {form.salesOrderId ? (
+          <p className="text-xs text-muted-foreground">Linked to a sales order, so it takes that sales order&apos;s opportunity.</p>
+        ) : (
+          <OpportunityPicker
+            record="order"
+            clientId={form.shipToClient && shipClientId ? shipClientId : null}
+            value={opportunityId}
+            onChange={setOpportunityId}
+          />
+        )}
       </div>
 
       <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
