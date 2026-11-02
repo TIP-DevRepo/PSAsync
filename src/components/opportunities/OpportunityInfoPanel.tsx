@@ -26,6 +26,7 @@ import {
 } from "@/lib/opportunity-view"
 import { StagePill } from "./StagePill"
 import { useClientLocations } from "./useClientLocations"
+import { CLIENT_LOCKED_MESSAGE, hasLinkedRecords } from "@/lib/opportunity-quote-rules"
 import { clientContactHref, clientLocationHref, clientPageHref } from "@/lib/client-links"
 import type { TeamSummary } from "@/lib/team-rules"
 
@@ -124,6 +125,10 @@ export function OpportunityInfoPanel({
   // The value's quote is linked for users who can open quotes; the quote
   // page still runs its own view check
   const canOpenQuotes = useAccess().can("pages.quotes")
+  // While quotes or orders are linked the client can't change (the server
+  // refuses it too); the Client field says why instead of opening
+  const clientLocked = hasLinkedRecords(o._count)
+  const [clientLockShown, setClientLockShown] = useState(false)
 
   const field = (key: FieldKey) => ({
     canEdit,
@@ -146,6 +151,13 @@ export function OpportunityInfoPanel({
     setEditing(null)
   }
   async function changeParty(next: ClientContactValue) {
+    // Another client isn't allowed while records are linked: the contact
+    // editor keeps to the current client's contacts
+    if (clientLocked && next.client && next.client.id !== o.client.id) {
+      toast.error("Couldn't change the client", CLIENT_LOCKED_MESSAGE)
+      closeParty()
+      return
+    }
     const changed = next.contact?.id !== o.contact.id || next.client?.id !== o.client.id
     if (next.client && next.contact && changed) {
       closeParty()
@@ -217,6 +229,7 @@ export function OpportunityInfoPanel({
               labelClassName={LABEL}
               autoFocus={partyFocus}
             />
+            {clientLocked && <p className="text-xs text-muted-foreground">{CLIENT_LOCKED_MESSAGE}. Choose another contact of this client.</p>}
             {partyDraft && !partyDraft.contact && (
               <p className="text-xs text-warning">
                 {partyDraft.client ? "Choose a contact to save the new client. The location then resets to its main location." : "Choose a client and contact."}
@@ -236,11 +249,20 @@ export function OpportunityInfoPanel({
               renderValue={(name) => <InlineFieldLink href={clientPageHref(o.client.id)}>{name}</InlineFieldLink>}
               canEdit={canEdit}
               editing={false}
-              onEditingChange={(open) => open && openParty("client")}
+              onEditingChange={(open) => {
+                if (!open) return
+                if (clientLocked) setClientLockShown(true)
+                else openParty("client")
+              }}
               onSave={async () => true}
               renderEditor={() => null}
               busy={partySaving}
             />
+            {canEdit && clientLocked && clientLockShown && (
+              <p role="status" className="-mt-2 text-xs text-muted-foreground">
+                {CLIENT_LOCKED_MESSAGE}.
+              </p>
+            )}
             <InlineEditField
               label="Contact"
               value={contactFullName(o.contact)}

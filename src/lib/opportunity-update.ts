@@ -21,6 +21,7 @@ import { recordAudit, type AuditEntryInput } from "@/lib/audit-log"
 import { opportunityFieldAudits } from "@/lib/opportunity-audit"
 import type { TimelineAction } from "@/lib/timeline-actions"
 import { EXPECTED_VALUE_FROM_QUOTE_MESSAGE } from "@/lib/opportunity-value"
+import { CLIENT_LOCKED_MESSAGE, hasLinkedRecords } from "@/lib/opportunity-quote-rules"
 import type { Prisma } from "@/generated/prisma"
 
 // Changing an opportunity's fields, shared by PATCH /api/opportunities/[id]
@@ -122,6 +123,16 @@ export async function planOpportunityUpdate(
   // kept) always belongs to the client (new or kept)
   if ("clientId" in body || "contactId" in body) {
     if ("clientId" in body && isBlank(body.clientId)) return refuse(apiError(400, "A client is required"))
+    // A new client is refused while any quote, sales order, or purchase
+    // order is linked (they belong to the old client); a new contact of the
+    // same client is fine. The undo of a client change goes through here too.
+    if ("clientId" in body && body.clientId !== existing.clientId) {
+      const linked = await prisma.opportunity.findFirst({
+        where: opportunityWhere(ctx, existing.id),
+        select: { _count: { select: { quotes: true, salesOrders: true, purchaseOrders: true } } },
+      })
+      if (linked && hasLinkedRecords(linked._count)) return refuse(apiError(409, CLIENT_LOCKED_MESSAGE, "CLIENT_LOCKED"))
+    }
     if ("contactId" in body && isBlank(body.contactId)) return refuse(apiError(400, "A contact is required"))
     refs.clientId = "clientId" in body ? body.clientId : existing.clientId
     refs.contactId = "contactId" in body ? body.contactId : existing.contactId
