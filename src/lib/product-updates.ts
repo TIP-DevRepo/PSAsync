@@ -18,6 +18,48 @@ export interface ProductUpdate {
 // update appears on /updates the moment the release goes live.
 export const PRODUCT_UPDATES: ProductUpdate[] = [
   {
+    version: "v0.9.09",
+    date: "2026-11-03",
+    title: "Opportunities, Teams, and the Audit Log",
+    sections: [
+      {
+        category: "Added",
+        items: [
+          "Opportunities: track your deals on a board with a column for each stage, dragging cards from one stage to the next, or in a list.",
+          "Each opportunity has its own page with a timeline of notes, emails, and changes, plus Attachments and Related tabs.",
+          "Click any detail on an opportunity to edit it right where it is. Client, contact, and location names open the client page.",
+          "Posting a note on an opportunity can also change its stage.",
+          "Action buttons on opportunities: Note, Email, Won, Lost, and Raise Quote. Admins can add, edit, recolor, reorder, and hide them in Settings > Action Buttons.",
+          "Send emails to clients straight from an opportunity. Sent emails appear on its timeline.",
+          "Teams: admins can create teams, add members, and choose roles that members receive automatically. The Opportunities folder in the sidebar lists each team and its members with their open opportunity counts.",
+          "Settings > Opportunity Settings, for stages, types, the number prefix, and the stage an opportunity moves to when its quote is sent.",
+          "Quotes, sales orders, and purchase orders can be linked to an opportunity. Sending or accepting a quote that has no opportunity creates one automatically.",
+          "An opportunity's stage moves on its own when a linked quote is sent, accepted, or declined.",
+          "Raise a quote, a new sales order, or a new purchase order from an opportunity, with its details filled in for you.",
+          "An Opportunity panel on quote, sales order, and purchase order pages.",
+          "An Audit Log in Settings: see every change, filter by type, undo a changed field, and restore a deleted opportunity.",
+          "Column filters on the opportunities list, opened from the filter icon in the header row."
+        ],
+      },
+      {
+        category: "Improved",
+        items: [
+          "Every list of users now shows your own name instead of \"Me\", puts Unassigned first, and sorts everyone else alphabetically.",
+          "Client pages remember the open tab in the address bar, and links to a contact or location open that tab with the row highlighted.",
+          "Giving someone a role, directly or through a team, now requires that you hold every permission the role includes.",
+          "The quote expiry help text now explains that expiry counts from when a quote is created."
+        ],
+      },
+      {
+        category: "Fixed",
+        items: [
+          "Quotes, sales orders, and purchase orders created at the same moment could get the same number. Numbers are now always unique and never reused.",
+          "Mark as sent now shows an error message when it can't finish, instead of failing silently."
+        ],
+      },
+    ],
+  },
+  {
     version: "v0.9.08",
     date: "2026-10-20",
     title: "Safer Files and Links, and Quote Terms That Stay in Sync",
