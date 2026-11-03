@@ -19,11 +19,18 @@ export const GENERIC_ERROR_MESSAGE = "Something went wrong. Please try again."
 // values it was called with, and the user gets GENERIC_ERROR_MESSAGE.
 export function userFacingError(err: unknown, context: string): { message: string; status: 400 | 500 } {
   if (err instanceof UserError) return { message: err.message, status: 400 }
+  console.error(`${context} failed: ${errorSummary(err)}`)
+  return { message: GENERIC_ERROR_MESSAGE, status: 500 }
+}
+
+// An error as one log line: its kind, its Prisma code and fields when it
+// has them, and the first line of its message. Never the whole error
+// object, whose other properties can hold the values it was called with.
+export function errorSummary(err: unknown): string {
   const e = err as { name?: unknown; code?: unknown; meta?: { target?: unknown }; message?: unknown } | null
   const name = typeof e?.name === "string" ? e.name : typeof err
   const code = typeof e?.code === "string" ? ` ${e.code}` : ""
   const target = Array.isArray(e?.meta?.target) ? ` on ${e.meta.target.join(", ")}` : ""
   const firstLine = typeof e?.message === "string" ? e.message.trim().split("\n")[0].slice(0, 200) : ""
-  console.error(`${context} failed: ${name}${code}${target}${firstLine ? `: ${firstLine}` : ""}`)
-  return { message: GENERIC_ERROR_MESSAGE, status: 500 }
+  return `${name}${code}${target}${firstLine ? `: ${firstLine}` : ""}`
 }
