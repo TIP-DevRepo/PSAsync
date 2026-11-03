@@ -20,6 +20,7 @@ import bcrypt from "bcryptjs"
 import { globalAdminRoleData } from "../src/lib/global-admin-role"
 import { ensureEveryoneRole } from "../src/lib/everyone-role"
 import { setUserRoles } from "../src/lib/user-roles"
+import { errorSummary } from "../src/lib/user-error"
 import { MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH, passwordByteLength } from "../src/lib/password-rules"
 import { enforceDevGuard } from "../scripts/dev-only/lib/guard"
 import { BCRYPT_COST } from "../scripts/dev-only/lib/test-data"
@@ -136,4 +137,10 @@ async function main() {
   await pool.end()
 }
 
-main().catch(console.error)
+// A failure mid seed (a database error, say) exits 1 so a script or CI run
+// sees it. Only the error's kind, code, and first line are printed, never
+// the whole error, whose other properties can hold the values written.
+main().catch((err) => {
+  console.error(`Seed failed: ${errorSummary(err)}`)
+  process.exit(1)
+})
