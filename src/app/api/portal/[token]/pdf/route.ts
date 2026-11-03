@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
-import chromium from "@sparticuz/chromium"
-import puppeteer from "puppeteer-core"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
+import { pdfUnavailableResponse, renderPdf } from "@/lib/pdf-render"
 import { resolveQuoteTerms } from "@/lib/quote-terms"
 import { linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { consumeSubject, linkLimitedResponse } from "@/lib/rate-limit"
@@ -57,33 +56,15 @@ export async function GET(
     accentColor: quote.company.settings?.accentColor ?? "#2E86AB",
   })
 
-  const isVercel = !!process.env.VERCEL
+  // A browser that can't start or render answers PDF_UNAVAILABLE (503)
+  const pdf = await renderPdf(html, "Portal quote PDF")
+  if (!pdf) return pdfUnavailableResponse()
 
-  const browser = isVercel
-    ? await puppeteer.launch({
-        args: chromium.args,
-        executablePath: await chromium.executablePath(),
-        headless: true,
-      })
-    : await (await import("puppeteer")).launch({ headless: true })
-
-  try {
-    const page = await browser.newPage()
-    await page.setContent(html, { waitUntil: "load" })
-    const pdfBuffer = await page.pdf({
-      format: "letter",
-      printBackground: true,
-      margin: { top: "0", bottom: "0", left: "0", right: "0" },
-    })
-
-    return new NextResponse(Buffer.from(pdfBuffer), {
-      headers: {
-        "Content-Type": "application/pdf",
-        // Built from the stored quote number, so through the shared helper
-        "Content-Disposition": attachmentDisposition(quotePdfName(quote.quoteNumber, quote.version), "quote.pdf"),
-      },
-    })
-  } finally {
-    await browser.close()
-  }
+  return new NextResponse(pdf, {
+    headers: {
+      "Content-Type": "application/pdf",
+      // Built from the stored quote number, so through the shared helper
+      "Content-Disposition": attachmentDisposition(quotePdfName(quote.quoteNumber, quote.version), "quote.pdf"),
+    },
+  })
 }

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { sendQuoteEmail } from "@/lib/send-quote-email"
+import { PDF_UNAVAILABLE_CODE, pdfUnavailableResponse } from "@/lib/pdf-render"
 import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { withoutPortalTokens } from "@/lib/portal-token"
@@ -139,6 +140,8 @@ export async function POST(
   const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
   const result = await sendQuoteEmail({ quoteId: id, ...emailPayload, termsFreeze: freeze })
   if (!result.success) {
+    // The attached PDF couldn't be made: refused before anything was sent
+    if (result.code === PDF_UNAVAILABLE_CODE) return pdfUnavailableResponse()
     return NextResponse.json({ error: result.error }, { status: 400 })
   }
 

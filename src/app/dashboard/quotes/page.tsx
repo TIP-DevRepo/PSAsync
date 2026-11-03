@@ -9,6 +9,7 @@ import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy
 import { Modal } from "@/components/Modal"
 import { CopyQuoteModal } from "@/components/quotes/CopyQuoteModal"
 import { toast } from "@/lib/toast"
+import { downloadPdf } from "@/lib/download-pdf"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { copyText } from "@/lib/clipboard"
 import { formatValidUntil } from "@/lib/quote-expiry"
@@ -1060,7 +1061,7 @@ function QuoteActionsMenu({
               )}
               <button
                 onClick={() => {
-                  window.open(`/api/quotes/${quote.id}/pdf`, "_blank")
+                  void downloadPdf(`/api/quotes/${quote.id}/pdf`)
                   setOpen(false)
                 }}
                 className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"

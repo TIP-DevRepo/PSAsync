@@ -3,8 +3,7 @@ import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
 import { asSent, resolveQuoteTerms, type TermsFreeze } from "@/lib/quote-terms"
 import { quotePdfName } from "@/lib/content-disposition"
 import { graphRecipients, postSendMail, refreshMailboxAccess } from "@/lib/microsoft-mail"
-import chromium from "@sparticuz/chromium"
-import puppeteer from "puppeteer-core"
+import { PDF_UNAVAILABLE_CODE, PDF_UNAVAILABLE_MESSAGE, renderPdf } from "@/lib/pdf-render"
 
 export interface SendQuoteEmailInput {
   quoteId: string
@@ -27,6 +26,8 @@ export interface SendQuoteEmailInput {
 export interface SendQuoteEmailResult {
   success: boolean
   error?: string
+  // PDF_UNAVAILABLE: the attached PDF couldn't be made, so nothing was sent
+  code?: typeof PDF_UNAVAILABLE_CODE
 }
 
 export async function sendQuoteEmail(input: SendQuoteEmailInput): Promise<SendQuoteEmailResult> {
@@ -124,32 +125,15 @@ async function sendFromConnection(
       accentColor: settings.accentColor,
     })
 
-    const isVercel = !!process.env.VERCEL
-    const browser = isVercel
-      ? await puppeteer.launch({
-          args: chromium.args,
-          executablePath: await chromium.executablePath(),
-          headless: true,
-        })
-      : await (await import("puppeteer")).launch({ headless: true })
-
-    try {
-      const page = await browser.newPage()
-      await page.setContent(html, { waitUntil: "load" })
-      const pdfBuffer = await page.pdf({
-        format: "letter",
-        printBackground: true,
-        margin: { top: "0", bottom: "0", left: "0", right: "0" },
-      })
-      attachments.push({
-        "@odata.type": "#microsoft.graph.fileAttachment",
-        name: quotePdfName(quote.quoteNumber, quote.version),
-        contentType: "application/pdf",
-        contentBytes: Buffer.from(pdfBuffer).toString("base64"),
-      })
-    } finally {
-      await browser.close()
-    }
+    // No PDF, no email: the send is refused before anything goes out
+    const pdf = await renderPdf(html, "Quote email PDF")
+    if (!pdf) return { success: false, error: PDF_UNAVAILABLE_MESSAGE, code: PDF_UNAVAILABLE_CODE }
+    attachments.push({
+      "@odata.type": "#microsoft.graph.fileAttachment",
+      name: quotePdfName(quote.quoteNumber, quote.version),
+      contentType: "application/pdf",
+      contentBytes: pdf.toString("base64"),
+    })
   }
 
   const message = {

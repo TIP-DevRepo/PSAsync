@@ -5,7 +5,7 @@ import { Button as HeroButton } from "@heroui/react"
 import { AcceptFlowModal } from "./AcceptFlowModal"
 import { formatValidUntil } from "@/lib/quote-expiry"
 import { PORTAL_COMMENT_MAX, PORTAL_DECLINE_REASON_MAX, PORTAL_QUANTITY_MAX } from "@/lib/portal-input"
-import { toast } from "@/lib/toast"
+import { downloadPdf } from "@/lib/download-pdf"
 
 const pdfButtonStyle = `
   .pdf-download-btn {
@@ -402,29 +402,12 @@ export default function PortalPage({
   }
 
   // Fetched rather than linked, so a link that has been used too often (429)
-  // shows a short note instead of an error page
+  // or a PDF that couldn't be made (503) shows a short note instead of an
+  // error page
   async function handleDownloadPdf() {
     setDownloadingPdf(true)
     try {
-      const res = await fetch(`/api/portal/${token}/pdf`)
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        if (res.status === 429) toast.warning("Please wait before downloading again", data.error)
-        else toast.error("Couldn't download the PDF", data.error || "Please try again.")
-        return
-      }
-      const blob = await res.blob()
-      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] || "quote.pdf"
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = name
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-    } catch {
-      toast.error("Couldn't download the PDF", "Please try again.")
+      await downloadPdf(`/api/portal/${token}/pdf`)
     } finally {
       setDownloadingPdf(false)
     }
