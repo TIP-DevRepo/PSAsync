@@ -49,7 +49,7 @@ export async function POST(
 
   const reason = body.reason || ""
   const rejecter = await prisma.user.findUnique({ where: { id: ctx.userId }, select: { name: true, email: true } })
-  const note = `[Approval rejected — ${approval.workflow.name} by ${rejecter?.name || rejecter?.email}]${
+  const note = `[Approval rejected: ${approval.workflow.name} by ${rejecter?.name || rejecter?.email}]${
     reason ? `: ${reason}` : ""
   }`
 

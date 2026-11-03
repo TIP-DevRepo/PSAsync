@@ -105,7 +105,7 @@ export async function PATCH(
       )
       if (!stillCovered) {
         return NextResponse.json(
-          { error: "Can't remove Users & Roles access — this is the only role that has it. At least one role must be able to manage users." },
+          { error: "Can't remove Users & Roles access. This is the only role that has it. At least one role must be able to manage users." },
           { status: 400 }
         )
       }
@@ -186,7 +186,7 @@ export async function DELETE(
     )
     if (!stillCovered) {
       return NextResponse.json(
-        { error: "Can't delete this role — it's the only one that can manage Users & Roles." },
+        { error: "Can't delete this role. It's the only one that can manage Users & Roles." },
         { status: 400 }
       )
     }

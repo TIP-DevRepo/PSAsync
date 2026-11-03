@@ -608,8 +608,8 @@ function PurchaseOrderDetail({ params }: { params: Promise<{ id: string }> }) {
                   </div>
                 ) : (
                   <>
-                    <p className="text-foreground">{po.shipContactName ?? "—"}</p>
-                    <p className="text-muted-foreground">{po.shipAddress ?? "—"}</p>
+                    <p className="text-foreground">{po.shipContactName ?? "-"}</p>
+                    <p className="text-muted-foreground">{po.shipAddress ?? "-"}</p>
                     {po.shipAddress2 && <p className="text-muted-foreground">{po.shipAddress2}</p>}
                     <p className="text-muted-foreground">{[po.shipCity, po.shipState, po.shipZip].filter(Boolean).join(", ")}</p>
                   </>

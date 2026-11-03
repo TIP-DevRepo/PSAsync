@@ -147,7 +147,7 @@ export function DashboardView({ allowedWidgetTypes }: { allowedWidgetTypes: Widg
 
     const others = detail.widgets.filter((w) => w.id !== widgetId)
     if (!canPlace(cell.row, cell.col, widget.size, others)) {
-      toast.error("That spot doesn't fit — it's off the grid or overlaps another widget")
+      toast.error("That spot doesn't fit: it's off the grid or overlaps another widget")
       return
     }
 

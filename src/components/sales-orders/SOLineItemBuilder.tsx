@@ -188,7 +188,7 @@ export function SOLineItemBuilder({
             </td>
             <td className="py-2 pr-2 align-top">
               <select value={li.vendorId ?? ""} onChange={(e) => onUpdate(li.id, { vendorId: e.target.value || null })} className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring text-foreground">
-                <option value="">—</option>
+                <option value="">-</option>
                 {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
               </select>
             </td>
@@ -232,12 +232,12 @@ export function SOLineItemBuilder({
               <span className="text-foreground">{li.name}</span>
               {li.description && <p className="text-xs text-muted-foreground truncate">{li.description}</p>}
             </td>
-            <td className="py-2 pr-2 align-top text-muted-foreground truncate">{li.vendor?.name ?? "—"}</td>
+            <td className="py-2 pr-2 align-top text-muted-foreground truncate">{li.vendor?.name ?? "-"}</td>
             <td className="py-2 pr-2 align-top text-muted-foreground"><CopyableCell value={li.vendorSku} /></td>
             <td className="py-2 pr-2 align-top text-right text-foreground tabular-nums">{li.quantity}</td>
             <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{typeof li.cost === "number" ? money(li.cost) : "-"}</td>
             <td className="py-2 pr-2 align-top text-right text-foreground tabular-nums">{money(li.unitPrice)}</td>
-            <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{li.discount ? `${li.discount}%` : "—"}</td>
+            <td className="py-2 pr-2 align-top text-right text-muted-foreground tabular-nums">{li.discount ? `${li.discount}%` : "-"}</td>
             <td className="py-2 pr-2 align-top text-right font-medium text-foreground tabular-nums">{money(total)}</td>
             <td className="py-2 pr-2 align-top text-muted-foreground truncate">{typeLabel(li)}</td>
             <td className="py-2 pr-4 align-top">
@@ -328,7 +328,7 @@ export function SOLineItemBuilder({
                 <div>
                   <label className="block text-sm font-medium mb-1 text-foreground">Vendor</label>
                   <select value={adhoc.vendorId} onChange={(e) => setAdhoc({ ...adhoc, vendorId: e.target.value })} className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <option value="">—</option>
+                    <option value="">-</option>
                     {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
                   </select>
                 </div>

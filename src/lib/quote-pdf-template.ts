@@ -139,7 +139,7 @@ export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string 
               <td>
                 <div class="item-name">${escapeHtml(li.name)}</div>
                 ${li.description ? `<div class="item-desc">${escapeHtml(li.description)}</div>` : ""}
-                ${li.isRecurring ? `<div class="item-desc">Recurring — ${escapeHtml((li.recurringInterval || "").toLowerCase())}</div>` : ""}
+                ${li.isRecurring ? `<div class="item-desc">Recurring: ${escapeHtml((li.recurringInterval || "").toLowerCase())}</div>` : ""}
               </td>
               <td class="num">${li.quantity} × ${money(li.unitPrice)}</td>
               <td class="num">${skipped ? '<span class="muted">Not included</span>' : money(lineTotal(li))}</td>
@@ -251,7 +251,7 @@ export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string 
 
     <div class="meta">
       <div><strong>Prepared for:</strong> ${escapeHtml(quote.client.name)}${
-    quote.contact ? ` — ${escapeHtml(quote.contact.firstName)} ${escapeHtml(quote.contact.lastName)}` : ""
+    quote.contact ? ` - ${escapeHtml(quote.contact.firstName)} ${escapeHtml(quote.contact.lastName)}` : ""
   }</div>
       <div><strong>Prepared by:</strong> ${escapeHtml(quote.user.name)}</div>
       <div><strong>Date:</strong> ${quote.createdAt.toLocaleDateString()}</div>

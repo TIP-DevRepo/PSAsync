@@ -65,7 +65,7 @@ const TRACKED_FIELDS: { key: keyof typeof FIELD_LABELS; label: string }[] = [
 ]
 
 function displayValue(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "—"
+  if (v === null || v === undefined || v === "") return "-"
   if (typeof v === "boolean") return v ? "Yes" : "No"
   return String(v)
 }

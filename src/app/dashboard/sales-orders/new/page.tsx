@@ -264,7 +264,7 @@ function NewSalesOrderForm() {
         <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
           <h2 className="font-semibold text-sm text-foreground">Bill To</h2>
           <p className="text-xs text-muted-foreground">
-            Auto-filled from the client&apos;s main billing location — pick a different saved location or edit freely if this order bills differently.
+            Auto-filled from the client&apos;s main billing location. Pick a different saved location or edit freely if this order bills differently.
           </p>
           <ClientLocationPicker
             clientId={form.clientId}
@@ -329,7 +329,7 @@ function NewSalesOrderForm() {
         <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3">
           <h2 className="font-semibold text-sm text-foreground">Ship To</h2>
           <p className="text-xs text-muted-foreground">
-            Auto-filled from the client&apos;s main shipping location — pick a different saved location or edit freely if this order ships differently.
+            Auto-filled from the client&apos;s main shipping location. Pick a different saved location or edit freely if this order ships differently.
           </p>
           <ClientLocationPicker
             clientId={form.clientId}

@@ -41,7 +41,7 @@ export async function POST(
   const existing = await prisma.dashboardWidget.findMany({ where: { dashboardId: id }, select: { row: true, col: true, size: true } })
   const cell = findFirstAvailableCell(size, existing)
   if (!cell) {
-    return NextResponse.json({ error: "This dashboard's grid is full — remove a widget or pick a smaller size" }, { status: 400 })
+    return NextResponse.json({ error: "This dashboard's grid is full. Remove a widget or pick a smaller size" }, { status: 400 })
   }
 
   const widget = await prisma.dashboardWidget.create({

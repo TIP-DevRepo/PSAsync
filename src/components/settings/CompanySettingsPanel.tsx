@@ -146,7 +146,7 @@ export function CompanySettingsPanel() {
       <div>
         <label className="block text-sm font-medium mb-1">Secondary Logo (optional)</label>
         <p className="text-xs text-muted-foreground mb-2">
-          Shown on client-facing quotes instead of the primary logo — useful if your primary logo
+          Shown on client-facing quotes instead of the primary logo, useful if your primary logo
           is the same color as your brand's primary color and would blend into the quote header.
         </p>
         {data.secondaryLogoUrl && (

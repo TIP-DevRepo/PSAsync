@@ -142,7 +142,7 @@ export function POLineItemBuilder({
 
   function renderSerialCell(li: POLineItemBuilderItem) {
     if (!isInventoryTrackedLine(li) || !li.catalogItem?.isSerialized) {
-      return <span className="text-xs text-muted-foreground">—</span>
+      return <span className="text-xs text-muted-foreground">-</span>
     }
     if (!li.received) {
       return <span className="text-xs text-muted-foreground">Set during receiving</span>

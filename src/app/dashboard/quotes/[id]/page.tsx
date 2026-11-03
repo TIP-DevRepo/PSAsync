@@ -884,16 +884,16 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                 <p><span className="text-muted-foreground">Client:</span> <span className="text-foreground">{quote.client.name}</span></p>
                 <p>
                   <span className="text-muted-foreground">Contact:</span>{" "}
-                  <span className="text-foreground">{quote.contact ? `${quote.contact.firstName} ${quote.contact.lastName}` : "—"}</span>
+                  <span className="text-foreground">{quote.contact ? `${quote.contact.firstName} ${quote.contact.lastName}` : "-"}</span>
                 </p>
                 <p><span className="text-muted-foreground">Rep:</span> <span className="text-foreground">{quote.user.name}</span></p>
                 <p>
                   <span className="text-muted-foreground">Expires:</span>{" "}
-                  <span className="text-foreground">{quote.expiresAt ? formatValidUntil(quote.expiresAt) : "—"}</span>
+                  <span className="text-foreground">{quote.expiresAt ? formatValidUntil(quote.expiresAt) : "-"}</span>
                 </p>
                 <p>
                   <span className="text-muted-foreground">Payment Terms:</span>{" "}
-                  <span className="text-foreground">{quote.paymentTerms || "—"}</span>
+                  <span className="text-foreground">{quote.paymentTerms || "-"}</span>
                 </p>
                 {quote.effectiveTerms && (
                   <CollapsibleField label="Terms & Conditions">

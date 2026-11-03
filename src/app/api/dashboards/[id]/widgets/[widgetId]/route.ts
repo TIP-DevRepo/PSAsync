@@ -42,7 +42,7 @@ export async function PATCH(
     select: { row: true, col: true, size: true },
   })
   if (!canPlace(row, col, widget.size, others)) {
-    return NextResponse.json({ error: "That spot doesn't fit — it's off the grid or overlaps another widget" }, { status: 400 })
+    return NextResponse.json({ error: "That spot doesn't fit: it's off the grid or overlaps another widget" }, { status: 400 })
   }
 
   const updated = await prisma.dashboardWidget.update({ where: { id: widgetId }, data: { row, col } })

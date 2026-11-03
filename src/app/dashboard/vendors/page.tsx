@@ -218,7 +218,7 @@ function VendorsListPageContent() {
                   )}
                 </td>
                 <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{vendor.type}</td>
-                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{vendor.email ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{vendor.email ?? "-"}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{formatPhoneDisplay(vendor.phone)}</td>
                 <td className={`${ROW_PADDING[density]} px-3`}>
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_COLORS[vendor.status]}`}>

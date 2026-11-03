@@ -12,7 +12,7 @@ export function money(n: number) {
 // clipboard so you don't have to open a row for editing just to grab a
 // value like a part number or vendor SKU.
 export function CopyableCell({ value }: { value: string | null }) {
-  if (!value) return <span className="text-muted-foreground">—</span>
+  if (!value) return <span className="text-muted-foreground">-</span>
   return (
     <span className="flex items-center gap-1 min-w-0">
       <span className="truncate">{value}</span>

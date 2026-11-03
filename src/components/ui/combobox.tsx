@@ -131,7 +131,7 @@ export function Combobox({ options, value, onChange, onCreate, placeholder, empt
           ))}
           {filtered.length === 0 && !query && (
             <p className="px-3 py-2 text-xs text-muted-foreground">
-              {onCreate ? "No options yet — type to create one." : "No options yet."}
+              {onCreate ? "No options yet. Type to create one." : "No options yet."}
             </p>
           )}
           {onCreate && query.trim() && !exactMatch && (

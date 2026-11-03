@@ -257,8 +257,8 @@ function ClientsListPageContent() {
                     {client.name}
                   </Link>
                 </td>
-                <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{client.industryRef?.name ?? "—"}</td>
-                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{client.email ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-foreground`}>{client.industryRef?.name ?? "-"}</td>
+                <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{client.email ?? "-"}</td>
                 <td className={`${ROW_PADDING[density]} px-3 text-muted-foreground`}>{formatPhoneDisplay(client.phone)}</td>
                 <td className={`${ROW_PADDING[density]} px-3`}>
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_COLORS[client.status]}`}>

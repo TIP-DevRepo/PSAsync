@@ -131,7 +131,7 @@ export function SalesOrderSettingsPanel() {
           <h3 className="font-semibold text-sm">Sales Order Status Notifications</h3>
           <p className="text-xs text-zinc-500 mt-1">
             When a Sales Order is manually changed to one of these statuses, notify a specific
-            person or everyone holding a specific role — in-app and by email.
+            person or everyone holding a specific role, in-app and by email.
           </p>
         </div>
 

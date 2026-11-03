@@ -107,7 +107,7 @@ export function ImportModal({
       setResult(res)
       setStep("results")
     } catch {
-      setError("The import failed partway through. No records were saved — please try again.")
+      setError("The import failed partway through. No records were saved. Please try again.")
       setStep("preview")
     }
   }
@@ -166,7 +166,7 @@ export function ImportModal({
                   onChange={(e) => setMapping((prev) => ({ ...prev, [f.key]: e.target.value }))}
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
-                  <option value="">— Don&apos;t import —</option>
+                  <option value="">Don&apos;t import</option>
                   {parsed.headers.map((h) => (
                     <option key={h} value={h}>
                       {h}
@@ -210,7 +210,7 @@ export function ImportModal({
                   <tr key={i} className="border-b border-border last:border-0">
                     {fields.filter((f) => mapping[f.key]).map((f) => (
                       <td key={f.key} className="py-2 px-3 text-foreground">
-                        {row[mapping[f.key]] || "—"}
+                        {row[mapping[f.key]] || "-"}
                       </td>
                     ))}
                   </tr>

@@ -279,7 +279,7 @@ function CatalogItemDetailPageContent() {
               {!editing ? (
                 <>
                   <p><span className="font-medium text-foreground">Item Name:</span> <span className="text-muted-foreground">{item.name}</span></p>
-                  <p><span className="font-medium text-foreground">Description:</span> <span className="text-muted-foreground">{item.description || "—"}</span></p>
+                  <p><span className="font-medium text-foreground">Description:</span> <span className="text-muted-foreground">{item.description || "-"}</span></p>
                   <p><span className="font-medium text-foreground">Type:</span> <span className="text-muted-foreground">{item.type}</span></p>
                   <p><span className="font-medium text-foreground">Serialized:</span> <span className="text-muted-foreground">{item.isSerialized ? "Yes" : "No"}</span></p>
                   <p>
@@ -289,7 +289,7 @@ function CatalogItemDetailPageContent() {
                         ? item.categoryRef.parent
                           ? `${item.categoryRef.parent.name} > ${item.categoryRef.name}`
                           : item.categoryRef.name
-                        : "—"}
+                        : "-"}
                     </span>
                   </p>
                   <p><span className="font-medium text-foreground">Cost Price:</span> <span className="text-muted-foreground">{money(item.cost)}</span></p>
@@ -297,10 +297,10 @@ function CatalogItemDetailPageContent() {
                   <p><span className="font-medium text-foreground">Billing Unit:</span> <span className="text-muted-foreground">{unitLabel(item.unit)}</span></p>
                   <p><span className="font-medium text-foreground">Taxable:</span> <span className="text-muted-foreground">{item.taxable ? "Yes" : "No"}</span></p>
                   <p><span className="font-medium text-foreground">Active:</span> <span className="text-muted-foreground">{item.active ? "Yes" : "No"}</span></p>
-                  <p><span className="font-medium text-foreground">Vendor:</span> <span className="text-muted-foreground">{vendorName || "—"}</span></p>
-                  <p><span className="font-medium text-foreground">Vendor SKU:</span> <span className="text-muted-foreground">{item.vendorSku || "—"}</span></p>
-                  <p><span className="font-medium text-foreground">Manufacturer:</span> <span className="text-muted-foreground">{manufacturerName || "—"}</span></p>
-                  <p><span className="font-medium text-foreground">Manufacturer SKU:</span> <span className="text-muted-foreground">{item.manufacturerSku || "—"}</span></p>
+                  <p><span className="font-medium text-foreground">Vendor:</span> <span className="text-muted-foreground">{vendorName || "-"}</span></p>
+                  <p><span className="font-medium text-foreground">Vendor SKU:</span> <span className="text-muted-foreground">{item.vendorSku || "-"}</span></p>
+                  <p><span className="font-medium text-foreground">Manufacturer:</span> <span className="text-muted-foreground">{manufacturerName || "-"}</span></p>
+                  <p><span className="font-medium text-foreground">Manufacturer SKU:</span> <span className="text-muted-foreground">{item.manufacturerSku || "-"}</span></p>
                 </>
               ) : draft && (
                 <>

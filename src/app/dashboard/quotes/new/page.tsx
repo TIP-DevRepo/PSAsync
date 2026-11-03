@@ -220,7 +220,7 @@ function NewQuoteForm() {
               <div className="rounded-md border p-3 text-sm space-y-0.5 bg-zinc-50 dark:bg-zinc-900">
                 <p className="font-medium">
                   {selectedContact.firstName} {selectedContact.lastName}
-                  {selectedContact.title && <span className="text-zinc-500"> — {selectedContact.title}</span>}
+                  {selectedContact.title && <span className="text-zinc-500"> - {selectedContact.title}</span>}
                 </p>
                 <p className="text-zinc-500">{selectedContact.client.name}</p>
                 {selectedContact.email && <p className="text-zinc-500">{selectedContact.email}</p>}
@@ -325,7 +325,7 @@ function NewQuoteForm() {
           <div className="rounded-md border p-4 space-y-3">
             <h2 className="font-semibold text-sm">Shipping Address</h2>
             <p className="text-xs text-zinc-500">
-              Autofilled from the selected contact's company — edit freely if this quote ships somewhere different.
+              Autofilled from the selected contact's company. Edit freely if this quote ships somewhere different.
             </p>
             <div>
               <label className="block text-sm font-medium mb-1">Address</label>

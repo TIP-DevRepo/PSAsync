@@ -344,9 +344,9 @@ function InventoryAssetDetailPageContent() {
                     : asset.catalogItem.categoryRef.name}
                 </span>
               </p>
-              <p><span className="font-medium text-foreground">Owner:</span> <span className="text-muted-foreground">{asset.ownerClient?.name ?? "—"}</span></p>
+              <p><span className="font-medium text-foreground">Owner:</span> <span className="text-muted-foreground">{asset.ownerClient?.name ?? "-"}</span></p>
               <p><span className="font-medium text-foreground">Current User:</span> <span className="text-muted-foreground">{currentUserLabel(asset)}</span></p>
-              <p><span className="font-medium text-foreground">Site:</span> <span className="text-muted-foreground">{asset.clientLocation?.name ?? "—"}</span></p>
+              <p><span className="font-medium text-foreground">Site:</span> <span className="text-muted-foreground">{asset.clientLocation?.name ?? "-"}</span></p>
               <p><span className="font-medium text-foreground">Container:</span> <span className="text-muted-foreground">{asset.containerPath ?? "Unknown (no container)"}</span></p>
               {asset.loanedToClient && (
                 <p><span className="font-medium text-foreground">Loaned To:</span> <span className="text-muted-foreground">{asset.loanedToClient.name}{asset.loanExpectedReturnDate ? ` (expected back ${new Date(asset.loanExpectedReturnDate).toLocaleDateString()})` : ""}</span></p>
