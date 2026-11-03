@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, canSeeCost, notFound, omitCost, omitUnitCost, requireAccess } from "@/lib/api-access"
-import { loadViewableSalesOrder, purchaseOrderVisibilityWhere, salesOrderWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
+import { assertRefs, loadViewableSalesOrder, purchaseOrderVisibilityWhere, salesOrderWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
 import { deleteStoredObjects } from "@/lib/uploads"
 import { notifySalesOrderStatusChange } from "@/lib/notify"
+import { readOptionalId } from "@/lib/opportunity-rules"
+import { recordRecordLink } from "@/lib/opportunity-quotes"
 
 const VALID_STATUSES = [
   "DRAFT",
@@ -40,8 +42,9 @@ const EDIT_GATED_FIELDS = [
   "shipCountry",
 ]
 
-// Every field other than status needs salesOrders.edit, the notes included
-const EDIT_FIELDS = [...EDIT_GATED_FIELDS, "internalNotes", "clientNotes"]
+// Every field other than status needs salesOrders.edit, the notes and the
+// opportunity link included
+const EDIT_FIELDS = [...EDIT_GATED_FIELDS, "internalNotes", "clientNotes", "opportunityId"]
 
 export async function GET(
   req: NextRequest,
@@ -173,7 +176,35 @@ export async function PATCH(
   if (body.shipZip !== undefined) data.shipZip = body.shipZip || null
   if (body.shipCountry !== undefined) data.shipCountry = body.shipCountry || null
 
-  const updated = await prisma.salesOrder.update({ where: salesOrderWhere(ctx, existing.id), data })
+  // The opportunity (null or blank unlinks): one of the order's client the
+  // user may open, in any stage. The old and new opportunities record the
+  // change in the same transaction.
+  const current = await prisma.salesOrder.findFirst({
+    where: salesOrderWhere(ctx, existing.id),
+    select: { clientId: true, soNumber: true, opportunityId: true },
+  })
+  if (!current) return notFound()
+  let opportunityId = current.opportunityId
+  if (body.opportunityId !== undefined) {
+    const linkRef = readOptionalId(body.opportunityId)
+    if (linkRef.error !== undefined) return apiError(400, "Invalid opportunity", "INVALID_REFERENCE")
+    if (linkRef.value && linkRef.value !== current.opportunityId) {
+      const invalid = await assertRefs(ctx, { clientId: current.clientId, orderOpportunityId: linkRef.value })
+      if (invalid) return invalid
+    }
+    opportunityId = linkRef.value
+    data.opportunityId = opportunityId
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const saved = await tx.salesOrder.update({ where: salesOrderWhere(ctx, existing.id), data })
+    if (opportunityId !== current.opportunityId) {
+      const link = { companyId: ctx.companyId, actorId: ctx.userId, kind: "salesOrder" as const, record: { id: existing.id, name: current.soNumber } }
+      if (current.opportunityId) await recordRecordLink(tx, { ...link, opportunityId: current.opportunityId, change: "unlinked" })
+      if (opportunityId) await recordRecordLink(tx, { ...link, opportunityId, change: "linked" })
+    }
+    return saved
+  })
 
   // Fire notifications for the 3 statuses that have a configured notify rule
   if (body.status && ["READY_TO_INVOICE", "READY_TO_ORDER", "READY_TO_CLOSEOUT"].includes(body.status)) {
@@ -217,7 +248,22 @@ export async function DELETE(
   // collected first and removed (best effort) once the delete succeeds
   const attachments = await prisma.sOAttachment.findMany({ where: { salesOrderId: salesOrder.id }, select: { fileUrl: true } })
 
-  await prisma.salesOrder.delete({ where: salesOrderWhere(ctx, salesOrder.id) })
+  // A linked order's opportunity records that it is no longer linked, in
+  // the same transaction as the delete
+  await prisma.$transaction(async (tx) => {
+    await tx.salesOrder.delete({ where: salesOrderWhere(ctx, salesOrder.id) })
+    if (salesOrder.opportunityId) {
+      await recordRecordLink(tx, {
+        companyId: ctx.companyId,
+        actorId: ctx.userId,
+        opportunityId: salesOrder.opportunityId,
+        kind: "salesOrder",
+        change: "unlinked",
+        record: { id: salesOrder.id, name: salesOrder.soNumber },
+        deleted: true,
+      })
+    }
+  })
 
   await deleteStoredObjects(attachments.map((a) => a.fileUrl), `sales-orders/${salesOrder.id}/`)
 

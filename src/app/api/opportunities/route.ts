@@ -27,6 +27,7 @@ import {
 } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
 import { createOpportunity, initialNoteHtml, INITIAL_NOTE_REQUIRED_MESSAGE } from "@/lib/opportunity-create"
+import { withQuoteValues } from "@/lib/opportunity-quotes"
 import type { Prisma } from "@/generated/prisma"
 
 const DAY = 24 * 60 * 60 * 1000
@@ -101,7 +102,9 @@ export async function GET(req: NextRequest) {
     orderBy: { createdAt: "desc" },
   })
 
-  return NextResponse.json(opportunities)
+  // Each with quoteValue: its latest linked quote's total (null without
+  // linked quotes), the value the board and list show
+  return NextResponse.json(await withQuoteValues(ctx.companyId, opportunities))
 }
 
 export async function POST(req: NextRequest) {
@@ -221,7 +224,8 @@ export async function POST(req: NextRequest) {
       expectedCloseDate: expectedCloseDate.value,
       initialNote,
     })
-    return NextResponse.json(opportunity)
+    // A new opportunity has no linked quotes yet
+    return NextResponse.json({ ...opportunity, quoteValue: null })
   } catch (err) {
     const { message, status } = userFacingError(err, "Creating an opportunity")
     return apiError(status, message)

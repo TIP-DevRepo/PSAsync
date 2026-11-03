@@ -5,6 +5,7 @@
 
 import { userChoices } from "@/lib/user-picker"
 import { writeColumnFilters } from "@/lib/column-filters"
+import { opportunityDisplayValue, type OpportunityQuoteValue } from "@/lib/opportunity-value"
 
 export type StageCategory = "OPEN" | "WON" | "LOST"
 
@@ -43,6 +44,9 @@ export interface OpportunityRow {
   team: { id: string; name: string } | null
   stage: { id: string; name: string; category: StageCategory; winProbability: number }
   type: { id: string; name: string } | null
+  // The latest linked quote's total, or null without linked quotes; while
+  // set it is the value every screen shows (opportunityDisplayValue)
+  quoteValue: OpportunityQuoteValue | null
 }
 
 // ─── URL view and search ────────────────────────────────────────────────────
@@ -211,7 +215,8 @@ export interface BoardColumn<T extends OpportunityRow = OpportunityRow> {
 }
 
 // One column per stage, in the order given (the company's sortOrder). Value
-// is expectedValue for now. Branch 3 switches it to the latest quote total.
+// is the latest linked quote's total, else the expected value
+// (opportunityDisplayValue).
 export function boardColumns<T extends OpportunityRow>(stages: StageOption[], opportunities: T[], now: Date): BoardColumn<T>[] {
   return stages.map((stage) => {
     const inStage = opportunities.filter((o) => o.stage.id === stage.id)
@@ -220,7 +225,7 @@ export function boardColumns<T extends OpportunityRow>(stages: StageOption[], op
       stage,
       cards,
       count: cards.length,
-      totalCents: cards.reduce((sum, o) => sum + valueCents(o.expectedValue), 0),
+      totalCents: cards.reduce((sum, o) => sum + valueCents(opportunityDisplayValue(o)), 0),
       olderCount: inStage.length - cards.length,
     }
   })

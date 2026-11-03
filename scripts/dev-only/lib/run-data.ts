@@ -754,8 +754,9 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
     const salesUnassignedOpportunity = await createOpportunity(n.salesUnassignedOpportunity, null, "sales-unassigned", salesTeam.id)
 
     // ── Action buttons ──
-    // The four defaults, made the way the app makes them on first use, then
-    // one custom Note button that always moves to the second stage
+    // The five defaults (Note, Email, Raise Quote, Won, Lost), made the way
+    // the app makes them on first use, then one custom Note button that
+    // always moves to the second stage
     await ensureActionButtonDefaults(companyId, prisma)
     const defaultButtons = await prisma.actionButton.findMany({
       where: { companyId },

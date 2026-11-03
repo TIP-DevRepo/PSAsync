@@ -101,6 +101,26 @@ export function opportunityEmailAudit(o: OpportunityAuditRecord, email: { entryI
   return entry(o, { action: "email_sent", after: { entryId: email.entryId, to: email.to, subject: email.subject } })
 }
 
+// A quote, sales order, or purchase order linked or unlinked ({ id, name }
+// with its number, in after for a link and before for an unlink), or a
+// quote event (the quote in after)
+export type RecordLinkAuditAction =
+  | "quote_linked"
+  | "quote_unlinked"
+  | "sales_order_linked"
+  | "sales_order_unlinked"
+  | "purchase_order_linked"
+  | "purchase_order_unlinked"
+  | "quote_sent"
+  | "quote_accepted"
+  | "quote_declined"
+  | "quote_expired"
+
+export function opportunityRecordAudit(o: OpportunityAuditRecord, action: RecordLinkAuditAction, record: { id: string; name: string }): AuditEntryInput {
+  const value = { id: record.id, name: record.name }
+  return action.endsWith("_unlinked") ? entry(o, { action, before: value }) : entry(o, { action, after: value })
+}
+
 export function opportunityDeletedAudit(o: OpportunityAuditRecord): AuditEntryInput {
   return entry(o, { action: "deleted" })
 }

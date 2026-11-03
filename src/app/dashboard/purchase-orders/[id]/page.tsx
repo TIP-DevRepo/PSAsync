@@ -15,6 +15,8 @@ import { buildLocationPathOptions, type LocationPathOption } from "@/lib/invento
 import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
+import { OpportunityPicker } from "@/components/opportunities/OpportunityPicker"
+import { RecordOpportunityPanel, useRecordOpportunityPanel } from "@/components/opportunities/RecordOpportunityPanel"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Shipment {
@@ -46,6 +48,9 @@ interface PODetail {
   vendor: { id: string; name: string; email: string | null }
   user: { id: string; name: string }
   salesOrder: { id: string; soNumber: string; clientId: string } | null
+  // The opportunity it is linked to, if any
+  opportunityId: string | null
+  shipToClientId: string | null
   shipToClientRef: { id: string; name: string } | null
   shipToClientLocation: { id: string; name: string } | null
   receivingClientLocation: { id: string; name: string } | null
@@ -142,6 +147,7 @@ function PurchaseOrderDetail({ params }: { params: Promise<{ id: string }> }) {
   const [clientLocationOptions, setClientLocationOptions] = useState<LocationPathOption[]>([])
   const [clientContainerOptions, setClientContainerOptions] = useState<LocationPathOption[]>([])
   const [defaultContainerId, setDefaultContainerId] = useState<string | null>(null)
+  const opportunityPanel = useRecordOpportunityPanel(`/api/purchase-orders/${id}/opportunity`)
 
   function loadPO() {
     fetch(`/api/purchase-orders/${id}`)
@@ -656,8 +662,37 @@ function PurchaseOrderDetail({ params }: { params: Promise<{ id: string }> }) {
               </div>
             </div>
 
-            {/* Right: Shipments */}
+            {/* Right: the Opportunity panel, then Shipments */}
             <div className="space-y-3">
+              <RecordOpportunityPanel
+                data={opportunityPanel.data}
+                failed={opportunityPanel.failed}
+                loading={opportunityPanel.loading}
+                currentId={po.id}
+              >
+                {canEdit && (
+                  <OpportunityPicker
+                    record="order"
+                    clientId={po.shipToClientId}
+                    value={po.opportunityId}
+                    onChange={async (opportunityId) => {
+                      await handleUpdateField("opportunityId", opportunityId)
+                      opportunityPanel.reload()
+                    }}
+                    current={
+                      po.opportunityId
+                        ? {
+                            id: po.opportunityId,
+                            label: opportunityPanel.data?.opportunity
+                              ? `${opportunityPanel.data.opportunity.number} ${opportunityPanel.data.opportunity.title}`
+                              : "The linked opportunity",
+                          }
+                        : null
+                    }
+                    label="Link to opportunity"
+                  />
+                )}
+              </RecordOpportunityPanel>
               <h2 className="font-semibold text-sm text-foreground">Shipments</h2>
               {po.shipments.length === 0 && (
                 <p className="text-sm text-muted-foreground">No shipments logged yet.</p>

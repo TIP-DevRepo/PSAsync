@@ -6,7 +6,9 @@ import { Columns3, List, Plus, Target, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
+import { confirmDialog } from "@/lib/confirm-dialog"
 import { cn } from "@/lib/utils"
+import { newSalesOrderHref, offersSalesOrderAfterMove, WON_SALES_ORDER_PROMPT } from "@/lib/opportunity-quote-rules"
 import {
   EMPTY_FILTERS,
   hasActiveFilters,
@@ -126,9 +128,18 @@ export function OpportunitiesPage() {
 
   async function handleMove(card: OpportunityRow, stage: StageOption) {
     const result = await moveOpportunityStage({ card, stage, now: new Date(), update: setOpportunities, save: saveStage })
-    if (!result.ok) toast.error(`Couldn't move ${card.number} to ${stage.name}`, result.error)
+    if (!result.ok) {
+      toast.error(`Couldn't move ${card.number} to ${stage.name}`, result.error)
+      return
+    }
     // The sidebar counts open opportunities, so a move in or out of Won or Lost changes them
-    else notifyOpportunitiesChanged()
+    notifyOpportunitiesChanged()
+    // Dragged into a WON stage with no linked quote: offer a sales order
+    const canCreateSalesOrders = can("pages.salesOrders") && can("salesOrders.create")
+    if (offersSalesOrderAfterMove({ from: card.stage.category, to: stage.category, hasLinkedQuote: card.quoteValue !== null, canCreateSalesOrders })) {
+      const create = await confirmDialog(WON_SALES_ORDER_PROMPT)
+      if (create) router.push(newSalesOrderHref(card.id))
+    }
   }
 
   const filtered = hasActiveFilters(filters)

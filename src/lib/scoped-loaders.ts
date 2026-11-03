@@ -591,6 +591,14 @@ export interface BodyRefs {
   // Attachments of opportunityId when it's given, otherwise of any company
   // opportunity (one id or a list)
   opportunityAttachmentId?: unknown
+  // The opportunity a quote links to: one the caller may open (VOP, never a
+  // deleted one), in an OPEN stage, of clientId and contactId (both needed;
+  // without them it never passes). Needs a ctx with userId and can.
+  quoteOpportunityId?: unknown
+  // The opportunity a sales order or purchase order links to: one the
+  // caller may open (VOP, never a deleted one), in any stage, of clientId
+  // when it's given. Needs a ctx with userId and can.
+  orderOpportunityId?: unknown
 }
 
 type RefKey = keyof BodyRefs
@@ -620,6 +628,8 @@ const REF_LABELS: Record<RefKey, string> = {
   actionButtonId: "action button",
   opportunityId: "opportunity",
   opportunityAttachmentId: "attachment",
+  quoteOpportunityId: "opportunity",
+  orderOpportunityId: "opportunity",
 }
 
 // Turns a single id *Where builder's clause into one matching every id in
@@ -646,7 +656,7 @@ function readIds(value: unknown): string[] | null {
 // view rule (viewableSalesOrderId) read userId and can
 type RefScope = Scope & Partial<Pick<AccessContext, "userId" | "can">>
 
-function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string, vendorId?: string, opportunityId?: string) {
+function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string, vendorId?: string, opportunityId?: string, contactId?: string) {
   const [first] = ids
   const company = { companyId: ctx.companyId }
   switch (key) {
@@ -707,6 +717,20 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
           ? whereIds(opportunityAttachmentWhere(ctx, opportunityId, first), ids)
           : { id: { in: ids }, opportunity: { ...company, ...NOT_DELETED_OPPORTUNITY } },
       })
+    case "quoteOpportunityId": {
+      const { userId, can } = ctx
+      if (!userId || !can || !clientId || !contactId) return Promise.resolve(0)
+      return prisma.opportunity.count({
+        where: { AND: [opportunityListWhere({ ...ctx, userId, can }), { id: { in: ids }, clientId, contactId, stage: { category: "OPEN" } }] },
+      })
+    }
+    case "orderOpportunityId": {
+      const { userId, can } = ctx
+      if (!userId || !can) return Promise.resolve(0)
+      return prisma.opportunity.count({
+        where: { AND: [opportunityListWhere({ ...ctx, userId, can }), { id: { in: ids }, ...(clientId ? { clientId } : {}) }] },
+      })
+    }
   }
 }
 
@@ -718,11 +742,13 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
 //   if (invalid) return invalid
 // contactId and clientLocationId are tied to clientId, vendorLocationId
 // to vendorId, and opportunityAttachmentId to opportunityId, when that
-// parent is a single id.
+// parent is a single id. quoteOpportunityId is tied to clientId and
+// contactId, and orderOpportunityId to clientId.
 export async function assertRefs(ctx: RefScope, refs: BodyRefs) {
   const clientId = typeof refs.clientId === "string" && refs.clientId ? refs.clientId : undefined
   const vendorId = typeof refs.vendorId === "string" && refs.vendorId ? refs.vendorId : undefined
   const opportunityId = typeof refs.opportunityId === "string" && refs.opportunityId ? refs.opportunityId : undefined
+  const contactId = typeof refs.contactId === "string" && refs.contactId ? refs.contactId : undefined
 
   const checks: { key: RefKey; ids: string[] | null }[] = []
   for (const key of Object.keys(REF_LABELS) as RefKey[]) {
@@ -732,7 +758,7 @@ export async function assertRefs(ctx: RefScope, refs: BodyRefs) {
   }
 
   const counts = await Promise.all(
-    checks.map(({ key, ids }) => (ids ? countRefs(ctx, key, ids, clientId, vendorId, opportunityId) : Promise.resolve(-1)))
+    checks.map(({ key, ids }) => (ids ? countRefs(ctx, key, ids, clientId, vendorId, opportunityId, contactId) : Promise.resolve(-1)))
   )
 
   const failed = checks.find(({ ids }, i) => !ids || counts[i] !== ids.length)

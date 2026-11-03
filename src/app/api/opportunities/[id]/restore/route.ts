@@ -5,6 +5,7 @@ import { deletedOpportunityWhere, opportunityWhere, viewableOpportunityIncluding
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { opportunityDetailSelect } from "@/lib/opportunity-selects"
+import { withQuoteValue } from "@/lib/opportunity-quotes"
 import { isPrismaError } from "@/lib/opportunity-rules"
 import { recordTimelineActions } from "@/lib/timeline"
 import { recordAudit } from "@/lib/audit-log"
@@ -64,7 +65,7 @@ export async function POST(
       return tx.opportunity.findFirstOrThrow({ where: opportunityWhere(ctx, opportunity.id), select: opportunityDetailSelect })
     })
     if (!restored) return apiError(409, NOT_DELETED_MESSAGE, "NOT_DELETED")
-    return NextResponse.json(restored)
+    return NextResponse.json(await withQuoteValue(ctx.companyId, restored))
   } catch (err) {
     if (isPrismaError(err, "P2003") || isPrismaError(err, "P2025")) return apiError(409, RESTORE_REFUSED_MESSAGE, "RESTORE_REFUSED")
     const { message, status } = userFacingError(err, "Restoring an opportunity")

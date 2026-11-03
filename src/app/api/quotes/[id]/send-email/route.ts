@@ -8,6 +8,8 @@ import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { escapeHtmlWithBreaks } from "@/lib/html"
 import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
+import { prepareQuoteStatusChange, runQuoteStatusChange } from "@/lib/opportunity-quotes"
+import { userFacingError } from "@/lib/user-error"
 import {
   MAX_RECIPIENTS,
   actorName,
@@ -126,9 +128,14 @@ export async function POST(
     return NextResponse.json({ ...(updated ? withoutPortalTokens(updated) : {}), pendingApproval: true })
   }
 
-  // No approval needed, send the email right now. The terms it freezes are
-  // worked out once, used for the attached PDF, and stored when the quote
-  // is marked sent below, so the customer gets exactly what is stored.
+  // No approval needed, send the email right now. A quote without an
+  // opportunity gets one when it is marked sent; it is planned here, before
+  // the email goes out, so a quote that can't have one is refused while
+  // nothing has been sent. The terms it freezes are worked out once, used
+  // for the attached PDF, and stored when the quote is marked sent below,
+  // so the customer gets exactly what is stored.
+  const prepared = await prepareQuoteStatusChange(companyId, quote, "SENT")
+  if (prepared.error !== undefined) return apiError(400, prepared.error)
   const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
   const result = await sendQuoteEmail({ quoteId: id, ...emailPayload, termsFreeze: freeze })
   if (!result.success) {
@@ -136,23 +143,32 @@ export async function POST(
   }
 
   const note = sendAsNote({ userId: ctx.userId, name: clickerName }, sender.mailbox)
-  const updated = await prisma.$transaction(async (tx) => {
-    await applyTermsFreeze(tx, id, freeze)
-    await tx.quote.updateMany({
-      where: { companyId, quoteNumber: quote.quoteNumber, id: { not: id } },
-      data: { isActive: false },
+  let updated
+  try {
+    updated = await prisma.$transaction(async (tx) => {
+      await applyTermsFreeze(tx, id, freeze)
+      await tx.quote.updateMany({
+        where: { companyId, quoteNumber: quote.quoteNumber, id: { not: id } },
+        data: { isActive: false },
+      })
+      const sent = await tx.quote.update({
+        where: quoteWhere(ctx, id),
+        data: {
+          status: "SENT",
+          sentAt: new Date(),
+          isActive: true,
+          pendingEmailPayload: Prisma.JsonNull,
+          internalNotes: withNote(quote.internalNotes, note),
+        },
+      })
+      await runQuoteStatusChange(tx, { companyId, quoteId: id, from: quote.status, to: "SENT", actorId: ctx.userId, plan: prepared.plan })
+      return sent
     })
-    return tx.quote.update({
-      where: quoteWhere(ctx, id),
-      data: {
-        status: "SENT",
-        sentAt: new Date(),
-        isActive: true,
-        pendingEmailPayload: Prisma.JsonNull,
-        internalNotes: withNote(quote.internalNotes, note),
-      },
-    })
-  })
+  } catch (err) {
+    // The email already went out, so say so instead of a plain failure
+    userFacingError(err, "Marking an emailed quote sent")
+    return apiError(500, "The email was sent, but the quote couldn't be marked sent. Mark it as sent from the status menu.")
+  }
 
   return NextResponse.json(withoutPortalTokens(updated))
 }

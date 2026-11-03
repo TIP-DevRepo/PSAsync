@@ -187,6 +187,8 @@ export function Timeline({
 
   function openComposer(button: ActionButtonDefinition) {
     if (!canAddNotes || unavailableReason?.(button)) return
+    // Raise Quote opens a form of its own, which the page handles
+    if (button.opens.kind === "quote") return
     if (button.opens.kind === "email" && !email) return
     const stageId = presetStageId(button, stages ?? [])
     setComposer((prev) => ({ button, html: prev?.html ?? "", stageId }))

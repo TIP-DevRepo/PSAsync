@@ -46,8 +46,8 @@ export const ACTION_KIND_LABELS: Record<ActionButtonKindName, string> = {
 // The kinds whose feature exists, the one list that decides which buttons
 // show on records. The others can be configured in Settings now and stay
 // hidden on records until a later branch builds the feature and adds the
-// kind here (Raise Quote is next).
-export const AVAILABLE_ACTION_KINDS: readonly ActionButtonKindName[] = ["NOTE", "EMAIL"]
+// kind here. Raise Quote opens the New Quote form for the record.
+export const AVAILABLE_ACTION_KINDS: readonly ActionButtonKindName[] = ["NOTE", "EMAIL", "RAISE_QUOTE"]
 
 export function isAvailableActionKind(kind: string): boolean {
   return (AVAILABLE_ACTION_KINDS as readonly string[]).includes(kind)
@@ -70,9 +70,11 @@ export interface ActionButtonDefinition {
   color: string
   // What the button opens: the note or email composer, with its stage rule
   // (none, the user chooses, or one fixed stage, by id or by the first stage
-  // of a category in the company's order) and whether text is required
+  // of a category in the company's order) and whether text is required, or
+  // (quote) the New Quote form filled in from the record, which has no
+  // stage or text of its own
   opens: {
-    kind: "note" | "email"
+    kind: "note" | "email" | "quote"
     stageMode: ActionStageModeName
     stage?: { id?: string; category?: "OPEN" | "WON" | "LOST" }
     noteRequired: boolean
@@ -91,6 +93,15 @@ export function toActionButtonDefinition(row: {
   fixedStageId: string | null
   noteMode: string
 }): ActionButtonDefinition | null {
+  if (row.kind === "RAISE_QUOTE") {
+    return {
+      id: row.id,
+      label: row.label,
+      icon: isActionButtonIcon(row.icon) ? row.icon : "quote",
+      color: isHexColor(row.color) ? row.color : DEFAULT_BUTTON_COLOR,
+      opens: { kind: "quote", stageMode: "NONE", noteRequired: false },
+    }
+  }
   if (row.kind !== "NOTE" && row.kind !== "EMAIL") return null
   const stageMode: ActionStageModeName = row.stageMode === "CHOOSE" || row.stageMode === "FIXED" ? row.stageMode : "NONE"
   return {

@@ -1,8 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { withoutCustomerToken, withoutPortalTokens } from "@/lib/portal-token"
-import { canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
-import { loadViewableQuote, quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
+import { apiError, canSeeCost, notFound, omitCost, requireAccess } from "@/lib/api-access"
+import { assertRefs, loadViewableQuote, quoteWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
+import { readOptionalId } from "@/lib/opportunity-rules"
+import { linkStillMatches, quoteLabel } from "@/lib/opportunity-quote-rules"
+import { recordRecordLink, setQuoteFamilyOpportunity } from "@/lib/opportunity-quotes"
 import { isTermsFrozen, loadCompanyDefaultTerms, quoteTermsView, requestTouchesTerms, termsPatchData } from "@/lib/quote-terms"
 
 export async function GET(
@@ -98,7 +101,32 @@ export async function PATCH(
   if (body.paymentTerms !== undefined) data.paymentTerms = body.paymentTerms || null
   if (body.expiresAt !== undefined) data.expiresAt = body.expiresAt ? new Date(body.expiresAt) : null
 
-  const updated = await prisma.quote.update({ where: quoteWhere(ctx, id), data })
+  // The opportunity the quote family belongs to (null or blank unlinks):
+  // an OPEN one of the quote's client and contact that the user may open.
+  // A client or contact change that no longer matches the linked
+  // opportunity clears the link.
+  const clientId = (data.clientId as string | undefined) ?? existing.clientId
+  const contactId = "contactId" in data ? (data.contactId as string | null) : existing.contactId
+  let opportunityId = existing.opportunityId
+  if (body.opportunityId !== undefined) {
+    const chosen = readOptionalId(body.opportunityId)
+    if (chosen.error !== undefined) return apiError(400, "Invalid opportunity", "INVALID_REFERENCE")
+    if (chosen.value && chosen.value !== existing.opportunityId) {
+      const invalid = await assertRefs(ctx, { clientId, contactId, quoteOpportunityId: chosen.value })
+      if (invalid) return invalid
+    }
+    opportunityId = chosen.value
+  }
+  if (opportunityId && opportunityId === existing.opportunityId && (clientId !== existing.clientId || contactId !== existing.contactId)) {
+    const linked = await prisma.opportunity.findFirst({ where: { id: opportunityId, companyId }, select: { clientId: true, contactId: true } })
+    if (!linked || !linkStillMatches(linked, { clientId, contactId })) opportunityId = null
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const saved = await tx.quote.update({ where: quoteWhere(ctx, id), data })
+    await setQuoteFamilyOpportunity(tx, { companyId, actorId: ctx.userId, quoteNumber: existing.quoteNumber, from: existing.opportunityId, to: opportunityId })
+    return { ...saved, opportunityId }
+  })
 
   return NextResponse.json(withoutPortalTokens(updated))
 }
@@ -126,7 +154,23 @@ export async function DELETE(
     )
   }
 
-  await prisma.quote.delete({ where: quoteWhere(ctx, id) })
+  // A linked quote's opportunity records that it is no longer linked, in
+  // the same transaction as the delete
+  const linked = await prisma.quote.findFirst({ where: quoteWhere(ctx, id), select: { opportunityId: true, quoteNumber: true, version: true } })
+  await prisma.$transaction(async (tx) => {
+    await tx.quote.delete({ where: quoteWhere(ctx, id) })
+    if (linked?.opportunityId) {
+      await recordRecordLink(tx, {
+        companyId: ctx.companyId,
+        actorId: ctx.userId,
+        opportunityId: linked.opportunityId,
+        kind: "quote",
+        change: "unlinked",
+        record: { id, name: quoteLabel(linked) },
+        deleted: true,
+      })
+    }
+  })
 
   return NextResponse.json({ deleted: true })
 }

@@ -4,6 +4,8 @@ import { apiError, requireAccess } from "@/lib/api-access"
 import { userFacingError } from "@/lib/user-error"
 import { isNumberCollision, NUMBER_TAKEN_MESSAGE, takeRecordNumber } from "@/lib/record-number"
 import { assertRefs, salesOrderListWhere } from "@/lib/scoped-loaders"
+import { readOptionalId } from "@/lib/opportunity-rules"
+import { recordRecordLink } from "@/lib/opportunity-quotes"
 
 export async function GET() {
   const { ctx, response } = await requireAccess({
@@ -57,7 +59,13 @@ export async function POST(req: NextRequest) {
   if (!body.clientId) {
     return NextResponse.json({ error: "A client is required" }, { status: 400 })
   }
-  const invalid = await assertRefs(ctx, { clientId: body.clientId })
+  // An optional opportunity (from the opportunity's Related tab or the
+  // Won prompt, or the form's picker): one of this client the user may
+  // open, in any stage
+  const linkRef = readOptionalId(body.opportunityId)
+  if (linkRef.error !== undefined) return apiError(400, "Invalid opportunity", "INVALID_REFERENCE")
+  const opportunityId = linkRef.value
+  const invalid = await assertRefs(ctx, { clientId: body.clientId, orderOpportunityId: opportunityId })
   if (invalid) return invalid
 
   const companyId = ctx.companyId
@@ -71,7 +79,7 @@ export async function POST(req: NextRequest) {
   try {
     salesOrder = await prisma.$transaction(async (tx) => {
       const soNumber = await takeRecordNumber(tx, companyId, "salesOrder", prefix)
-      return tx.salesOrder.create({
+      const created = await tx.salesOrder.create({
         data: {
           companyId,
           clientId: body.clientId,
@@ -95,8 +103,20 @@ export async function POST(req: NextRequest) {
           shipState: body.shipState || null,
           shipZip: body.shipZip || null,
           shipCountry: body.shipCountry || null,
+          opportunityId,
         },
       })
+      if (opportunityId) {
+        await recordRecordLink(tx, {
+          companyId,
+          actorId: ctx.userId,
+          opportunityId,
+          kind: "salesOrder",
+          change: "linked",
+          record: { id: created.id, name: created.soNumber },
+        })
+      }
+      return created
     })
   } catch (err) {
     if (isNumberCollision(err)) return apiError(409, NUMBER_TAKEN_MESSAGE, "NUMBER_TAKEN")

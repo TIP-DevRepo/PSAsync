@@ -15,14 +15,19 @@ import {
   type OpportunityRow,
   type StageOption,
 } from "@/lib/opportunity-view"
+import { opportunityDisplayValue } from "@/lib/opportunity-value"
 import { StagePill } from "./StagePill"
 
 type SortColumn = "number" | "title" | "client" | "contact" | "team" | "owner" | "stage" | "type" | "value" | "expectedClose" | "updated"
 type SortDirection = "asc" | "desc" | null
 
 // The text each column shows, which its column filter also matches
-// ("Unassigned" for no owner, dates and values as displayed)
-const valueText = (o: OpportunityRow) => (o.expectedValue === null ? "-" : formatCents(valueCents(o.expectedValue)))
+// ("Unassigned" for no owner, dates and values as displayed). The value is
+// the latest linked quote's total, else the expected value.
+const valueText = (o: OpportunityRow) => {
+  const shown = opportunityDisplayValue(o)
+  return shown === null ? "-" : formatCents(valueCents(shown))
+}
 
 // Fixed widths: below their total the table scrolls sideways, and long
 // text truncates with the full value in a tooltip. Never squeezed. The key
@@ -68,7 +73,7 @@ function compare(a: OpportunityRow, b: OpportunityRow, column: SortColumn, stage
     case "type":
       return (a.type?.name ?? "").localeCompare(b.type?.name ?? "")
     case "value":
-      return valueCents(a.expectedValue) - valueCents(b.expectedValue)
+      return valueCents(opportunityDisplayValue(a)) - valueCents(opportunityDisplayValue(b))
     case "expectedClose":
       return time(a.expectedCloseDate) - time(b.expectedCloseDate)
     case "updated":

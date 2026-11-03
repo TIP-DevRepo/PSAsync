@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from "next/server"
 import { Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { withoutPortalTokensOrNull, withoutPortalTokens } from "@/lib/portal-token"
-import { notFound, requireAccess } from "@/lib/api-access"
+import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
 import { approvalFingerprint, loadMatchingWorkflows } from "@/lib/approval-workflows"
+import { prepareQuoteStatusChange, runQuoteStatusChange } from "@/lib/opportunity-quotes"
 
 export async function POST(
   req: NextRequest,
@@ -63,8 +64,13 @@ export async function POST(
     return NextResponse.json(withoutPortalTokensOrNull(updated))
   }
 
-  // No approval needed, send immediately. A quote using the company
-  // default terms keeps the default as it is now, frozen in this write.
+  // No approval needed, send immediately. A quote without an opportunity
+  // gets one in the same transaction (planned first, so a quote that can't
+  // have one is refused before anything changes). A quote using the
+  // company default terms keeps the default as it is now, frozen in this
+  // write.
+  const prepared = await prepareQuoteStatusChange(companyId, quote, "SENT")
+  if (prepared.error !== undefined) return apiError(400, prepared.error)
   const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
   const updated = await prisma.$transaction(async (tx) => {
     await applyTermsFreeze(tx, id, freeze)
@@ -75,10 +81,12 @@ export async function POST(
       data: { isActive: false },
     })
 
-    return tx.quote.update({
+    const sent = await tx.quote.update({
       where: { id },
       data: { status: "SENT", sentAt: new Date(), isActive: true, pendingEmailPayload: Prisma.JsonNull },
     })
+    await runQuoteStatusChange(tx, { companyId, quoteId: id, from: quote.status, to: "SENT", actorId: ctx.userId, plan: prepared.plan })
+    return sent
   })
 
   return NextResponse.json(withoutPortalTokens(updated))

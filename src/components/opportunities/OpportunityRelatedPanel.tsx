@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { useAccess } from "@/components/AccessProvider"
+import { buttonVariants } from "@/components/ui/button"
 import type { OpportunityRelated, RelatedRecord } from "@/lib/opportunity-related"
+import { newPurchaseOrderHref, newSalesOrderHref } from "@/lib/opportunity-quote-rules"
 
 // Quote statuses read the way the quotes list shows them
 const QUOTE_STATUS_LABELS: Record<string, string> = { ACCEPTED: "Approved", DECLINED: "Lost" }
@@ -48,16 +51,50 @@ export function relatedCount(related: OpportunityRelated | null): number {
 }
 
 // Linked quotes, sales orders, and purchase orders, only the ones this user
-// may open. linkedCount is every link, visible or not, from the opportunity
-// itself.
-export function OpportunityRelatedPanel({ related, failed, linkedCount }: { related: OpportunityRelated | null; failed: boolean; linkedCount: number }) {
+// may open, each section with its count. linkedCount is every link, visible
+// or not, from the opportunity itself. New sales order and New purchase
+// order open their create forms filled in with the opportunity's client and
+// the link, for users who may create them (deleted is set on a deleted
+// opportunity, which can't take new links).
+export function OpportunityRelatedPanel({
+  related,
+  failed,
+  linkedCount,
+  opportunityId,
+  deleted = false,
+}: {
+  related: OpportunityRelated | null
+  failed: boolean
+  linkedCount: number
+  opportunityId: string
+  deleted?: boolean
+}) {
   const shown = relatedCount(related)
+  const { can } = useAccess()
+  const canNewSalesOrder = !deleted && can("pages.salesOrders") && can("salesOrders.create")
+  const canNewPurchaseOrder = !deleted && can("pages.purchaseOrders") && can("purchaseOrders.create")
 
   return (
     <section aria-labelledby="opportunity-related-heading" className="space-y-3 rounded-lg border border-border bg-card p-4 shadow-card">
-      <h2 id="opportunity-related-heading" className="text-sm font-semibold text-foreground">
-        Related
-      </h2>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="opportunity-related-heading" className="text-sm font-semibold text-foreground">
+          Related
+        </h2>
+        {(canNewSalesOrder || canNewPurchaseOrder) && (
+          <div className="flex flex-wrap gap-2">
+            {canNewSalesOrder && (
+              <Link href={newSalesOrderHref(opportunityId)} className={buttonVariants({ size: "sm", variant: "outline" })}>
+                New sales order
+              </Link>
+            )}
+            {canNewPurchaseOrder && (
+              <Link href={newPurchaseOrderHref(opportunityId)} className={buttonVariants({ size: "sm", variant: "outline" })}>
+                New purchase order
+              </Link>
+            )}
+          </div>
+        )}
+      </div>
       {failed ? (
         <p className="text-sm text-muted-foreground">Couldn&apos;t load related records.</p>
       ) : !related ? (
@@ -73,7 +110,9 @@ export function OpportunityRelatedPanel({ related, failed, linkedCount }: { rela
           {SECTIONS.map((section) =>
             related[section.key].length === 0 ? null : (
               <div key={section.key} className="space-y-1.5">
-                <h3 className="text-caption font-medium uppercase tracking-wide text-muted-foreground">{section.label}</h3>
+                <h3 className="text-caption font-medium uppercase tracking-wide text-muted-foreground">
+                  {section.label} ({related[section.key].length})
+                </h3>
                 <ul className="space-y-1.5">
                   {related[section.key].map((record: RelatedRecord) => (
                     <li key={record.id} className="rounded-md border border-border p-2.5 text-sm">

@@ -1,7 +1,9 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, canSeeCost, notFound, omitUnitCost, requireAccess } from "@/lib/api-access"
-import { purchaseOrderWhere, viewablePurchaseOrderWhere } from "@/lib/scoped-loaders"
+import { assertRefs, purchaseOrderWhere, viewablePurchaseOrderWhere } from "@/lib/scoped-loaders"
+import { readOptionalId } from "@/lib/opportunity-rules"
+import { recordRecordLink } from "@/lib/opportunity-quotes"
 import { deleteStoredObjects } from "@/lib/uploads"
 
 const VALID_STATUSES = ["DRAFT", "PARTS_ORDERED", "RECEIVED", "ON_HOLD", "BACKORDERED", "CANCELLED"]
@@ -23,8 +25,9 @@ const EDIT_GATED_FIELDS = [
   "shipClientLocationId",
 ]
 
-// Every field other than status needs purchaseOrders.edit
-const EDIT_FIELDS = [...EDIT_GATED_FIELDS, "internalNotes", "expectedAt", "shipToClient"]
+// Every field other than status needs purchaseOrders.edit, the opportunity
+// link included
+const EDIT_FIELDS = [...EDIT_GATED_FIELDS, "internalNotes", "expectedAt", "shipToClient", "opportunityId"]
 
 export async function GET(
   req: NextRequest,
@@ -153,7 +156,30 @@ export async function PATCH(
     }
   }
 
-  const updated = await prisma.purchaseOrder.update({ where: purchaseOrderWhere(ctx, existing.id), data })
+  // The opportunity (null or blank unlinks): one the user may open, in any
+  // stage, of the ship to client when there is one. The old and new
+  // opportunities record the change in the same transaction.
+  let opportunityId = existing.opportunityId
+  if (body.opportunityId !== undefined) {
+    const linkRef = readOptionalId(body.opportunityId)
+    if (linkRef.error !== undefined) return apiError(400, "Invalid opportunity", "INVALID_REFERENCE")
+    if (linkRef.value && linkRef.value !== existing.opportunityId) {
+      const invalid = await assertRefs(ctx, { clientId: existing.shipToClientId, orderOpportunityId: linkRef.value })
+      if (invalid) return invalid
+    }
+    opportunityId = linkRef.value
+    data.opportunityId = opportunityId
+  }
+
+  const updated = await prisma.$transaction(async (tx) => {
+    const saved = await tx.purchaseOrder.update({ where: purchaseOrderWhere(ctx, existing.id), data })
+    if (opportunityId !== existing.opportunityId) {
+      const link = { companyId: ctx.companyId, actorId: ctx.userId, kind: "purchaseOrder" as const, record: { id: existing.id, name: existing.poNumber } }
+      if (existing.opportunityId) await recordRecordLink(tx, { ...link, opportunityId: existing.opportunityId, change: "unlinked" })
+      if (opportunityId) await recordRecordLink(tx, { ...link, opportunityId, change: "linked" })
+    }
+    return saved
+  })
 
   return NextResponse.json(updated)
 }
@@ -191,7 +217,22 @@ export async function DELETE(
   // collected first and removed (best effort) once the delete succeeds
   const attachments = await prisma.pOAttachment.findMany({ where: { purchaseOrderId: po.id }, select: { fileUrl: true } })
 
-  await prisma.purchaseOrder.delete({ where: purchaseOrderWhere(ctx, po.id) })
+  // A linked order's opportunity records that it is no longer linked, in
+  // the same transaction as the delete
+  await prisma.$transaction(async (tx) => {
+    await tx.purchaseOrder.delete({ where: purchaseOrderWhere(ctx, po.id) })
+    if (po.opportunityId) {
+      await recordRecordLink(tx, {
+        companyId: ctx.companyId,
+        actorId: ctx.userId,
+        opportunityId: po.opportunityId,
+        kind: "purchaseOrder",
+        change: "unlinked",
+        record: { id: po.id, name: po.poNumber },
+        deleted: true,
+      })
+    }
+  })
 
   await deleteStoredObjects(attachments.map((a) => a.fileUrl), `purchase-orders/${po.id}/`)
 

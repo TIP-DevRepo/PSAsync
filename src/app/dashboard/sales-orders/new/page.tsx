@@ -2,6 +2,8 @@
 
 import { useState, useEffect } from "react"
 import { useRouter } from "next/navigation"
+import { OpportunityPicker } from "@/components/opportunities/OpportunityPicker"
+import { readOpportunityParam } from "@/lib/opportunity-quote-rules"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { ClientLocationPicker, type ClientLocationAddress } from "@/components/ClientLocationPicker"
@@ -53,6 +55,7 @@ function NewSalesOrderForm() {
   const [error, setError] = useState("")
   const [billLocationId, setBillLocationId] = useState("")
   const [shipLocationId, setShipLocationId] = useState("")
+  const [opportunityId, setOpportunityId] = useState<string | null>(null)
 
   const [form, setForm] = useState({
     clientId: "",
@@ -81,6 +84,22 @@ function NewSalesOrderForm() {
       .then((data) => Array.isArray(data) && setClients(data))
   }, [])
 
+  // Opened from an opportunity (its Related tab, or the Won prompt) with
+  // ?opportunity=<id>: the form starts on its client with it linked
+  useEffect(() => {
+    const fromOpportunityId = readOpportunityParam(new URLSearchParams(window.location.search).get("opportunity"))
+    if (!fromOpportunityId) return
+    fetch(`/api/opportunities/${fromOpportunityId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then(async (o: { id: string; client: { id: string } } | null) => {
+        if (!o) return
+        await handleClientSelect(o.client.id)
+        setOpportunityId(o.id)
+      })
+      .catch(() => undefined)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   function update(field: string, value: string) {
     setForm((prev) => ({ ...prev, [field]: value }))
   }
@@ -90,6 +109,8 @@ function NewSalesOrderForm() {
   // from here on and is stored as a snapshot on the SO, not a live link.
   async function handleClientSelect(clientId: string) {
     update("clientId", clientId)
+    // An opportunity belongs to one client
+    setOpportunityId(null)
     setBillLocationId("")
     setShipLocationId("")
     if (!clientId) return
@@ -170,7 +191,7 @@ function NewSalesOrderForm() {
     const res = await fetch("/api/sales-orders", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(form),
+      body: JSON.stringify({ ...form, opportunityId }),
     })
 
     if (!res.ok) {
@@ -235,6 +256,8 @@ function NewSalesOrderForm() {
             </select>
           </div>
         </div>
+
+        <OpportunityPicker record="order" clientId={form.clientId || null} value={opportunityId} onChange={setOpportunityId} />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

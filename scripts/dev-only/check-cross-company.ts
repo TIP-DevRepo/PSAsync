@@ -17,7 +17,13 @@
 // lists (the sidebar counts and GET /api/teams must hold the caller's own
 // teams and nothing of the other company's), the action button lists
 // (likewise, own buttons only), the audit log lists (own entries only),
-// then the deactivated user check. Any FAIL or UNEXPECTED exits non zero.
+// the Opportunity panels on a quote, sales order, and purchase order and
+// the opportunity's Related tab (own records only, with the sample records
+// linked to the own opportunity for the check and put back after), then the
+// deactivated user check. The opportunity link attempts send the other
+// company's opportunity on quote, copy, sales order, and purchase order
+// creates and updates (400), and ask for the other company's panels (404)
+// and picker list (400). Any FAIL or UNEXPECTED exits non zero.
 //
 // The Email action is only called on the other company's opportunity (a
 // 404 before anything is read) or with the other company's attachment or
@@ -274,6 +280,20 @@ const ATTEMPTS: Attempt[] = [
   { name: "Own audit log paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/audit-log?cursor=${c.other.auditEntryId}`, expect: 400, expectError: "Invalid cursor" },
   { name: "Own opportunity audit log paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.own.opportunityId}/audit?cursor=${c.other.auditEntryId}`, expect: 400, expectError: "Invalid cursor" },
   { name: "Email from own opportunity with other company's actionButtonId", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/email`, body: (c) => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>", actionButtonId: c.other.actionButtonId }), expect: 400, expectError: "Invalid action button" },
+
+  // ── Quotes, sales orders, and purchase orders linked to opportunities ──
+  { name: "New quote with other company's opportunity", directions: "both", method: "POST", path: () => "/api/quotes", body: (c) => ({ clientId: c.own.clientId, contactId: c.own.contactId, opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "Link own quote to other company's opportunity", directions: "both", method: "PATCH", path: (c) => `/api/quotes/${c.own.quoteId}`, body: (c) => ({ opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "Copy own quote with other company's opportunity", directions: "both", method: "POST", path: (c) => `/api/quotes/${c.own.quoteId}/copy`, body: (c) => ({ clientId: c.own.clientId, contactId: c.own.contactId, opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "New sales order with other company's opportunity", directions: "both", method: "POST", path: () => "/api/sales-orders", body: (c) => ({ clientId: c.own.clientId, opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "Link own sales order to other company's opportunity", directions: "both", method: "PATCH", path: (c) => `/api/sales-orders/${c.own.salesOrderId}`, body: (c) => ({ opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "New purchase order with other company's opportunity", directions: "both", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.own.vendorId, opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "Link own purchase order to other company's opportunity", directions: "both", method: "PATCH", path: (c) => `/api/purchase-orders/${c.own.purchaseOrderId}`, body: (c) => ({ opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "GET other company's quote's Opportunity panel", directions: "both", method: "GET", path: (c) => `/api/quotes/${c.other.quoteId}/opportunity`, expect: 404 },
+  { name: "Create an opportunity for other company's quote", directions: "both", method: "POST", path: (c) => `/api/quotes/${c.other.quoteId}/opportunity`, expect: 404 },
+  { name: "GET other company's sales order's Opportunity panel", directions: "both", method: "GET", path: (c) => `/api/sales-orders/${c.other.salesOrderId}/opportunity`, expect: 404 },
+  { name: "GET other company's purchase order's Opportunity panel", directions: "both", method: "GET", path: (c) => `/api/purchase-orders/${c.other.purchaseOrderId}/opportunity`, expect: 404 },
+  { name: "Linkable opportunities for other company's client", directions: "both", method: "GET", path: (c) => `/api/opportunities/linkable?for=quote&clientId=${c.other.clientId}&contactId=${c.other.contactId}`, expect: 400, expectError: "Invalid client" },
 
   // ── Teams ──
   { name: "PATCH other company's team", directions: "both", method: "PATCH", path: (c) => `/api/teams/${c.other.salesTeamId}`, body: () => ({ name: "Changed" }), expect: 404 },
@@ -714,6 +734,48 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
               ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
               : null
       rows.push({ attempt: `${ownLetter} ${path} holds only its own entries`, expected: "200, own entries only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+    }
+  }
+
+  // The Opportunity panels and the Related tab: each admin's sample quote,
+  // sales order, and purchase order are linked to its own opportunity for
+  // the check (and put back after), and the panels and the Related tab must
+  // hold its own records and nothing of the other company's
+  for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+    const own = ids[ownLetter]
+    const other = ids[otherLetter]
+    const saved = await Promise.all([
+      prisma.quote.findUniqueOrThrow({ where: { id: own.quoteId }, select: { opportunityId: true } }),
+      prisma.salesOrder.findUniqueOrThrow({ where: { id: own.salesOrderId }, select: { opportunityId: true } }),
+      prisma.purchaseOrder.findUniqueOrThrow({ where: { id: own.purchaseOrderId }, select: { opportunityId: true } }),
+    ])
+    try {
+      await prisma.quote.update({ where: { id: own.quoteId }, data: { opportunityId: own.opportunityId } })
+      await prisma.salesOrder.update({ where: { id: own.salesOrderId }, data: { opportunityId: own.opportunityId } })
+      await prisma.purchaseOrder.update({ where: { id: own.purchaseOrderId }, data: { opportunityId: own.opportunityId } })
+      const paths = [
+        `/api/quotes/${own.quoteId}/opportunity`,
+        `/api/sales-orders/${own.salesOrderId}/opportunity`,
+        `/api/purchase-orders/${own.purchaseOrderId}/opportunity`,
+        `/api/opportunities/${own.opportunityId}/related`,
+      ]
+      for (const path of paths) {
+        const res = await admins[ownLetter].request("GET", path)
+        const leaked = [other.opportunityId, other.quoteId, other.salesOrderId, other.purchaseOrderId, ...markersFor(other, names[otherLetter])].filter((m) => res.text.includes(m))
+        const problem =
+          res.status !== 200
+            ? `got ${res.status}: ${errorText(res.text)}`
+            : !res.text.includes(own.quoteId) || !res.text.includes(own.salesOrderId)
+              ? "its own linked records are missing"
+              : leaked.length > 0
+                ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
+                : null
+        rows.push({ attempt: `${ownLetter} ${path.replace(/[A-Za-z0-9_-]{20,}/g, "[id]")} holds only its own records`, expected: "200, own records only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+      }
+    } finally {
+      await prisma.quote.update({ where: { id: own.quoteId }, data: { opportunityId: saved[0].opportunityId } })
+      await prisma.salesOrder.update({ where: { id: own.salesOrderId }, data: { opportunityId: saved[1].opportunityId } })
+      await prisma.purchaseOrder.update({ where: { id: own.purchaseOrderId }, data: { opportunityId: saved[2].opportunityId } })
     }
   }
 

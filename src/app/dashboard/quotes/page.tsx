@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect, useRef, useLayoutEffect } from "react"
+import { useState, useEffect, useRef, useLayoutEffect, Suspense } from "react"
 import { useFixedMenuPosition, useCloseOnOutsideClick, useCloseOnScroll } from "@/lib/useFixedMenu"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy, Workflow, FileText, ExternalLink, Link2, History, Trash2, ArrowUp, ArrowDown, ArrowUpDown } from "lucide-react"
 import { Modal } from "@/components/Modal"
@@ -16,6 +16,7 @@ import { TabsBar } from "@/components/ui/tabs-bar"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
 import { sortUsersByName } from "@/lib/user-picker"
+import { newQuoteHref, readOpportunityParam } from "@/lib/opportunity-quote-rules"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Quote {
@@ -248,6 +249,11 @@ function QuotesPageContent() {
 
       {showTemplatePicker && (
         <TemplatePickerModal onClose={() => setShowTemplatePicker(false)} />
+      )}
+      {can("quotes.create") && (
+        <Suspense fallback={null}>
+          <RaiseQuotePicker />
+        </Suspense>
       )}
     </div>
   )
@@ -1344,7 +1350,17 @@ function TemplatesTab() {
 }
 
 // ─── New Quote Template Picker Modal ──────────────────────────────────────
-function TemplatePickerModal({ onClose }: { onClose: () => void }) {
+// The Raise Quote action on an opportunity opens this page with
+// ?raiseFor=<opportunity id>: the template picker shows at once and the New
+// Quote form starts on that opportunity. Closing it drops the parameter.
+function RaiseQuotePicker() {
+  const router = useRouter()
+  const opportunityId = readOpportunityParam(useSearchParams().get("raiseFor"))
+  if (!opportunityId) return null
+  return <TemplatePickerModal opportunityId={opportunityId} onClose={() => router.replace("/dashboard/quotes")} />
+}
+
+function TemplatePickerModal({ onClose, opportunityId = null }: { onClose: () => void; opportunityId?: string | null }) {
   const [templates, setTemplates] = useState<Template[]>([])
   const [loading, setLoading] = useState(true)
 
@@ -1373,7 +1389,7 @@ function TemplatePickerModal({ onClose }: { onClose: () => void }) {
           {templates.map((t) => (
             <Link
               key={t.id}
-              href={`/dashboard/quotes/new?template=${t.id}`}
+              href={newQuoteHref(t.id, opportunityId)}
               className="block rounded-md border border-border p-3 text-sm hover:bg-surface-hover"
             >
               <p className="font-medium text-foreground">{t.name}</p>

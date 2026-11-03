@@ -1,6 +1,7 @@
 import { prisma } from "@/lib/prisma"
 import type { QuoteLineItem } from "@/generated/prisma"
 import { isNumberCollision, takeRecordNumber } from "@/lib/record-number"
+import { recordRecordLink } from "@/lib/opportunity-quotes"
 
 type QuoteLineItemWithCatalog = QuoteLineItem & {
   catalogItem: { vendorId: string | null; vendorSku: string | null; manufacturerSku: string | null } | null
@@ -19,8 +20,11 @@ function resolveOrderedLineItems(lineItems: QuoteLineItemWithCatalog[]) {
 // has a unique constraint on quoteId, and this can be triggered from two
 // places (client accepting on the portal, or a rep manually changing
 // status), so it always checks for an existing SO first rather than risking
-// a duplicate-key error or a second SO being created.
-export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
+// a duplicate-key error or a second SO being created. The order carries the
+// quote's opportunity, and the opportunity records the new link in the
+// same transaction (by actorId, the rep who changed the status, or the
+// system for the customer portal).
+export async function createSalesOrderFromAcceptedQuote(quoteId: string, actorId: string | null = null) {
   const existing = await prisma.salesOrder.findUnique({ where: { quoteId } })
   if (existing) return existing
 
@@ -33,9 +37,12 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
       },
       client: { include: { mainShippingLocation: true } },
       company: { include: { settings: true } },
+      // Only an opportunity that isn't deleted is carried
+      opportunity: { select: { id: true, deletedAt: true } },
     },
   })
   if (!quote) return null
+  const opportunityId = quote.opportunity && !quote.opportunity.deletedAt ? quote.opportunity.id : null
 
   const orderedItems = resolveOrderedLineItems(quote.lineItems)
 
@@ -48,7 +55,7 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
   try {
     salesOrder = await prisma.$transaction(async (tx) => {
       const soNumber = await takeRecordNumber(tx, quote.companyId, "salesOrder", prefix)
-      return tx.salesOrder.create({
+      const created = await tx.salesOrder.create({
         data: {
           companyId: quote.companyId,
           quoteId: quote.id,
@@ -63,6 +70,7 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
           shipState: quote.client.mainShippingLocation?.state ?? null,
           shipZip: quote.client.mainShippingLocation?.zip ?? null,
           shipCountry: null,
+          opportunityId,
           lineItems: {
             create: orderedItems.map((li) => ({
               catalogItemId: li.catalogItemId,
@@ -93,6 +101,17 @@ export async function createSalesOrderFromAcceptedQuote(quoteId: string) {
           },
         },
       })
+      if (opportunityId) {
+        await recordRecordLink(tx, {
+          companyId: quote.companyId,
+          actorId,
+          opportunityId,
+          kind: "salesOrder",
+          change: "linked",
+          record: { id: created.id, name: created.soNumber },
+        })
+      }
+      return created
     })
   } catch (err) {
     if (!isNumberCollision(err)) throw err
