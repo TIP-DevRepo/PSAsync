@@ -1,25 +1,40 @@
 // DEV ONLY. Proves multi company isolation against the locally running dev
-// server: signs in as Test Admin B and Test Admin C (made by
-// create-test-companies.ts) and tries to read and change the OTHER
+// server: signs in as Test Admin B and Test Admin C (temporary users this
+// run makes, lib/run-data.ts) and tries to read and change the OTHER
 // company's records, expecting every attempt to be refused.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and only
 // talks to a server on this machine. Run from the repo root, with the dev
-// server running and both passwords set in the shell (never in a file):
-//   TEST_ADMIN_B_PASSWORD=... TEST_ADMIN_C_PASSWORD=... npx tsx scripts/dev-only/check-cross-company.ts --yes
+// server running:
+//   npx tsx scripts/dev-only/check-cross-company.ts --yes
 // Optional: --base-url http://localhost:3000 (the default)
+// On its own it sets up and removes its own temporary data; run-checks.ts
+// runs it with the data it shares between all three checks.
 //
 // Order of work: guard, sign in, positive controls on each user's OWN
 // records (if any fails the harness itself is broken and nothing else
-// runs), then every attempt below in both directions, then the
-// deactivated user check. Any FAIL or UNEXPECTED exits non zero.
+// runs), then every attempt below in both directions, then the team
+// lists (the sidebar counts and GET /api/teams must hold the caller's own
+// teams and nothing of the other company's), the action button lists
+// (likewise, own buttons only), the audit log lists (own entries only),
+// the Opportunity panels on a quote, sales order, and purchase order and
+// the opportunity's Related tab (own records only, with the sample records
+// linked to the own opportunity for the check and put back after), then the
+// deactivated user check. The opportunity link attempts send the other
+// company's opportunity on quote, copy, sales order, and purchase order
+// creates and updates (400), and ask for the other company's panels (404)
+// and picker list (400). Any FAIL or UNEXPECTED exits non zero.
+//
+// The Email action is only called on the other company's opportunity (a
+// 404 before anything is read) or with the other company's attachment or
+// button (a 400 before anything is sent). The test companies have no
+// Microsoft credentials either, so nothing could go out.
 
-import bcrypt from "bcryptjs"
 import type { PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
-import { BCRYPT_COST, generatePassword, loadSampleIds, testNames, type SampleIds, type TestLetter } from "./lib/test-data"
-// Only imports Prisma types, so loading it can't reach the database
-import { setUserRoles } from "@/lib/user-roles"
+import type { SampleIds, TestLetter, TestNames } from "./lib/test-data"
+import { HarnessBroken as SharedHarnessBroken, ServerUnreachable, checkResult, fetchOrExplain, pathForMessage, type CheckResult } from "./lib/harness"
+import { addRunRole, addRunUser, isEntryScript, withRunData, type RunData } from "./lib/run-data"
 
 // Must stay first: nothing below may run before the guard has passed
 enforceDevGuard("check-cross-company")
@@ -32,8 +47,11 @@ enforceDevGuard("check-cross-company")
 //                   other company. "both" attempts run twice, as B against C
 //                   and as C against B. "once" attempts run as B only.
 //   expect          404 for an id in the URL from another company (or another
-//                   parent), 400 for a foreign id sent in the body, 403 only
-//                   where a refusal is the point (role escalation).
+//                   parent), 400 for a foreign id sent in the body or query,
+//                   403 only where a refusal is the point (role escalation),
+//                   409 for a stage, type, or team reorder list holding
+//                   another company's stage, type, or team (the list no
+//                   longer matches the caller's own).
 //   expectError     text the refusal must contain, so a 400 for some other
 //                   reason (a malformed test body) can't pass as a refusal.
 //   multipart       sends a form with no file, so an attachment upload that
@@ -43,12 +61,12 @@ enforceDevGuard("check-cross-company")
 interface AttemptContext {
   own: SampleIds
   other: SampleIds
-  ownNames: ReturnType<typeof testNames>
+  ownNames: TestNames
   // Only for B, from the role escalation fixture
   targetRoleId: string
 }
 
-type Method = "GET" | "POST" | "PATCH" | "DELETE"
+type Method = "GET" | "POST" | "PUT" | "PATCH" | "DELETE"
 
 interface Attempt {
   name: string
@@ -60,11 +78,15 @@ interface Attempt {
   multipart?: boolean
   // Uses only the caller's own company's records, labeled B->B or C->C
   sameCompany?: boolean
-  expect: 400 | 403 | 404
+  expect: 400 | 403 | 404 | 409
   expectError?: string
 }
 
 const FAR_FUTURE = "2030-01-01"
+
+// Creating an opportunity needs an initial note, so each create attempt
+// sends one and is still refused only for the id under test
+const OPP_NOTE = "<p>Dev check initial note</p>"
 
 const ATTEMPTS: Attempt[] = [
   // ── Nested records, other company's ids in the URL ──
@@ -195,6 +217,96 @@ const ATTEMPTS: Attempt[] = [
   { name: "SO/PO settings notify rule with foreign user", directions: "both", method: "PATCH", path: () => "/api/so-po-settings", body: (c) => ({ soStatusNotifyRules: { READY_TO_INVOICE: { type: "user", id: c.other.adminId } } }), expect: 400, expectError: "Invalid user" },
   { name: "SO/PO settings notify rule with foreign role", directions: "both", method: "PATCH", path: () => "/api/so-po-settings", body: (c) => ({ soStatusNotifyRules: { READY_TO_ORDER: { type: "role", id: c.other.globalAdminRoleId } } }), expect: 400, expectError: "Invalid role" },
 
+  // ── Opportunities, their attachments, stages, types, and settings ──
+  { name: "GET other company's opportunity", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}`, expect: 404 },
+  { name: "PATCH other company's opportunity", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.other.opportunityId}`, body: () => ({ title: "Changed" }), expect: 404 },
+  { name: "DELETE other company's opportunity", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.other.opportunityId}`, expect: 404 },
+  { name: "GET other opportunity's attachments", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}/attachments`, expect: 404 },
+  { name: "GET other opportunity's related records", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}/related`, expect: 404 },
+  { name: "GET other opportunity's timeline", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}/timeline`, expect: 404 },
+  { name: "POST note on other opportunity", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.other.opportunityId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expect: 404 },
+  { name: "PATCH other opportunity's note", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.other.opportunityId}/timeline/${c.other.timelineNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 404 },
+  { name: "DELETE other opportunity's note", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.other.opportunityId}/timeline/${c.other.timelineNoteId}`, expect: 404 },
+  { name: "PATCH other company's note under own opportunity", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline/${c.other.timelineNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 404 },
+  { name: "DELETE other company's note under own opportunity", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline/${c.other.timelineNoteId}`, expect: 404 },
+  { name: "DELETE other company's action under own opportunity", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline/${c.other.timelineActionId}`, expect: 404 },
+  { name: "Note on own opportunity with other company's stage", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", stageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Own timeline paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline?cursor=${c.other.timelineNoteId}`, expect: 400, expectError: "Invalid cursor" },
+  { name: "POST attachment to other opportunity", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.other.opportunityId}/attachments`, multipart: true, expect: 404 },
+  { name: "DELETE other opportunity's attachment", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.other.opportunityId}/attachments/${c.other.opportunityAttachmentId}`, expect: 404 },
+  { name: "DELETE other attachment under own opportunity", directions: "both", method: "DELETE", path: (c) => `/api/opportunities/${c.own.opportunityId}/attachments/${c.other.opportunityAttachmentId}`, expect: 404 },
+  { name: "PATCH other company's opportunity stage", directions: "both", method: "PATCH", path: (c) => `/api/opportunity-stages/${c.other.opportunityStageId}`, body: () => ({ name: "Changed" }), expect: 404 },
+  { name: "DELETE other company's opportunity stage", directions: "both", method: "DELETE", path: (c) => `/api/opportunity-stages/${c.other.opportunityStageId}`, expect: 404 },
+  { name: "PATCH other company's opportunity type", directions: "both", method: "PATCH", path: (c) => `/api/opportunity-types/${c.other.opportunityTypeId}`, body: () => ({ name: "Changed" }), expect: 404 },
+  { name: "DELETE other company's opportunity type", directions: "both", method: "DELETE", path: (c) => `/api/opportunity-types/${c.other.opportunityTypeId}`, expect: 404 },
+  // The reorder list must be exactly the caller's own stages, so another
+  // company's stage makes it the stale list answer
+  { name: "Reorder with other company's stage", directions: "both", method: "POST", path: () => "/api/opportunity-stages/reorder", body: (c) => ({ stageIds: [c.other.opportunityStageId] }), expect: 409, expectError: "The stage list changed" },
+  { name: "Reorder with other company's type", directions: "both", method: "POST", path: () => "/api/opportunity-types/reorder", body: (c) => ({ typeIds: [c.other.opportunityTypeId] }), expect: 409, expectError: "The type list changed" },
+  { name: "Opportunity POST clientId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.other.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid client" },
+  { name: "Opportunity POST contactId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },
+  { name: "Opportunity POST ownerId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, ownerId: c.other.adminId }), expect: 400, expectError: "Invalid user" },
+  { name: "Opportunity POST stageId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, stageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Opportunity POST typeId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, typeId: c.other.opportunityTypeId }), expect: 400, expectError: "Invalid opportunity type" },
+  { name: "Opportunity POST clientLocationId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, clientLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Opportunity PATCH clientLocationId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ clientLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Opportunity PATCH clientId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ clientId: c.other.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid client" },
+  { name: "Opportunity PATCH contactId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },
+  { name: "Opportunity PATCH ownerId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ ownerId: c.other.adminId }), expect: 400, expectError: "Invalid user" },
+  { name: "Opportunity PATCH stageId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ stageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Opportunity PATCH typeId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ typeId: c.other.opportunityTypeId }), expect: 400, expectError: "Invalid opportunity type" },
+  { name: "Opportunity settings PATCH quoteSentStageId", directions: "both", method: "PATCH", path: () => "/api/opportunity-settings", body: (c) => ({ quoteSentStageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Opportunity list filtered by other company's stage", directions: "both", method: "GET", path: (c) => `/api/opportunities?stageId=${c.other.opportunityStageId}`, expect: 400, expectError: "Invalid stage" },
+  { name: "Opportunity list filtered by other company's client", directions: "both", method: "GET", path: (c) => `/api/opportunities?clientId=${c.other.clientId}`, expect: 400, expectError: "Invalid client" },
+  { name: "Opportunity list filtered by other company's type", directions: "both", method: "GET", path: (c) => `/api/opportunities?typeId=${c.other.opportunityTypeId}`, expect: 400, expectError: "Invalid opportunity type" },
+  { name: "Opportunity list filtered by other company's user", directions: "both", method: "GET", path: (c) => `/api/opportunities?ownerId=${c.other.adminId}`, expect: 400, expectError: "Invalid user" },
+  { name: "Opportunity list filtered by other company's team", directions: "both", method: "GET", path: (c) => `/api/opportunities?teamId=${c.other.salesTeamId}`, expect: 400, expectError: "Invalid team" },
+  { name: "Opportunity POST teamId", directions: "both", method: "POST", path: () => "/api/opportunities", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.own.contactId, teamId: c.other.salesTeamId }), expect: 400, expectError: "Invalid team" },
+  { name: "Opportunity PATCH teamId", directions: "both", method: "PATCH", path: (c) => `/api/opportunities/${c.own.opportunityId}`, body: (c) => ({ teamId: c.other.generalTeamId, ownerId: null }), expect: 400, expectError: "Invalid team" },
+
+  // ── Action buttons ──
+  { name: "PATCH other company's action button", directions: "both", method: "PATCH", path: (c) => `/api/action-buttons/${c.other.actionButtonId}`, body: () => ({ label: "Changed" }), expect: 404 },
+  { name: "DELETE other company's action button", directions: "both", method: "DELETE", path: (c) => `/api/action-buttons/${c.other.actionButtonId}`, expect: 404 },
+  { name: "Reorder with other company's action button", directions: "both", method: "POST", path: () => "/api/action-buttons/reorder", body: (c) => ({ buttonIds: [c.other.actionButtonId] }), expect: 409, expectError: "The button list changed" },
+  { name: "Action button POST fixedStageId", directions: "both", method: "POST", path: () => "/api/action-buttons", body: (c) => ({ label: "Should Not Exist", icon: "note", color: "#1B3A5C", kind: "NOTE", stageMode: "FIXED", fixedStageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Action button PATCH fixedStageId", directions: "both", method: "PATCH", path: (c) => `/api/action-buttons/${c.own.actionButtonId}`, body: (c) => ({ fixedStageId: c.other.opportunityStageId }), expect: 400, expectError: "Invalid stage" },
+  { name: "Note on own opportunity with other company's actionButtonId", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", actionButtonId: c.other.actionButtonId }), expect: 400, expectError: "Invalid action button" },
+  { name: "Email from other company's opportunity", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.other.opportunityId}/email`, body: () => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>" }), expect: 404 },
+  { name: "Email options of other company's opportunity", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}/email-options`, expect: 404 },
+  { name: "Email from own opportunity with other company's attachment", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/email`, body: (c) => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>", attachmentIds: [c.other.opportunityAttachmentId] }), expect: 400, expectError: "Invalid attachment" },
+  { name: "GET other opportunity's audit log", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.other.opportunityId}/audit`, expect: 404 },
+  { name: "Undo other company's audit entry", directions: "both", method: "POST", path: (c) => `/api/audit-log/${c.other.auditEntryId}/undo`, expect: 404 },
+  { name: "Restore other company's opportunity", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.other.opportunityId}/restore`, expect: 404 },
+  { name: "Own audit log paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/audit-log?cursor=${c.other.auditEntryId}`, expect: 400, expectError: "Invalid cursor" },
+  { name: "Own opportunity audit log paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.own.opportunityId}/audit?cursor=${c.other.auditEntryId}`, expect: 400, expectError: "Invalid cursor" },
+  { name: "Email from own opportunity with other company's actionButtonId", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/email`, body: (c) => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>", actionButtonId: c.other.actionButtonId }), expect: 400, expectError: "Invalid action button" },
+
+  // ── Quotes, sales orders, and purchase orders linked to opportunities ──
+  { name: "New quote with other company's opportunity", directions: "both", method: "POST", path: () => "/api/quotes", body: (c) => ({ clientId: c.own.clientId, contactId: c.own.contactId, opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "Link own quote to other company's opportunity", directions: "both", method: "PATCH", path: (c) => `/api/quotes/${c.own.quoteId}`, body: (c) => ({ opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "Copy own quote with other company's opportunity", directions: "both", method: "POST", path: (c) => `/api/quotes/${c.own.quoteId}/copy`, body: (c) => ({ clientId: c.own.clientId, contactId: c.own.contactId, opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "New sales order with other company's opportunity", directions: "both", method: "POST", path: () => "/api/sales-orders", body: (c) => ({ clientId: c.own.clientId, opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "Link own sales order to other company's opportunity", directions: "both", method: "PATCH", path: (c) => `/api/sales-orders/${c.own.salesOrderId}`, body: (c) => ({ opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "New purchase order with other company's opportunity", directions: "both", method: "POST", path: () => "/api/purchase-orders", body: (c) => ({ vendorId: c.own.vendorId, opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "Link own purchase order to other company's opportunity", directions: "both", method: "PATCH", path: (c) => `/api/purchase-orders/${c.own.purchaseOrderId}`, body: (c) => ({ opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
+  { name: "GET other company's quote's Opportunity panel", directions: "both", method: "GET", path: (c) => `/api/quotes/${c.other.quoteId}/opportunity`, expect: 404 },
+  { name: "Create an opportunity for other company's quote", directions: "both", method: "POST", path: (c) => `/api/quotes/${c.other.quoteId}/opportunity`, expect: 404 },
+  { name: "GET other company's sales order's Opportunity panel", directions: "both", method: "GET", path: (c) => `/api/sales-orders/${c.other.salesOrderId}/opportunity`, expect: 404 },
+  { name: "GET other company's purchase order's Opportunity panel", directions: "both", method: "GET", path: (c) => `/api/purchase-orders/${c.other.purchaseOrderId}/opportunity`, expect: 404 },
+  { name: "Linkable opportunities for other company's client", directions: "both", method: "GET", path: (c) => `/api/opportunities/linkable?for=quote&clientId=${c.other.clientId}&contactId=${c.other.contactId}`, expect: 400, expectError: "Invalid client" },
+
+  // ── Teams ──
+  { name: "PATCH other company's team", directions: "both", method: "PATCH", path: (c) => `/api/teams/${c.other.salesTeamId}`, body: () => ({ name: "Changed" }), expect: 404 },
+  { name: "DELETE other company's team", directions: "both", method: "DELETE", path: (c) => `/api/teams/${c.other.salesTeamId}`, expect: 404 },
+  { name: "PUT other company's team members", directions: "both", method: "PUT", path: (c) => `/api/teams/${c.other.salesTeamId}/members`, body: (c) => ({ userIds: [c.own.adminId] }), expect: 404 },
+  { name: "PUT other company's team default roles", directions: "both", method: "PUT", path: (c) => `/api/teams/${c.other.salesTeamId}/default-roles`, body: () => ({ roleIds: [] }), expect: 404 },
+  { name: "Reorder with other company's team", directions: "both", method: "POST", path: () => "/api/teams/reorder", body: (c) => ({ teamIds: [c.other.generalTeamId] }), expect: 409, expectError: "The team list changed" },
+  { name: "Team members PUT userIds", directions: "both", method: "PUT", path: (c) => `/api/teams/${c.own.salesTeamId}/members`, body: (c) => ({ userIds: [c.other.adminId] }), expect: 400, expectError: "Invalid user" },
+  { name: "Team default roles PUT roleIds", directions: "both", method: "PUT", path: (c) => `/api/teams/${c.own.salesTeamId}/default-roles`, body: (c) => ({ roleIds: [c.own.teamGrantRoleId, c.other.teamGrantRoleId] }), expect: 400, expectError: "Invalid role" },
+  { name: "Team POST memberIds", directions: "both", method: "POST", path: () => "/api/teams", body: (c) => ({ name: "Should Not Exist", memberIds: [c.other.adminId] }), expect: 400, expectError: "Invalid user" },
+  { name: "Team POST defaultRoleIds", directions: "both", method: "POST", path: () => "/api/teams", body: (c) => ({ name: "Should Not Exist", defaultRoleIds: [c.other.teamGrantRoleId] }), expect: 400, expectError: "Invalid role" },
+  { name: "User PATCH teamIds", directions: "both", method: "PATCH", path: (c) => `/api/users/${c.own.adminId}`, body: (c) => ({ teamIds: [c.own.generalTeamId, c.other.salesTeamId] }), expect: 400, expectError: "Invalid team" },
+
   // ── Permission escalation inside one company ──
   { name: "Limited role grants a permission it doesn't hold", directions: "once", sameCompany: true, actor: "limited", method: "PATCH", path: (c) => `/api/roles/${c.targetRoleId}`, body: () => ({ permissions: { quotes: { delete: true } } }), expect: 403, expectError: "You can't grant permissions you don't have yourself" },
 ]
@@ -269,7 +381,7 @@ class Session {
       headers["Content-Type"] = "application/json"
       body = JSON.stringify(options.json)
     }
-    const res = await fetch(`${this.baseUrl}${path}`, { method, headers, body, redirect: "manual" })
+    const res = await fetchOrExplain(`${this.baseUrl}${path}`, { method, headers, body, redirect: "manual" }, `${this.label}: ${method} ${pathForMessage(path)}`)
     this.store(res)
     const text = await res.text()
     return { status: res.status, text, location: res.headers.get("location") ?? "" }
@@ -316,8 +428,8 @@ function errorText(text: string): string {
 }
 
 // Strings that only appear in the other company's data
-function markersFor(ids: SampleIds, letter: TestLetter): string[] {
-  const names = Object.values(testNames(letter)).filter((v) => v.length > 6 && v !== "Sample")
+function markersFor(ids: SampleIds, otherNames: TestNames): string[] {
+  const names = Object.values(otherNames).filter((v) => v.length > 6 && v !== "Sample")
   return [ids.companyId, ...names]
 }
 
@@ -368,6 +480,13 @@ async function snapshot(prisma: PrismaClient, companyId: string): Promise<Record
       },
     }),
     approvalWorkflows: prisma.approvalWorkflow.findMany({ where: { companyId }, ...byId }),
+    opportunities: prisma.opportunity.findMany({ where: { companyId }, ...byId, include: { attachments: byId, timeline: byId } }),
+    opportunityStages: prisma.opportunityStage.findMany({ where: { companyId }, ...byId }),
+    opportunityTypes: prisma.opportunityType.findMany({ where: { companyId }, ...byId }),
+    opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId } }),
+    teams: prisma.team.findMany({ where: { companyId }, ...byId, include: { members: byId, defaultRoles: byId } }),
+    actionButtons: prisma.actionButton.findMany({ where: { companyId }, ...byId }),
+    auditLogEntries: prisma.auditLogEntry.findMany({ where: { companyId }, ...byId }),
     roles: prisma.role.findMany({ where: { companyId }, ...byId }),
     settings: prisma.companySettings.findUnique({ where: { companyId } }),
     users: prisma.user.findMany({ where: { companyId }, ...byId, select: { id: true, active: true, roleId: true } }),
@@ -382,36 +501,18 @@ function changedSections(before: Record<string, string>, after: Record<string, s
 }
 
 // Limited role and user inside Test Company B for the escalation attempt,
-// reset to the same known state every run. The password exists only in
-// memory for this run.
-async function ensureLimitedFixture(prisma: PrismaClient, b: SampleIds) {
-  const n = testNames("B")
-  const companyId = b.companyId
+// made for this run (removed with the rest of its data). The password
+// exists only in memory for this run.
+async function ensureLimitedFixture(prisma: PrismaClient, run: RunData) {
+  const n = run.companies.B.names
+  const companyId = run.companies.B.ids.companyId
   const limitedPermissions = { pages: { settings: true }, settingsSections: { users: true } }
 
-  const limitedRole = await prisma.role.findFirst({ where: { companyId, name: n.limitedRole } })
-  const limited = limitedRole
-    ? await prisma.role.update({ where: { id: limitedRole.id }, data: { rank: 20, permissions: limitedPermissions } })
-    : await prisma.role.create({ data: { companyId, name: n.limitedRole, rank: 20, permissions: limitedPermissions } })
+  const limitedRoleId = await addRunRole(prisma, run, { companyId, name: n.limitedRole, rank: 20, permissions: limitedPermissions })
+  const targetRoleId = await addRunRole(prisma, run, { companyId, name: n.targetRole, rank: 10, permissions: {} })
+  await addRunUser(prisma, run, { companyId, name: n.limitedUserName, email: n.limitedUserEmail, roleIds: [limitedRoleId] })
 
-  const targetRole = await prisma.role.findFirst({ where: { companyId, name: n.targetRole } })
-  const target = targetRole
-    ? await prisma.role.update({ where: { id: targetRole.id }, data: { rank: 10, permissions: {} } })
-    : await prisma.role.create({ data: { companyId, name: n.targetRole, rank: 10, permissions: {} } })
-
-  const password = generatePassword(20)
-  const hashed = await bcrypt.hash(password, BCRYPT_COST)
-  const existing = await prisma.user.findUnique({ where: { email: n.limitedUserEmail } })
-  if (existing && existing.companyId !== companyId) {
-    throw new HarnessBroken(`${n.limitedUserEmail} belongs to a different company, refusing to change it`)
-  }
-  const reset = { password: hashed, active: true, mustChangePassword: false, loginFailedAttempts: 0, loginLockedUntil: null }
-  const user = existing
-    ? await prisma.user.update({ where: { id: existing.id }, data: { name: n.limitedUserName, ...reset } })
-    : await prisma.user.create({ data: { companyId, name: n.limitedUserName, email: n.limitedUserEmail, ...reset } })
-  await setUserRoles(prisma, user.id, [limited.id])
-
-  return { email: n.limitedUserEmail, password, targetRoleId: target.id, targetRoleName: n.targetRole }
+  return { email: n.limitedUserEmail, targetRoleId, targetRoleName: n.targetRole }
 }
 
 function printTable(rows: Row[]) {
@@ -431,40 +532,34 @@ function printTable(rows: Row[]) {
   }
 }
 
-async function main() {
-  const baseUrl = readBaseUrl(process.argv.slice(2))
-  const passwords = { B: process.env.TEST_ADMIN_B_PASSWORD, C: process.env.TEST_ADMIN_C_PASSWORD }
-  const missing = (["B", "C"] as const).filter((l) => !passwords[l]).map((l) => `TEST_ADMIN_${l}_PASSWORD`)
-  if (missing.length > 0) {
-    throw new HarnessBroken(`Set ${missing.join(" and ")} in your shell (the passwords create-test-companies printed).`)
-  }
-
-  // Imported only after the guard passed
-  const { prisma } = await import("@/lib/prisma")
+// Runs every attempt against this run's data and returns the result (exit code 0
+// all passed, 1 a FAIL or UNEXPECTED). A broken harness throws HarnessBroken.
+export async function checkCrossCompany(prisma: PrismaClient, run: RunData, baseUrl: string): Promise<CheckResult> {
   const rows: Row[] = []
 
-  const ids: Record<TestLetter, SampleIds> = { B: await loadSampleIds(prisma, "B"), C: await loadSampleIds(prisma, "C") }
+  const ids: Record<TestLetter, SampleIds> = { B: run.companies.B.ids, C: run.companies.C.ids }
+  const names: Record<TestLetter, TestNames> = { B: run.companies.B.names, C: run.companies.C.names }
 
   // Safety: no test company may be able to reach a real mailbox or a real
   // distributor, even if a refusal below were broken
   const external = await findExternalServices(prisma, [ids.B.companyId, ids.C.companyId])
   if (external) throw new HarnessBroken(external)
 
-  const fixture = await ensureLimitedFixture(prisma, ids.B)
+  const fixture = await ensureLimitedFixture(prisma, run)
 
-  // Sign in
+  // Sign in, once per user for the whole check
   const admins: Record<TestLetter, Session> = { B: new Session("Test Admin B", baseUrl), C: new Session("Test Admin C", baseUrl) }
-  await admins.B.signIn(testNames("B").adminEmail, passwords.B as string)
-  await admins.C.signIn(testNames("C").adminEmail, passwords.C as string)
+  await run.credentials.signIn(admins.B, names.B.adminEmail)
+  await run.credentials.signIn(admins.C, names.C.adminEmail)
   const limited = new Session("Test Limited B", baseUrl)
-  await limited.signIn(fixture.email, fixture.password)
+  await run.credentials.signIn(limited, fixture.email)
   console.log(`Signed in to ${baseUrl} as Test Admin B, Test Admin C, and Test Limited B.`)
 
   // Positive controls: each user on their OWN records must succeed, or the
   // refusals below would prove nothing
   for (const letter of ["B", "C"] as const) {
     const own = ids[letter]
-    const n = testNames(letter)
+    const n = names[letter]
     const s = admins[letter]
     const controls: { name: string; method: Method; path: string; json?: unknown; mustContain: string }[] = [
       { name: "GET own client", method: "GET", path: `/api/clients/${own.clientId}`, mustContain: own.clientId },
@@ -473,6 +568,15 @@ async function main() {
       { name: "GET own purchase order comments", method: "GET", path: `/api/purchase-orders/${own.purchaseOrderId}/comments`, mustContain: own.poCommentId },
       { name: "GET own asset attachments", method: "GET", path: `/api/inventory-assets/${own.assetId}/attachments`, mustContain: own.assetAttachmentId },
       { name: "GET own catalog change log", method: "GET", path: `/api/catalog/${own.catalogItemId}/change-log`, mustContain: "[" },
+      { name: "GET own opportunity", method: "GET", path: `/api/opportunities/${own.opportunityId}`, mustContain: own.opportunityId },
+      { name: "GET own opportunity attachments", method: "GET", path: `/api/opportunities/${own.opportunityId}/attachments`, mustContain: own.opportunityAttachmentId },
+      { name: "GET own opportunity related records", method: "GET", path: `/api/opportunities/${own.opportunityId}/related`, mustContain: '"purchaseOrders"' },
+      { name: "GET own opportunity timeline", method: "GET", path: `/api/opportunities/${own.opportunityId}/timeline`, mustContain: own.timelineNoteId },
+      { name: "GET own opportunity stages", method: "GET", path: "/api/opportunity-stages", mustContain: own.opportunityStageId },
+      { name: "GET own teams", method: "GET", path: "/api/teams", mustContain: own.salesTeamId },
+      { name: "GET own action buttons", method: "GET", path: "/api/action-buttons", mustContain: own.actionButtonId },
+      { name: "GET own audit log", method: "GET", path: "/api/audit-log", mustContain: own.auditEntryId },
+      { name: "GET own opportunity audit log", method: "GET", path: `/api/opportunities/${own.opportunityId}/audit`, mustContain: own.auditEntryId },
       // Writes the values already stored, so nothing visible changes
       { name: "PATCH own vendor contact", method: "PATCH", path: `/api/vendors/${own.vendorId}/contacts/${own.vendorContactId}`, json: { lastName: n.vendorContactLastName }, mustContain: own.vendorContactId },
       { name: "PATCH own PO line item", method: "PATCH", path: `/api/purchase-orders/${own.purchaseOrderId}/line-items/${own.poLineId}`, json: { name: n.poLine }, mustContain: own.poLineId },
@@ -508,7 +612,7 @@ async function main() {
       const ctx: AttemptContext = {
         own: ids[ownLetter],
         other: ids[otherLetter],
-        ownNames: testNames(ownLetter),
+        ownNames: names[ownLetter],
         targetRoleId: fixture.targetRoleId,
       }
       const session = attempt.actor === "limited" ? limited : admins[ownLetter]
@@ -519,6 +623,8 @@ async function main() {
       try {
         res = await session.request(attempt.method, attempt.path(ctx), { json: attempt.body?.(ctx), multipart: attempt.multipart })
       } catch (err) {
+        // The server stopped answering: no later attempt can run either
+        if (err instanceof ServerUnreachable) throw err
         rows.push({ attempt: label, expected, actual: "no response", result: "UNEXPECTED", note: err instanceof Error ? err.message : String(err) })
         continue
       }
@@ -533,7 +639,7 @@ async function main() {
         before = after
       }
 
-      const leaked = markersFor(ids[otherLetter], otherLetter).filter((m) => res.text.includes(m))
+      const leaked = markersFor(ids[otherLetter], names[otherLetter]).filter((m) => res.text.includes(m))
       const message = errorText(res.text)
       const row: Row = { attempt: label, expected, actual: String(res.status), result: "PASS" }
 
@@ -571,6 +677,108 @@ async function main() {
     }
   }
 
+  // The team lists: each admin's sidebar counts and team list hold its own
+  // teams and nothing of the other company's (no team id, company id, or name)
+  for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+    const own = ids[ownLetter]
+    const other = ids[otherLetter]
+    for (const path of ["/api/opportunities/sidebar-counts", "/api/teams"]) {
+      const res = await admins[ownLetter].request("GET", path)
+      const leaked = [other.generalTeamId, other.salesTeamId, ...markersFor(other, names[otherLetter])].filter((m) => res.text.includes(m))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : !res.text.includes(own.salesTeamId)
+            ? "its own team is missing"
+            : leaked.length > 0
+              ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
+              : null
+      rows.push({ attempt: `${ownLetter} ${path} holds only its own teams`, expected: "200, own teams only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+    }
+  }
+
+  // The action button lists: each admin's lists hold its own buttons and
+  // nothing of the other company's
+  for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+    const own = ids[ownLetter]
+    const other = ids[otherLetter]
+    for (const path of ["/api/action-buttons", "/api/action-buttons?for=opportunity"]) {
+      const res = await admins[ownLetter].request("GET", path)
+      const leaked = [other.actionButtonId, ...markersFor(other, names[otherLetter])].filter((m) => res.text.includes(m))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : !res.text.includes(own.actionButtonId)
+            ? "its own button is missing"
+            : leaked.length > 0
+              ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
+              : null
+      rows.push({ attempt: `${ownLetter} ${path} holds only its own buttons`, expected: "200, own buttons only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+    }
+  }
+
+  // The audit log lists: each admin's lists hold its own entries and nothing
+  // of the other company's (no entry id, opportunity id, or marked name)
+  for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+    const own = ids[ownLetter]
+    const other = ids[otherLetter]
+    for (const path of ["/api/audit-log", "/api/audit-log?recordType=OPPORTUNITY", `/api/opportunities/${own.opportunityId}/audit`]) {
+      const res = await admins[ownLetter].request("GET", path)
+      const leaked = [other.auditEntryId, other.opportunityId, ...markersFor(other, names[otherLetter])].filter((m) => res.text.includes(m))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : !res.text.includes(own.auditEntryId)
+            ? "its own entry is missing"
+            : leaked.length > 0
+              ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
+              : null
+      rows.push({ attempt: `${ownLetter} ${path} holds only its own entries`, expected: "200, own entries only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+    }
+  }
+
+  // The Opportunity panels and the Related tab: each admin's sample quote,
+  // sales order, and purchase order are linked to its own opportunity for
+  // the check (and put back after), and the panels and the Related tab must
+  // hold its own records and nothing of the other company's
+  for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+    const own = ids[ownLetter]
+    const other = ids[otherLetter]
+    const saved = await Promise.all([
+      prisma.quote.findUniqueOrThrow({ where: { id: own.quoteId }, select: { opportunityId: true } }),
+      prisma.salesOrder.findUniqueOrThrow({ where: { id: own.salesOrderId }, select: { opportunityId: true } }),
+      prisma.purchaseOrder.findUniqueOrThrow({ where: { id: own.purchaseOrderId }, select: { opportunityId: true } }),
+    ])
+    try {
+      await prisma.quote.update({ where: { id: own.quoteId }, data: { opportunityId: own.opportunityId } })
+      await prisma.salesOrder.update({ where: { id: own.salesOrderId }, data: { opportunityId: own.opportunityId } })
+      await prisma.purchaseOrder.update({ where: { id: own.purchaseOrderId }, data: { opportunityId: own.opportunityId } })
+      const paths = [
+        `/api/quotes/${own.quoteId}/opportunity`,
+        `/api/sales-orders/${own.salesOrderId}/opportunity`,
+        `/api/purchase-orders/${own.purchaseOrderId}/opportunity`,
+        `/api/opportunities/${own.opportunityId}/related`,
+      ]
+      for (const path of paths) {
+        const res = await admins[ownLetter].request("GET", path)
+        const leaked = [other.opportunityId, other.quoteId, other.salesOrderId, other.purchaseOrderId, ...markersFor(other, names[otherLetter])].filter((m) => res.text.includes(m))
+        const problem =
+          res.status !== 200
+            ? `got ${res.status}: ${errorText(res.text)}`
+            : !res.text.includes(own.quoteId) || !res.text.includes(own.salesOrderId)
+              ? "its own linked records are missing"
+              : leaked.length > 0
+                ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
+                : null
+        rows.push({ attempt: `${ownLetter} ${path.replace(/[A-Za-z0-9_-]{20,}/g, "[id]")} holds only its own records`, expected: "200, own records only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+      }
+    } finally {
+      await prisma.quote.update({ where: { id: own.quoteId }, data: { opportunityId: saved[0].opportunityId } })
+      await prisma.salesOrder.update({ where: { id: own.salesOrderId }, data: { opportunityId: saved[1].opportunityId } })
+      await prisma.purchaseOrder.update({ where: { id: own.purchaseOrderId }, data: { opportunityId: saved[2].opportunityId } })
+    }
+  }
+
   // Deactivated user: an already signed in session must stop working
   // straight away, then the account is restored
   const c = ids.C
@@ -594,13 +802,20 @@ async function main() {
   const count = (r: Result) => rows.filter((row) => row.result === r).length
   console.log(`\n${rows.length} checks: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("UNEXPECTED")} UNEXPECTED`)
 
-  await prisma.$disconnect()
-  return count("FAIL") + count("UNEXPECTED") > 0 ? 1 : 0
+  return checkResult(rows)
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    console.error(err instanceof Error ? err.message : err)
-    process.exit(err instanceof HarnessBroken ? 2 : 1)
-  })
+// On its own: this check's own temporary data, set up and removed around it
+async function main() {
+  const baseUrl = readBaseUrl(process.argv.slice(2))
+  return withRunData("check-cross-company", (prisma, run) => checkCrossCompany(prisma, run, baseUrl))
+}
+
+if (isEntryScript("check-cross-company")) {
+  main()
+    .then((result) => process.exit(result.code))
+    .catch((err) => {
+      console.error(err instanceof Error ? err.message : err)
+      process.exit(err instanceof HarnessBroken || err instanceof SharedHarnessBroken ? 2 : 1)
+    })
+}

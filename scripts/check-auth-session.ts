@@ -84,7 +84,7 @@ const userDelegate = {
   async findUnique({ where }: { where: { id?: string; email?: string } }) {
     const u = users.find((x) => (where.email !== undefined ? x.email === where.email : x.id === where.id))
     if (!u) return null
-    return { ...u, mustChangePassword: false, company: { settings: { ssoEnabled: false } }, userRoles: [] }
+    return { ...u, mustChangePassword: false, company: { settings: { ssoEnabled: false } }, userRoles: [], teamMemberships: [] }
   },
   async update({ where, data }: { where: { id: string }; data: Record<string, unknown> }) {
     const u = users.find((x) => x.id === where.id)

@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
+import { userFacingError } from "@/lib/user-error"
+import { isNumberCollision, NUMBER_TAKEN_MESSAGE, takeRecordNumber } from "@/lib/record-number"
 import { assertRefs, purchaseOrderListWhere, viewableSalesOrderWhere } from "@/lib/scoped-loaders"
+import { readOptionalId } from "@/lib/opportunity-rules"
+import { recordRecordLink } from "@/lib/opportunity-quotes"
 
 export async function GET() {
   const { ctx, response } = await requireAccess({
@@ -70,10 +74,6 @@ export async function POST(req: NextRequest) {
   const prefix = settings?.poPrefix ?? "PO"
   const paymentType = body.paymentType || settings?.poDefaultPaymentType || "Net30"
 
-  const year = new Date().getFullYear()
-  const existingCount = await prisma.purchaseOrder.count({ where: { companyId } })
-  const poNumber = `${prefix}-${year}-${String(existingCount + 1).padStart(4, "0")}`
-
   // Two ways into this route: generating a PO from selected SO line items
   // (the existing "Generate Purchase Order" flow on a Sales Order), or
   // creating a blank PO manually with no line items yet — line items get
@@ -132,6 +132,23 @@ export async function POST(req: NextRequest) {
     if (invalid) return invalid
   }
 
+  // The opportunity it belongs to. Generated from a sales order, the sales
+  // order's. A manual one takes the opportunity the body names (from the
+  // opportunity's Related tab, or the form's picker: one the user may open,
+  // in any stage, of the ship to client when there is one), else the named
+  // sales order's.
+  let opportunityId: string | null = null
+  if (isGeneratingFromSO || (salesOrderId && body.opportunityId === undefined)) {
+    const source = salesOrderId
+      ? await prisma.salesOrder.findFirst({ where: { id: salesOrderId, companyId }, select: { opportunityId: true } })
+      : null
+    opportunityId = source?.opportunityId ?? null
+  } else {
+    const linkRef = readOptionalId(body.opportunityId)
+    if (linkRef.error !== undefined) return apiError(400, "Invalid opportunity", "INVALID_REFERENCE")
+    opportunityId = linkRef.value
+  }
+
   let shipToClientLocationId: string | null = null
 
   if (body.shipToClient) {
@@ -162,30 +179,59 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const purchaseOrder = await prisma.purchaseOrder.create({
-    data: {
-      companyId,
-      salesOrderId,
-      vendorId: body.vendorId,
-      userId: ctx.userId,
-      poNumber,
-      status: "DRAFT",
-      paymentType,
-      internalNotes: body.internalNotes || null,
-      expectedAt: body.expectedAt ? new Date(body.expectedAt) : null,
-      shipToClient: body.shipToClient ?? false,
-      shipToClientId,
-      shipToClientLocationId,
-      shipContactName: body.shipContactName || null,
-      shipAddress: body.shipAddress || null,
-      shipAddress2: body.shipAddress2 || null,
-      shipCity: body.shipCity || null,
-      shipState: body.shipState || null,
-      shipZip: body.shipZip || null,
-      shipCountry: body.shipCountry || null,
-      ...(lineItemsCreate.length > 0 ? { lineItems: { create: lineItemsCreate } } : {}),
-    },
-  })
+  if (opportunityId && !isGeneratingFromSO && body.opportunityId !== undefined) {
+    const invalid = await assertRefs(ctx, { clientId: shipToClientId, orderOpportunityId: opportunityId })
+    if (invalid) return invalid
+  }
+
+  // The next number from the company's purchase order counter, taken in the
+  // same transaction as the create so a failed create gives it back
+  let purchaseOrder
+  try {
+    purchaseOrder = await prisma.$transaction(async (tx) => {
+      const poNumber = await takeRecordNumber(tx, companyId, "purchaseOrder", prefix)
+      const created = await tx.purchaseOrder.create({
+        data: {
+          companyId,
+          salesOrderId,
+          vendorId: body.vendorId,
+          userId: ctx.userId,
+          poNumber,
+          status: "DRAFT",
+          paymentType,
+          internalNotes: body.internalNotes || null,
+          expectedAt: body.expectedAt ? new Date(body.expectedAt) : null,
+          shipToClient: body.shipToClient ?? false,
+          shipToClientId,
+          shipToClientLocationId,
+          shipContactName: body.shipContactName || null,
+          shipAddress: body.shipAddress || null,
+          shipAddress2: body.shipAddress2 || null,
+          shipCity: body.shipCity || null,
+          shipState: body.shipState || null,
+          shipZip: body.shipZip || null,
+          shipCountry: body.shipCountry || null,
+          opportunityId,
+          ...(lineItemsCreate.length > 0 ? { lineItems: { create: lineItemsCreate } } : {}),
+        },
+      })
+      if (opportunityId) {
+        await recordRecordLink(tx, {
+          companyId,
+          actorId: ctx.userId,
+          opportunityId,
+          kind: "purchaseOrder",
+          change: "linked",
+          record: { id: created.id, name: created.poNumber },
+        })
+      }
+      return created
+    })
+  } catch (err) {
+    if (isNumberCollision(err)) return apiError(409, NUMBER_TAKEN_MESSAGE, "NUMBER_TAKEN")
+    const { message, status } = userFacingError(err, "Creating a purchase order")
+    return apiError(status, message)
+  }
 
   return NextResponse.json(purchaseOrder)
 }

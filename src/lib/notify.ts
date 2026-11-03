@@ -142,8 +142,9 @@ export async function notifySalesOrderStatusChange(salesOrderId: string, status:
   if (!rule) return
 
   // A role rule matches every active user holding that role among any of
-  // their roles. The Everyone role is held implicitly by every user in the
-  // company, so it matches all of them.
+  // their roles, given directly or as a default role of a team they are in.
+  // The Everyone role is held implicitly by every user in the company, so it
+  // matches all of them.
   let recipientUserIds: string[]
   if (rule.type === "user") {
     recipientUserIds = [rule.id]
@@ -156,7 +157,14 @@ export async function notifySalesOrderStatusChange(salesOrderId: string, status:
     const users = await prisma.user.findMany({
       where: role.isEveryone
         ? { companyId: salesOrder.companyId, active: true }
-        : { active: true, userRoles: { some: { roleId: rule.id } } },
+        : {
+            companyId: salesOrder.companyId,
+            active: true,
+            OR: [
+              { userRoles: { some: { roleId: rule.id } } },
+              { teamMemberships: { some: { team: { companyId: salesOrder.companyId, defaultRoles: { some: { roleId: rule.id } } } } } },
+            ],
+          },
       select: { id: true },
     })
     recipientUserIds = users.map((u) => u.id)

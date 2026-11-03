@@ -4,6 +4,7 @@ import { sendQuoteEmail } from "@/lib/send-quote-email"
 import { loadCompanyMailbox, sendAsNote, withNote } from "@/lib/quote-sender"
 import { applyTermsFreeze, loadCompanyDefaultTerms, termsFreezeFor } from "@/lib/quote-terms"
 import { approvalFingerprint, approvalsCoverQuote, heldEmailOf, type HeldEmail } from "@/lib/approval-workflows"
+import { prepareQuoteStatusChange, runQuoteStatusChange } from "@/lib/opportunity-quotes"
 
 // The held email and the fingerprint live with the workflow evaluation in
 // src/lib/approval-workflows.ts
@@ -87,11 +88,15 @@ type Sender = typeof sendQuoteEmail
 // sent from another mailbox and never stranded. Before anything is sent the
 // quote is checked again as it is now (approvalsCoverQuote): if it changed
 // after approval was requested, or a workflow that matches now isn't
-// approved, it is not sent either (markStale).
+// approved, it is not sent either (markStale). A quote without an
+// opportunity gets one when it is marked sent, planned before anything is
+// sent; one that can't have one (no contact) is not sent, like a failed
+// send. actorId is the approver whose decision completes it.
 export async function completeApprovedQuote(
   quoteId: string,
   companyId: string,
-  send: Sender = sendQuoteEmail
+  send: Sender = sendQuoteEmail,
+  actorId: string | null = null
 ): Promise<CompletionResult> {
   const claimed = await prisma.quote.updateMany({
     where: { id: quoteId, companyId, status: "PENDING_APPROVAL" },
@@ -114,6 +119,8 @@ export async function completeApprovedQuote(
   // terms freezes the default as it is now: worked out once, used for the
   // held email's PDF, and stored in the write that marks it sent
   const freeze = termsFreezeFor(quote, await loadCompanyDefaultTerms(companyId))
+  const prepared = await prepareQuoteStatusChange(companyId, quote, "SENT")
+  const plan = prepared.plan ?? null
 
   async function markSent(internalNotes: string | null | undefined) {
     await prisma.$transaction(async (tx) => {
@@ -126,11 +133,21 @@ export async function completeApprovedQuote(
         where: { id: quoteId, companyId },
         data: { status: "SENT", sentAt: new Date(), isActive: true, pendingEmailPayload: Prisma.JsonNull, internalNotes },
       })
+      await runQuoteStatusChange(tx, { companyId, quoteId, from: "DRAFT", to: "SENT", actorId, plan })
     })
   }
 
   // A payload with only the recorded fingerprint means no email was held
   const held = heldEmailOf(quote.pendingEmailPayload)
+  if (prepared.error !== undefined) {
+    // Kept like a failed send: the quote stays in DRAFT with the email
+    // held, and the approvals still count once the problem is fixed
+    if (held) {
+      const kept: HeldEmail = { ...held, lastSendError: prepared.error, approvedFingerprint: approvalFingerprint(quote.userId, quote.lineItems) }
+      await prisma.quote.update({ where: { id: quoteId, companyId }, data: { pendingEmailPayload: kept as unknown as Prisma.InputJsonValue } })
+    }
+    return { outcome: "send_failed", warning: prepared.error }
+  }
   if (!held) {
     await markSent(undefined)
     return { outcome: "marked_sent" }

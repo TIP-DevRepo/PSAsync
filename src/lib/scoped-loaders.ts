@@ -1,4 +1,5 @@
 import type { Prisma } from "@/generated/prisma"
+import { mainClientLocation } from "@/lib/client-main-location"
 import { prisma } from "@/lib/prisma"
 import { apiError, type AccessContext } from "@/lib/api-access"
 
@@ -231,6 +232,18 @@ export function quoteVisibilityWhere(ctx: QuoteViewer): Prisma.QuoteWhereInput {
   return { OR: visible }
 }
 
+// Who a user may make a quote's owner (the Assigned Rep on the New Quote
+// form, and the assign route). A quote has no creator of its own, so the
+// view rule above only knows its owner: a user who can't see everyone's
+// quotes would lose sight of a quote they gave to someone else, and may
+// only assign quotes to themselves. view-all holders (and Global Admin)
+// may assign anyone.
+export const SELF_ASSIGN_ONLY_MESSAGE = "You can only assign quotes to yourself"
+
+export function mayAssignQuoteTo(ctx: Pick<AccessContext, "userId" | "can">, ownerId: string): boolean {
+  return ownerId === ctx.userId || ctx.can("quotes.viewAllUsersQuotes")
+}
+
 // The list filter for every quote the user may open
 export const quoteListWhere = (ctx: QuoteViewer) =>
   ({ companyId: ctx.companyId, AND: [quoteVisibilityWhere(ctx)] }) satisfies Prisma.QuoteWhereInput
@@ -325,6 +338,192 @@ export function loadPurchaseOrderAttachment(ctx: OrderViewer, purchaseOrderId: s
   })
 }
 
+// Opportunities
+
+type OpportunityViewer = Pick<AccessContext, "companyId" | "userId" | "can">
+
+// Matches no row, for callers who may not open any opportunity
+const NO_OPPORTUNITIES = { id: { in: [] as string[] } } satisfies Prisma.OpportunityWhereInput
+
+// Deleting an opportunity only hides it (deletedAt), so admins can restore
+// it from the audit log. This is the one "not deleted" condition: every
+// opportunity query uses it through the builders below (opportunityWhere,
+// viewableOpportunityWhere, opportunityListWhere, and the loaders and
+// assertRefs keys built on them), and any new opportunity query must too.
+// Only the audit log, restore, and an auditLog.view holder opening a
+// deleted opportunity read deleted ones, through the *IncludingDeleted and
+// deleted builders.
+export const NOT_DELETED_OPPORTUNITY = { deletedAt: null } satisfies Prisma.OpportunityWhereInput
+export const DELETED_OPPORTUNITY = { deletedAt: { not: null } } satisfies Prisma.OpportunityWhereInput
+
+// Which of the company's opportunities a user may open (VOP). They need the
+// Opportunities page, and then one of three levels:
+//   basic: their own, plus unassigned ones in teams they belong to
+//   opportunities.viewTeam: their own anywhere, plus every one in teams
+//     they belong to
+//   opportunities.viewAll: every one (Global Admin too)
+// Team membership is matched in the same query (the team's members), so
+// joining or leaving a team applies on the next request.
+export function opportunityVisibilityWhere(ctx: OpportunityViewer): Prisma.OpportunityWhereInput {
+  if (!ctx.can("pages.opportunities")) return NO_OPPORTUNITIES
+  if (ctx.can("opportunities.viewAll")) return {}
+  const inMyTeams: Prisma.OpportunityWhereInput = { team: { members: { some: { userId: ctx.userId } } } }
+  if (ctx.can("opportunities.viewTeam")) return { OR: [{ ownerId: ctx.userId }, inMyTeams] }
+  return { OR: [{ ownerId: ctx.userId }, { ownerId: null, ...inMyTeams }] }
+}
+
+// Who a user may make an opportunity's owner, given whether they are in
+// the opportunity's team themselves. Unassigned (null) is always allowed.
+// With opportunities.viewAll anyone; with opportunities.viewTeam anyone
+// while they are in the team; otherwise only themselves. The owner must
+// also be a member of the team (loadTeamMemberIds), checked separately
+// with a 400.
+export const OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE = "You can only assign opportunities to yourself or leave them unassigned"
+
+export function mayAssignOpportunityTo(
+  ctx: Pick<AccessContext, "userId" | "can">,
+  ownerId: string | null,
+  actorInTeam: boolean
+): boolean {
+  if (ownerId === null || ctx.can("opportunities.viewAll")) return true
+  if (ctx.can("opportunities.viewTeam") && actorInTeam) return true
+  return ownerId === ctx.userId
+}
+
+// Whether a user may put an opportunity in a team (choose it on create, or
+// move one there): a team they belong to, or any team with viewAll
+export function mayUseOpportunityTeam(ctx: Pick<AccessContext, "can">, actorInTeam: boolean): boolean {
+  return actorInTeam || ctx.can("opportunities.viewAll")
+}
+
+// The list filter for every opportunity the user may open (never deleted ones)
+export const opportunityListWhere = (ctx: OpportunityViewer) =>
+  ({ companyId: ctx.companyId, ...NOT_DELETED_OPPORTUNITY, AND: [opportunityVisibilityWhere(ctx)] }) satisfies Prisma.OpportunityWhereInput
+
+// Company scoping only, for writes after loadViewableOpportunity has passed.
+// A deleted opportunity is never matched.
+export const opportunityWhere = (ctx: Scope, opportunityId: string) =>
+  ({ id: opportunityId, companyId: ctx.companyId, ...NOT_DELETED_OPPORTUNITY }) satisfies Prisma.OpportunityWhereUniqueInput
+
+// One opportunity the user may open, for reads that need their own select
+export const viewableOpportunityWhere = (ctx: OpportunityViewer, opportunityId: string) =>
+  ({
+    id: opportunityId,
+    companyId: ctx.companyId,
+    ...NOT_DELETED_OPPORTUNITY,
+    AND: [opportunityVisibilityWhere(ctx)],
+  }) satisfies Prisma.OpportunityWhereUniqueInput
+
+// The same view check (VOP) with deleted ones included: only for the
+// opportunity's audit log, restore, undo, and an auditLog.view holder
+// opening a deleted opportunity's page
+export const viewableOpportunityIncludingDeletedWhere = (ctx: OpportunityViewer, opportunityId: string) =>
+  ({ id: opportunityId, companyId: ctx.companyId, AND: [opportunityVisibilityWhere(ctx)] }) satisfies Prisma.OpportunityWhereUniqueInput
+
+// A deleted opportunity of the company, for the restore write
+export const deletedOpportunityWhere = (ctx: Scope, opportunityId: string) =>
+  ({ id: opportunityId, companyId: ctx.companyId, ...DELETED_OPPORTUNITY }) satisfies Prisma.OpportunityWhereUniqueInput
+
+// The company's opportunities with these ids, deleted ones included, for
+// the audit log's record states (deleted or not)
+export const opportunityRecordStatesWhere = (ctx: Scope, opportunityIds: string[]) =>
+  ({ companyId: ctx.companyId, id: { in: opportunityIds } }) satisfies Prisma.OpportunityWhereInput
+
+export const opportunityAttachmentWhere = (ctx: Scope, opportunityId: string, attachmentId: string) =>
+  ({
+    id: attachmentId,
+    opportunityId,
+    opportunity: opportunityWhere(ctx, opportunityId),
+  }) satisfies Prisma.OpportunityAttachmentWhereUniqueInput
+
+// Every attachment of one opportunity (not deleted), for lists
+export const opportunityAttachmentsWhere = (ctx: Scope, opportunityId: string) =>
+  ({ opportunityId, opportunity: opportunityWhere(ctx, opportunityId) }) satisfies Prisma.OpportunityAttachmentWhereInput
+
+// Every timeline entry of one opportunity (not deleted), for its timeline
+export const opportunityTimelineWhere = (ctx: Scope, opportunityId: string) =>
+  ({ companyId: ctx.companyId, opportunityId, opportunity: opportunityWhere(ctx, opportunityId) }) satisfies Prisma.TimelineEntryWhereInput
+
+// The opportunity view check (VOP) every opportunity route runs on its URL
+// id. One the user can't open is a miss, same as one that doesn't exist.
+export function loadViewableOpportunity(ctx: OpportunityViewer, opportunityId: string) {
+  if (!ctx.can("pages.opportunities")) return Promise.resolve(null)
+  return prisma.opportunity.findFirst({
+    where: viewableOpportunityWhere(ctx, opportunityId),
+    select: { id: true, ownerId: true, number: true, title: true },
+  })
+}
+
+// Runs the VOP check on the parent opportunity
+export function loadOpportunityAttachment(ctx: OpportunityViewer, opportunityId: string, attachmentId: string) {
+  if (!ctx.can("pages.opportunities")) return Promise.resolve(null)
+  return prisma.opportunityAttachment.findFirst({
+    where: { id: attachmentId, opportunityId, opportunity: viewableOpportunityWhere(ctx, opportunityId) },
+    select: { id: true },
+  })
+}
+
+// A timeline entry of one opportunity, company scoped, for writes after
+// loadOpportunityTimelineEntry has passed
+export const opportunityTimelineEntryWhere = (ctx: Scope, opportunityId: string, entryId: string) =>
+  ({ id: entryId, companyId: ctx.companyId, opportunityId, opportunity: opportunityWhere(ctx, opportunityId) }) satisfies Prisma.TimelineEntryWhereUniqueInput
+
+// A timeline entry by its URL id (or a paging cursor), only under the
+// opportunity it belongs to, with the VOP check on that opportunity
+export function loadOpportunityTimelineEntry(ctx: OpportunityViewer, opportunityId: string, entryId: string) {
+  if (!ctx.can("pages.opportunities")) return Promise.resolve(null)
+  return prisma.timelineEntry.findFirst({
+    where: { id: entryId, companyId: ctx.companyId, opportunityId, opportunity: viewableOpportunityWhere(ctx, opportunityId) },
+    select: { id: true, kind: true, authorId: true, opportunity: { select: { id: true, number: true, title: true } } },
+  })
+}
+
+// The id of a client's main location (mainClientLocation: its primary
+// location, else its main billing location), or null when it has none or
+// the client isn't this company's. The default location of an opportunity.
+export async function loadClientMainLocationId(ctx: Scope, clientId: string): Promise<string | null> {
+  const location = { select: { id: true, name: true, isPrimary: true } }
+  const client = await prisma.client.findFirst({
+    where: clientWhere(ctx, clientId),
+    select: { locations: { where: { isPrimary: true }, ...location }, mainBillingLocation: location },
+  })
+  return client ? (mainClientLocation(client)?.id ?? null) : null
+}
+
+export const opportunityStageWhere = (ctx: Scope, stageId: string) =>
+  ({ id: stageId, companyId: ctx.companyId }) satisfies Prisma.OpportunityStageWhereUniqueInput
+
+export const opportunityTypeWhere = (ctx: Scope, typeId: string) =>
+  ({ id: typeId, companyId: ctx.companyId }) satisfies Prisma.OpportunityTypeWhereUniqueInput
+
+// Teams (shared by opportunities now and tickets later)
+
+export const teamWhere = (ctx: Scope, teamId: string) =>
+  ({ id: teamId, companyId: ctx.companyId }) satisfies Prisma.TeamWhereUniqueInput
+
+// A team of the caller's company, for routes with a team id in the URL
+export function loadTeam(ctx: Scope, teamId: string) {
+  return prisma.team.findFirst({ where: teamWhere(ctx, teamId), select: { id: true, isDefault: true } })
+}
+
+// Which of these users are members of the team (a team of the caller's
+// company; another company's team has no members here). null and repeated
+// ids are skipped.
+export async function loadTeamMemberIds(ctx: Scope, teamId: string, userIds: (string | null | undefined)[]): Promise<Set<string>> {
+  const ids = [...new Set(userIds.filter((id): id is string => !!id))]
+  if (ids.length === 0) return new Set()
+  const rows = await prisma.teamMember.findMany({
+    where: { teamId, userId: { in: ids }, team: { companyId: ctx.companyId } },
+    select: { userId: true },
+  })
+  return new Set(rows.map((r) => r.userId))
+}
+
+// Audit log entries (shared by every record type)
+
+export const auditEntryWhere = (ctx: Scope, entryId: string) =>
+  ({ id: entryId, companyId: ctx.companyId }) satisfies Prisma.AuditLogEntryWhereUniqueInput
+
 // Company level records
 
 export const industryWhere = (ctx: Scope, industryId: string) =>
@@ -382,6 +581,24 @@ export interface BodyRefs {
   tagIds?: unknown
   // Containers
   inventoryLocationId?: unknown
+  opportunityStageId?: unknown
+  opportunityTypeId?: unknown
+  // Teams of the company (one id or a list)
+  teamId?: unknown
+  actionButtonId?: unknown
+  // An opportunity of the company; the parent of opportunityAttachmentId
+  opportunityId?: unknown
+  // Attachments of opportunityId when it's given, otherwise of any company
+  // opportunity (one id or a list)
+  opportunityAttachmentId?: unknown
+  // The opportunity a quote links to: one the caller may open (VOP, never a
+  // deleted one), in an OPEN stage, of clientId and contactId (both needed;
+  // without them it never passes). Needs a ctx with userId and can.
+  quoteOpportunityId?: unknown
+  // The opportunity a sales order or purchase order links to: one the
+  // caller may open (VOP, never a deleted one), in any stage, of clientId
+  // when it's given. Needs a ctx with userId and can.
+  orderOpportunityId?: unknown
 }
 
 type RefKey = keyof BodyRefs
@@ -405,6 +622,14 @@ const REF_LABELS: Record<RefKey, string> = {
   viewableSalesOrderId: "sales order",
   tagIds: "tag",
   inventoryLocationId: "container",
+  opportunityStageId: "stage",
+  opportunityTypeId: "opportunity type",
+  teamId: "team",
+  actionButtonId: "action button",
+  opportunityId: "opportunity",
+  opportunityAttachmentId: "attachment",
+  quoteOpportunityId: "opportunity",
+  orderOpportunityId: "opportunity",
 }
 
 // Turns a single id *Where builder's clause into one matching every id in
@@ -431,7 +656,7 @@ function readIds(value: unknown): string[] | null {
 // view rule (viewableSalesOrderId) read userId and can
 type RefScope = Scope & Partial<Pick<AccessContext, "userId" | "can">>
 
-function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string, vendorId?: string) {
+function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string, vendorId?: string, opportunityId?: string, contactId?: string) {
   const [first] = ids
   const company = { companyId: ctx.companyId }
   switch (key) {
@@ -476,6 +701,36 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
       return prisma.contactTag.count({ where: whereIds(contactTagWhere(ctx, first), ids) })
     case "inventoryLocationId":
       return prisma.inventoryLocation.count({ where: whereIds(inventoryLocationWhere(ctx, first), ids) })
+    case "opportunityStageId":
+      return prisma.opportunityStage.count({ where: whereIds(opportunityStageWhere(ctx, first), ids) })
+    case "opportunityTypeId":
+      return prisma.opportunityType.count({ where: whereIds(opportunityTypeWhere(ctx, first), ids) })
+    case "teamId":
+      return prisma.team.count({ where: whereIds(teamWhere(ctx, first), ids) })
+    case "actionButtonId":
+      return prisma.actionButton.count({ where: { id: { in: ids }, companyId: ctx.companyId } })
+    case "opportunityId":
+      return prisma.opportunity.count({ where: whereIds(opportunityWhere(ctx, first), ids) })
+    case "opportunityAttachmentId":
+      return prisma.opportunityAttachment.count({
+        where: opportunityId
+          ? whereIds(opportunityAttachmentWhere(ctx, opportunityId, first), ids)
+          : { id: { in: ids }, opportunity: { ...company, ...NOT_DELETED_OPPORTUNITY } },
+      })
+    case "quoteOpportunityId": {
+      const { userId, can } = ctx
+      if (!userId || !can || !clientId || !contactId) return Promise.resolve(0)
+      return prisma.opportunity.count({
+        where: { AND: [opportunityListWhere({ ...ctx, userId, can }), { id: { in: ids }, clientId, contactId, stage: { category: "OPEN" } }] },
+      })
+    }
+    case "orderOpportunityId": {
+      const { userId, can } = ctx
+      if (!userId || !can) return Promise.resolve(0)
+      return prisma.opportunity.count({
+        where: { AND: [opportunityListWhere({ ...ctx, userId, can }), { id: { in: ids }, ...(clientId ? { clientId } : {}) }] },
+      })
+    }
   }
 }
 
@@ -485,11 +740,15 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
 // same whether the id is made up or belongs to another company:
 //   const invalid = await assertRefs(ctx, { clientId: body.clientId, contactId: body.contactId })
 //   if (invalid) return invalid
-// contactId and clientLocationId are tied to clientId, and vendorLocationId
-// to vendorId, when that parent is a single id.
+// contactId and clientLocationId are tied to clientId, vendorLocationId
+// to vendorId, and opportunityAttachmentId to opportunityId, when that
+// parent is a single id. quoteOpportunityId is tied to clientId and
+// contactId, and orderOpportunityId to clientId.
 export async function assertRefs(ctx: RefScope, refs: BodyRefs) {
   const clientId = typeof refs.clientId === "string" && refs.clientId ? refs.clientId : undefined
   const vendorId = typeof refs.vendorId === "string" && refs.vendorId ? refs.vendorId : undefined
+  const opportunityId = typeof refs.opportunityId === "string" && refs.opportunityId ? refs.opportunityId : undefined
+  const contactId = typeof refs.contactId === "string" && refs.contactId ? refs.contactId : undefined
 
   const checks: { key: RefKey; ids: string[] | null }[] = []
   for (const key of Object.keys(REF_LABELS) as RefKey[]) {
@@ -499,7 +758,7 @@ export async function assertRefs(ctx: RefScope, refs: BodyRefs) {
   }
 
   const counts = await Promise.all(
-    checks.map(({ key, ids }) => (ids ? countRefs(ctx, key, ids, clientId, vendorId) : Promise.resolve(-1)))
+    checks.map(({ key, ids }) => (ids ? countRefs(ctx, key, ids, clientId, vendorId, opportunityId, contactId) : Promise.resolve(-1)))
   )
 
   const failed = checks.find(({ ids }, i) => !ids || counts[i] !== ids.length)

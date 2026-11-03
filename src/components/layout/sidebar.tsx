@@ -1,8 +1,10 @@
 "use client"
 
+import { Suspense } from "react"
 import Link from "next/link"
 import Image from "next/image"
 import { usePathname } from "next/navigation"
+import { OpportunitiesFolder } from "./OpportunitiesFolder"
 import { cn } from "@/lib/utils"
 import {
   LayoutDashboard,
@@ -14,6 +16,7 @@ import {
   ClipboardList,
   ShoppingCart,
   Boxes,
+  Target,
 } from "lucide-react"
 
 export interface PagePermissions {
@@ -21,6 +24,7 @@ export interface PagePermissions {
   catalog?: boolean
   vendors?: boolean
   quotes?: boolean
+  opportunities?: boolean
   settings?: boolean
   salesOrders?: boolean
   purchaseOrders?: boolean
@@ -34,6 +38,7 @@ const navItems: { label: string; href: string; icon: typeof LayoutDashboard; per
   { label: "Catalog", href: "/dashboard/catalog", icon: Package, permissionKey: "catalog" },
   { label: "Inventory", href: "/dashboard/inventory", icon: Boxes, permissionKey: "inventory" },
   { label: "Quotes", href: "/dashboard/quotes", icon: FileText, permissionKey: "quotes" },
+  { label: "Opportunities", href: "/dashboard/opportunities", icon: Target, permissionKey: "opportunities" },
   { label: "Sales Orders", href: "/dashboard/sales-orders", icon: ClipboardList, permissionKey: "salesOrders" },
   { label: "Purchase Orders", href: "/dashboard/purchase-orders", icon: ShoppingCart, permissionKey: "purchaseOrders" },
   { label: "Settings", href: "/dashboard/settings", icon: Settings, permissionKey: "settings" },
@@ -66,23 +71,36 @@ export function Sidebar({ pagePermissions = {} }: { pagePermissions?: PagePermis
           : item.href === "/dashboard"
             ? pathname === item.href
             : pathname === item.href || pathname.startsWith(`${item.href}/`)
-        const Icon = item.icon
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            className={cn(
-              "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              isActive
-                ? "bg-sidebar-primary text-sidebar-primary-foreground"
-                : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-            )}
-          >
-            <Icon className="h-4 w-4" />
-            {item.label}
-          </Link>
-        )
+        // Opportunities is a folder of teams and members with counts. It
+        // reads the board's team and owner from the URL, so it sits in its
+        // own Suspense boundary, falling back to the plain entry.
+        if (item.href === "/dashboard/opportunities") {
+          return (
+            <Suspense key={item.href} fallback={<NavLink item={item} isActive={isActive} />}>
+              <OpportunitiesFolder isActive={isActive} />
+            </Suspense>
+          )
+        }
+        return <NavLink key={item.href} item={item} isActive={isActive} />
       })}
     </nav>
+  )
+}
+
+function NavLink({ item, isActive }: { item: (typeof navItems)[number]; isActive: boolean }) {
+  const Icon = item.icon
+  return (
+    <Link
+      href={item.href}
+      className={cn(
+        "flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        isActive
+          ? "bg-sidebar-primary text-sidebar-primary-foreground"
+          : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+      )}
+    >
+      <Icon className="h-4 w-4" />
+      {item.label}
+    </Link>
   )
 }

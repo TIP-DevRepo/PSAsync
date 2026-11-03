@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { RolePill } from "@/components/roles/RolePill"
+import { sortUsersByName } from "@/lib/user-picker"
 
 type TriggerType = "TOTAL_THRESHOLD" | "DISCOUNT_THRESHOLD" | "SPECIFIC_USER"
 
@@ -69,7 +70,7 @@ export function ApprovalWorkflowsPanel() {
     loadWorkflows()
     fetch("/api/users")
       .then((res) => res.json())
-      .then((data: UserOption[]) => setUsers(data.filter((u) => u.active)))
+      .then((data: UserOption[]) => setUsers(sortUsersByName(data.filter((u) => u.active))))
     fetch("/api/roles")
       .then((res) => res.json())
       .then((data: RoleOption[]) => {

@@ -23,6 +23,8 @@ import { RolePill } from "@/components/roles/RolePill"
 import { useAccess } from "@/components/AccessProvider"
 import { canSeeCostWith } from "@/lib/access-check"
 import { NoAccess } from "@/components/NoAccess"
+import { OpportunityPicker } from "@/components/opportunities/OpportunityPicker"
+import { RecordOpportunityPanel, useRecordOpportunityPanel } from "@/components/opportunities/RecordOpportunityPanel"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface QuoteDetail {
@@ -60,6 +62,8 @@ interface QuoteDetail {
   user: { id: string; name: string }
   lineItems: LineItemBuilderItem[]
   pendingEmailPayload: HeldEmailView | null
+  // The opportunity the quote family is linked to, if any
+  opportunityId: string | null
 }
 
 // The email composed in the Send Quote dialog and held on the quote. When
@@ -190,6 +194,11 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
   const [clients, setClients] = useState<ClientOption[]>([])
   const [contacts, setContacts] = useState<ContactOption[]>([])
   const [termsDraft, setTermsDraft] = useState("")
+  const [creatingOpportunity, setCreatingOpportunity] = useState(false)
+  // The Opportunity panel, reloaded after anything that can change the link
+  // or the opportunity's stage
+  const opportunityPanel = useRecordOpportunityPanel(`/api/quotes/${id}/opportunity`)
+  const reloadOpportunityPanel = opportunityPanel.reload
 
   const loadQuote = useCallback(() => {
     fetch(`/api/quotes/${id}`)
@@ -280,12 +289,18 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
   // ─── Send / portal link actions ────────────────────────────────────────
   async function handleMarkSent() {
     setSending(true)
-    await fetch(`/api/quotes/${id}/send`, { method: "POST" })
+    const res = await fetch(`/api/quotes/${id}/send`, { method: "POST" })
     setSending(false)
-    toast.success("Quote marked as sent")
+    if (res.ok) toast.success("Quote marked as sent")
+    else {
+      // For example a quote without a contact, which can't have its opportunity
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't mark the quote sent", data.error)
+    }
     loadQuote()
     loadVersions()
     loadApprovals()
+    reloadOpportunityPanel()
   }
 
   async function handleApprove(approvalId: string) {
@@ -466,6 +481,35 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
     }
     loadQuote()
     loadVersions()
+    reloadOpportunityPanel()
+  }
+
+  // Links the quote (every version) to an opportunity, or unlinks it
+  async function handleOpportunityChange(opportunityId: string | null) {
+    const res = await fetch(`/api/quotes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ opportunityId }),
+    })
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}))
+      toast.error("Couldn't change the opportunity", data.error)
+    }
+    loadQuote()
+    reloadOpportunityPanel()
+  }
+
+  // A sent or closed quote without an opportunity creates one the way
+  // sending does, without changing the quote's status
+  async function handleCreateOpportunity() {
+    setCreatingOpportunity(true)
+    const res = await fetch(`/api/quotes/${id}/opportunity`, { method: "POST" })
+    const data = await res.json().catch(() => ({}))
+    setCreatingOpportunity(false)
+    if (!res.ok) toast.error("Couldn't create the opportunity", data.error)
+    else toast.success(`Opportunity ${data.number} created`)
+    loadQuote()
+    reloadOpportunityPanel()
   }
 
   async function handlePostComment() {
@@ -491,8 +535,11 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
     loadQuote()
   }
 
+  // A new client or contact that no longer matches the linked opportunity
+  // clears the link (the server decides), so the panel reloads too
   async function handleClientChange(newClientId: string) {
     await updateQuoteField({ clientId: newClientId, contactId: null })
+    reloadOpportunityPanel()
   }
 
   // ─── Line item mutations (passed into the shared LineItemBuilder) ──────
@@ -877,7 +924,10 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                   <label className="block text-xs text-muted-foreground mb-1">Contact</label>
                   <select
                     value={quote.contact?.id ?? ""}
-                    onChange={(e) => updateQuoteField({ contactId: e.target.value || null })}
+                    onChange={async (e) => {
+                      await updateQuoteField({ contactId: e.target.value || null })
+                      reloadOpportunityPanel()
+                    }}
                     className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                   >
                     <option value="">No contact selected</option>
@@ -1042,8 +1092,41 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
           </div>
         </div>
 
-        {/* Right: Version History + Comments, always one third */}
+        {/* Right: Opportunity, Version History, and Comments, always one third */}
         <div className="min-w-0 space-y-6">
+          <RecordOpportunityPanel
+            data={opportunityPanel.data}
+            failed={opportunityPanel.failed}
+            loading={opportunityPanel.loading}
+            currentId={quote.id}
+          >
+            {showEditableHeader && (
+              <OpportunityPicker
+                record="quote"
+                clientId={quote.client.id}
+                contactId={quote.contact?.id ?? null}
+                value={quote.opportunityId}
+                onChange={handleOpportunityChange}
+                current={
+                  quote.opportunityId
+                    ? {
+                        id: quote.opportunityId,
+                        label: opportunityPanel.data?.opportunity
+                          ? `${opportunityPanel.data.opportunity.number} ${opportunityPanel.data.opportunity.title}`
+                          : "The linked opportunity",
+                      }
+                    : null
+                }
+                label="Link to opportunity"
+              />
+            )}
+            {!quote.opportunityId && quote.status !== "DRAFT" && quote.status !== "PENDING_APPROVAL" && canEditQuote && (
+              <Button size="sm" variant="outline" onClick={handleCreateOpportunity} disabled={creatingOpportunity}>
+                {creatingOpportunity ? "Creating..." : "Create opportunity"}
+              </Button>
+            )}
+          </RecordOpportunityPanel>
+
           <div className="rounded-lg border border-border bg-card shadow-card p-4 text-sm">
               <h2 className="font-semibold text-sm mb-2 text-foreground">Version History</h2>
               <div className="space-y-1">
@@ -1148,6 +1231,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
             loadQuote()
             loadVersions()
             loadApprovals()
+            reloadOpportunityPanel()
           }}
         />
       )}

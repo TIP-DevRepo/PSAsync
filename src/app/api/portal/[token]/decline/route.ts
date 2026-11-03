@@ -4,6 +4,7 @@ import { alreadyRespondedResponse, AWAITING_RESPONSE_STATUSES, linkInvalidRespon
 import { optionalText, PORTAL_DECLINE_REASON_MAX, readPortalBody } from "@/lib/portal-input"
 import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
 import { prisma } from "@/lib/prisma"
+import { applyQuoteEvent } from "@/lib/opportunity-quotes"
 
 export async function POST(
   req: NextRequest,
@@ -24,14 +25,19 @@ export async function POST(
 
   // One conditional write on the quote still waiting on the customer, so of
   // a decline and an accept sent at the same time exactly one wins. Only
-  // the winner notifies.
-  const decided = await prisma.quote.updateMany({
-    where: { id: quote.id, status: { in: [...AWAITING_RESPONSE_STATUSES] } },
-    data: {
-      status: "DECLINED",
-      declinedAt: new Date(),
-      declineReason: reason.value ?? null,
-    },
+  // the winner notifies. The winner's declined event (which may move the
+  // opportunity to Lost) is applied in the same transaction, as the system.
+  const decided = await prisma.$transaction(async (tx) => {
+    const lost = await tx.quote.updateMany({
+      where: { id: quote.id, status: { in: [...AWAITING_RESPONSE_STATUSES] } },
+      data: {
+        status: "DECLINED",
+        declinedAt: new Date(),
+        declineReason: reason.value ?? null,
+      },
+    })
+    if (lost.count === 1) await applyQuoteEvent(tx, { companyId: quote.companyId, quoteId: quote.id, event: "declined", actorId: null })
+    return lost
   })
   if (decided.count !== 1) return alreadyRespondedResponse()
 

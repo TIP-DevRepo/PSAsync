@@ -4,6 +4,7 @@ import { useState, useEffect } from "react"
 import { Modal } from "@/components/Modal"
 import { Button } from "@/components/ui/button"
 import { buildLocationPathOptions, type LocationPathOption } from "@/lib/inventory/locationPaths"
+import { sortUsersByName } from "@/lib/user-picker"
 
 interface ClientOption { id: string; name: string }
 interface ClientListRow extends ClientOption { isInternal: boolean }
@@ -65,7 +66,7 @@ export function CheckoutModal({
       const own = data.find((c) => c.isInternal)
       if (own) setOwnCompanyId(own.id)
     })
-    fetch("/api/users").then((res) => res.json()).then((data) => Array.isArray(data) && setUsers(data))
+    fetch("/api/users").then((res) => res.json()).then((data) => Array.isArray(data) && setUsers(sortUsersByName(data)))
   }, [deployFromClientId])
 
   useEffect(() => {

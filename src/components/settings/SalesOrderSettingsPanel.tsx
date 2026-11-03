@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
+import { sortUsersByName } from "@/lib/user-picker"
 
 interface RoleOption {
   id: string
@@ -59,7 +60,7 @@ export function SalesOrderSettingsPanel() {
       .then((data: RoleOption[]) => setRoles(data.filter((r) => !r.isEveryone)))
     fetch("/api/users")
       .then((res) => res.json())
-      .then((data: (UserOption & { active: boolean })[]) => setUsers(data.filter((u) => u.active)))
+      .then((data: (UserOption & { active: boolean })[]) => setUsers(sortUsersByName(data.filter((u) => u.active))))
   }, [])
 
   function update(field: keyof Omit<SOPOSettings, "soStatusNotifyRules">, value: string) {

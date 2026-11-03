@@ -2,10 +2,9 @@ import { prisma } from "@/lib/prisma"
 import { buildQuotePdfHtml } from "@/lib/quote-pdf-template"
 import { asSent, resolveQuoteTerms, type TermsFreeze } from "@/lib/quote-terms"
 import { quotePdfName } from "@/lib/content-disposition"
+import { graphRecipients, postSendMail, refreshMailboxAccess } from "@/lib/microsoft-mail"
 import chromium from "@sparticuz/chromium"
 import puppeteer from "puppeteer-core"
-
-const SCOPES = "openid profile email offline_access User.Read Mail.Send Mail.ReadWrite Calendars.ReadWrite"
 
 export interface SendQuoteEmailInput {
   quoteId: string
@@ -28,22 +27,6 @@ export interface SendQuoteEmailInput {
 export interface SendQuoteEmailResult {
   success: boolean
   error?: string
-}
-
-// A failed Graph call for the server log: the status and Graph's error
-// code only. The message can name the recipients' addresses.
-async function graphErrorSummary(res: Response): Promise<string> {
-  const body = (await res.json().catch(() => null)) as { error?: { code?: unknown } } | null
-  const code = typeof body?.error?.code === "string" ? ` ${body.error.code}` : ""
-  return `${res.status}${code}`
-}
-
-function toRecipients(list: string) {
-  return list
-    .split(",")
-    .map((e) => e.trim())
-    .filter(Boolean)
-    .map((address) => ({ emailAddress: { address } }))
 }
 
 export async function sendQuoteEmail(input: SendQuoteEmailInput): Promise<SendQuoteEmailResult> {
@@ -119,37 +102,15 @@ async function sendFromConnection(
   settings: ConfiguredSettings,
   connection: { id: string; refreshToken: string }
 ): Promise<SendQuoteEmailResult> {
-  // Refresh the access token before using it — simpler and more reliable
-  // than tracking expiry ourselves
-  const tokenRes = await fetch(
-    `https://login.microsoftonline.com/${settings.microsoftTenantId}/oauth2/v2.0/token`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: settings.microsoftClientId,
-        client_secret: settings.microsoftClientSecret,
-        refresh_token: connection.refreshToken,
-        grant_type: "refresh_token",
-        scope: SCOPES,
-      }),
-    }
-  )
-  if (!tokenRes.ok) {
+  // A fresh access token (src/lib/microsoft-mail.ts, shared with every
+  // other email the app sends)
+  const accessToken = await refreshMailboxAccess(settings, connection)
+  if (!accessToken) {
     return {
       success: false,
       error: "Couldn't refresh the connected mailbox's access. It may need to be reconnected.",
     }
   }
-  const tokens = await tokenRes.json()
-
-  await prisma.microsoftConnection.update({
-    where: { id: connection.id },
-    data: {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || connection.refreshToken,
-    },
-  })
 
   // Optionally attach the branded PDF
   const attachments: Record<string, unknown>[] = []
@@ -194,22 +155,12 @@ async function sendFromConnection(
   const message = {
     subject: input.subject,
     body: { contentType: "HTML", content: input.bodyHtml },
-    toRecipients: toRecipients(input.to),
-    ccRecipients: input.cc ? toRecipients(input.cc) : [],
+    toRecipients: graphRecipients(input.to),
+    ccRecipients: input.cc ? graphRecipients(input.cc) : [],
     attachments,
   }
 
-  const sendRes = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${tokens.access_token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ message, saveToSentItems: true }),
-  })
-
-  if (!sendRes.ok) {
-    console.error(`Microsoft Graph sendMail failed: ${await graphErrorSummary(sendRes)}`)
+  if (!(await postSendMail(accessToken, message))) {
     return { success: false, error: "Microsoft rejected the email. Please try again." }
   }
 
@@ -248,50 +199,25 @@ export async function sendCompanyNotificationEmail(
     return { success: false, error: "No connected mailbox available to send from." }
   }
 
-  const tokenRes = await fetch(
-    `https://login.microsoftonline.com/${settings.microsoftTenantId}/oauth2/v2.0/token`,
+  const accessToken = await refreshMailboxAccess(
     {
-      method: "POST",
-      headers: { "Content-Type": "application/x-www-form-urlencoded" },
-      body: new URLSearchParams({
-        client_id: settings.microsoftClientId,
-        client_secret: settings.microsoftClientSecret,
-        refresh_token: connection.refreshToken,
-        grant_type: "refresh_token",
-        scope: SCOPES,
-      }),
-    }
+      microsoftTenantId: settings.microsoftTenantId,
+      microsoftClientId: settings.microsoftClientId,
+      microsoftClientSecret: settings.microsoftClientSecret,
+    },
+    connection
   )
-  if (!tokenRes.ok) {
+  if (!accessToken) {
     return { success: false, error: "Couldn't refresh the connected mailbox's access." }
   }
-  const tokens = await tokenRes.json()
-
-  await prisma.microsoftConnection.update({
-    where: { id: connection.id },
-    data: {
-      accessToken: tokens.access_token,
-      refreshToken: tokens.refresh_token || connection.refreshToken,
-    },
-  })
 
   const message = {
     subject,
     body: { contentType: "HTML", content: bodyHtml },
-    toRecipients: toRecipients(to),
+    toRecipients: graphRecipients(to),
   }
 
-  const sendRes = await fetch("https://graph.microsoft.com/v1.0/me/sendMail", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${tokens.access_token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ message, saveToSentItems: true }),
-  })
-
-  if (!sendRes.ok) {
-    console.error(`Microsoft Graph sendMail failed: ${await graphErrorSummary(sendRes)}`)
+  if (!(await postSendMail(accessToken, message))) {
     return { success: false, error: "Microsoft rejected the email." }
   }
 

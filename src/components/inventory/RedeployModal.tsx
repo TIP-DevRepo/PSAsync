@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import { Modal } from "@/components/Modal"
 import { Button } from "@/components/ui/button"
+import { sortUsersByName } from "@/lib/user-picker"
 
 interface ContactOption { id: string; firstName: string; lastName: string }
 interface UserOption { id: string; name: string }
@@ -39,7 +40,7 @@ export function RedeployModal({
 
   useEffect(() => {
     if (status === "INTERNAL") {
-      fetch("/api/users").then((res) => res.json()).then((data) => Array.isArray(data) && setUsers(data))
+      fetch("/api/users").then((res) => res.json()).then((data) => Array.isArray(data) && setUsers(sortUsersByName(data)))
       return
     }
     if (clientId) {

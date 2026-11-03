@@ -5,7 +5,7 @@ import { Modal as HeroModal } from "@heroui/react"
 
 interface ModalProps {
   children: ReactNode
-  maxWidth?: "sm" | "md" | "lg"
+  maxWidth?: "sm" | "md" | "lg" | "xl"
   /** Adds max-h-[90vh] overflow-y-auto for modals with long, scrollable content */
   scrollable?: boolean
   /**
@@ -22,6 +22,8 @@ const MAX_WIDTH_CLASSES: Record<NonNullable<ModalProps["maxWidth"]>, string> = {
   sm: "max-w-sm",
   md: "max-w-md",
   lg: "max-w-lg",
+  // Large forms (New opportunity): 56rem still fits a laptop screen
+  xl: "max-w-4xl",
 }
 
 // Shared modal backdrop + centered box, built on HeroUI's real compound

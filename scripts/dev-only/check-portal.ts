@@ -1,14 +1,16 @@
 // DEV ONLY. Proves the customer portal rules against the locally running dev
 // server: calls every portal route WITHOUT signing in, using the real tokens
-// of the sample quotes create-test-companies.ts made, and checks every
+// of the sample quotes this run made (lib/run-data.ts), and checks every
 // attempt in the ATTEMPTS list below. Test Admin B signs in only for the
 // regenerate step and the staff response checks.
 //
 // Refuses to run unless DB_NAME is psasync_dev (see lib/guard.ts), and only
 // talks to a server on this machine. Run from the repo root, with the dev
-// server running and the password set in the shell (never in a file):
-//   TEST_ADMIN_B_PASSWORD=... TEST_ADMIN_C_PASSWORD=... TEST_EVERYONE_B_PASSWORD=... npx tsx scripts/dev-only/check-portal.ts --yes
+// server running:
+//   npx tsx scripts/dev-only/check-portal.ts --yes
 // Optional: --base-url http://localhost:3000 (the default)
+// On its own it sets up and removes its own temporary data; run-checks.ts
+// runs it with the data it shares between all three checks.
 //
 // The quotes are put into each scene's state directly in the database
 // (sent, viewed, expired, accepted and expired, never sent, moved back to
@@ -19,8 +21,10 @@
 // No real email is ever sent: the test companies have no Microsoft
 // credentials and no distributor turned on (findExternalServices, checked
 // before anything runs). No scene attempt accepts, declines, or comments
-// successfully, and the one client visit to a quote that is SENT is never
-// made, so no notification fires. Nothing is uploaded anywhere.
+// successfully. The only client visit to a quote that is SENT is the
+// supersededSent scene's older version, which must not record a view or
+// notify anyone (any notification a broken rule made is removed at the
+// end, and could not be emailed). Nothing is uploaded anywhere.
 //
 // The terms scenes store terms holding a script tag, an img onerror, a
 // javascript: link, and an onclick next to harmless text on Test Company
@@ -45,8 +49,11 @@
 // The superseded scene adds a newer sent version to Test Company B's sample
 // quote (made the active one, already viewed so opening it notifies no one)
 // and checks the older version's link still opens and downloads but
-// refuses accept, decline, comments, and item changes. The extra version is
-// deleted right after the scene, and again at the end if a check broke.
+// refuses accept, decline, comments, and item changes. The supersededSent
+// scene does the same with the older version still SENT and never viewed,
+// and checks that opening its link leaves it SENT with no viewed date and
+// no view notification (quote correctness). The extra version is deleted
+// right after each scene, and again at the end if a check broke.
 // The awaiting scene also sends customer input that is too long or the
 // wrong type, which every portal route must refuse with a 400.
 //
@@ -61,11 +68,23 @@
 // deleted, and the quote and its notifications are put back with the rest.
 // The per link limits (20 PDFs, 30 comments an hour) count this script's
 // requests too: a run downloads Company B's customer PDF about four times.
+// Every run makes new quotes with new customer links, so running it again
+// within the hour starts from zero.
+//
+// Marking Company B's sample quote sent makes the app create an opportunity
+// for it (a quote sent or accepted without one gets one), which the later
+// scenes' accepts and declines move. The statusFreeze scene's DECLINED
+// creates none.
+// Every opportunity added during the run is unlinked and removed at the end
+// (lib/quote-opportunities.ts), so the other checks see the run's data as
+// it was set up.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
-import { loadPermissionFixtureIds, loadSampleIds, testNames, type SampleIds } from "./lib/test-data"
-import { HarnessBroken, Session, errorText, isJsonError, printTable, readBaseUrl, type Method, type Row } from "./lib/harness"
+import type { SampleIds, TestNames } from "./lib/test-data"
+import { HarnessBroken, ServerUnreachable, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
+import { isEntryScript, withRunData, type RunData } from "./lib/run-data"
+import { opportunityIdsOf, removeOpportunitiesAddedSince } from "./lib/quote-opportunities"
 
 // Must stay first: nothing below may run before the guard has passed
 enforceDevGuard("check-portal")
@@ -89,6 +108,7 @@ type Scene =
   | "defaultFrozen" // B VIEWED after the send froze DEFAULT_ONE, company default changed to DEFAULT_TWO
   | "statusFreeze" // B DRAFT, never sent, box ticked over CUSTOM_OLD, company default DEFAULT_ONE
   | "superseded" // B VIEWED but not active, with a newer active sent version (deleted after the scene)
+  | "supersededSent" // B SENT and never viewed but not active, with a newer active sent version (deleted after the scene)
   | "regenerate" // B VIEWED, not expired, for the regenerate steps
 
 // ─── ATTEMPTS ───────────────────────────────────────────────────────────────
@@ -143,15 +163,16 @@ interface Attempt {
   after?: (res: { status: number; text: string }, ctx: Ctx) => void
 }
 
-const B = testNames("B")
-const C = testNames("C")
+// This run's names for Test Company B and C, set when the check starts
+let B: TestNames
+let C: TestNames
 
 // What a public response must never carry. Keys are checked with their
 // quotes so words in the quote's own text can't match.
 const PRIVATE_KEYS = ['"cost"', '"internalNotes"', '"pendingEmailPayload"', '"accessToken"', '"internalAccessToken"', '"companyId"', '"userId"']
 const privateValues = (ctx: Ctx) => [...PRIVATE_KEYS, ctx.bClient, ctx.bInternal, ctx.adminEmailB]
-const companyC = [C.company, C.client, C.quoteLine]
-const companyB = [B.company, B.client, B.quoteLine]
+const companyC = () => [C.company, C.client, C.quoteLine]
+const companyB = () => [B.company, B.client, B.quoteLine]
 const p = (token: (ctx: Ctx) => string, rest = "") => (ctx: Ctx) => `/api/portal/${token(ctx)}${rest}`
 const bClient = (ctx: Ctx) => ctx.bClient
 const LINK_INVALID = "This link is no longer valid"
@@ -219,7 +240,7 @@ async function pdfHtmlTermsProblem(prisma: PrismaClient, quoteId: string): Promi
 const ATTEMPTS: Attempt[] = [
   // ── A valid link ──
   { scene: "awaiting", name: "client GET returns the public quote", kind: "control", method: "GET", path: p(bClient), expect: 200,
-    contains: () => [B.quote, B.company, B.quoteLine], notContains: (ctx) => [...privateValues(ctx), ...companyC] },
+    contains: () => [B.quote, B.company, B.quoteLine], notContains: (ctx) => [...privateValues(ctx), ...companyC()] },
   { scene: "awaiting", name: "client comments GET", kind: "allowed", method: "GET", path: p(bClient, "/comments"), expect: 200,
     notContains: () => ['"authorUserId"'] },
   { scene: "awaiting", name: "accept without a signature passes the status gate", kind: "refused", method: "POST", path: p(bClient, "/accept"),
@@ -227,7 +248,7 @@ const ATTEMPTS: Attempt[] = [
   { scene: "awaiting", name: "line item update with nothing passes the status gate", kind: "refused", method: "PATCH",
     path: (ctx) => `/api/portal/${ctx.bClient}/line-items/${ctx.b.quoteLineId}`, body: () => ({}), expect: 400, expectError: "Nothing to update" },
   { scene: "awaiting", name: "Company C link shows only Company C", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.cClient}`,
-    expect: 200, contains: () => [C.company], notContains: () => companyB },
+    expect: 200, contains: () => [C.company], notContains: companyB },
   { scene: "awaiting", name: "Company B token cannot change a Company C line item", kind: "refused", method: "PATCH",
     path: (ctx) => `/api/portal/${ctx.bClient}/line-items/${ctx.c.quoteLineId}`, body: () => ({ quantity: 5 }), expect: 404, expectError: "Line item not found" },
   { scene: "awaiting", name: "never sent quote is not valid", kind: "refused", method: "GET", path: (ctx) => `/api/portal/${ctx.repClient}`,
@@ -403,6 +424,20 @@ const ATTEMPTS: Attempt[] = [
     expect: 400, expectError: "A newer version of this quote has been sent", code: "SUPERSEDED" },
   { scene: "superseded", name: "newer version opens, not superseded", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.newerClient}`,
     expect: 200, contains: () => ['"superseded":false'], notContains: (ctx) => [...PRIVATE_KEYS, ctx.newerClient, ctx.adminEmailB] },
+  // Quote correctness: opening an older version that is still SENT records
+  // no view and notifies no one. The notification is looked for after a
+  // short wait, since the route sends it without waiting.
+  { scene: "supersededSent", name: "older SENT version opens without being marked viewed", kind: "allowed", method: "GET", path: p(bClient), expect: 200,
+    contains: () => ['"superseded":true', '"status":"SENT"'], notContains: privateValues,
+    check: async (_res, ctx, prisma) => {
+      await new Promise((resolve) => setTimeout(resolve, 1500))
+      const q = await prisma.quote.findUniqueOrThrow({ where: { id: ctx.b.quoteId }, select: { status: true, viewedAt: true } })
+      if (q.status !== "SENT" || q.viewedAt) return `the older version is now ${q.status}${q.viewedAt ? " with a viewed date" : ""}`
+      const notified = await prisma.notification.count({
+        where: { companyId: ctx.b.companyId, type: "QUOTE_VIEWED", link: `/dashboard/quotes/${ctx.b.quoteId}`, createdAt: { gte: new Date(Date.now() - 60_000) } },
+      })
+      return notified > 0 ? "the rep was notified of a view" : null
+    } },
 
   // ── Staff responses and regenerate ──
   { scene: "regenerate", as: "admin", name: "quote detail has no customer token", kind: "control", method: "GET", path: (ctx) => `/api/quotes/${ctx.b.quoteId}`,
@@ -427,7 +462,7 @@ const ATTEMPTS: Attempt[] = [
   { scene: "regenerate", name: "old link cannot accept", kind: "refused", method: "POST", path: (ctx) => `/api/portal/${ctx.oldBClient}/accept`,
     body: () => SIGNED, expect: 404, expectError: LINK_INVALID },
   { scene: "regenerate", name: "new link works", kind: "allowed", method: "GET", path: (ctx) => `/api/portal/${ctx.newBClient}`,
-    expect: 200, contains: () => [B.quote], notContains: (ctx) => [...PRIVATE_KEYS, ctx.newBClient, ctx.adminEmailB, ...companyC] },
+    expect: 200, contains: () => [B.quote], notContains: (ctx) => [...PRIVATE_KEYS, ctx.newBClient, ctx.adminEmailB, ...companyC()] },
 ]
 
 const SCENE_ORDER: Scene[] = [
@@ -444,6 +479,7 @@ const SCENE_ORDER: Scene[] = [
   "defaultFrozen",
   "statusFreeze",
   "superseded",
+  "supersededSent",
   "regenerate",
 ]
 
@@ -489,6 +525,7 @@ async function setScene(prisma: PrismaClient, scene: Scene, ids: { b: string; re
     statusFreeze: { ...base, status: "DRAFT" as const, sentAt: null, viewedAt: null },
     // The newer version added for this scene is the active one
     superseded: { ...base, status: "VIEWED" as const, isActive: false },
+    supersededSent: { ...base, status: "SENT" as const, viewedAt: null, isActive: false },
     regenerate: { ...base, status: "VIEWED" as const, isActive: true },
   }[scene]
   // Written straight to the database, past the sanitizer, the way terms
@@ -585,13 +622,16 @@ async function checkResponseRace(
   // The cleanup below deletes this quote's sales orders, so there must be
   // none of its own to begin with
   if ((await prisma.salesOrder.count({ where: { quoteId } })) > 0) {
-    throw new HarnessBroken("Company B's sample quote already has a sales order. Run create-test-companies again to reset it.")
+    throw new HarnessBroken("Company B's sample quote already has a sales order, so this run's data isn't as it was set up.")
   }
   // What an accept writes beyond the fields main puts back
   const signature = await prisma.quote.findUniqueOrThrow({
     where: { id: quoteId },
     select: { signatureType: true, signatureData: true, signerName: true, termsAgreedAt: true, clientPoNumber: true },
   })
+  // The customer link as it is now: the regenerate scene, which runs
+  // before this, replaced the one the scenes started with
+  const { accessToken: link } = await prisma.quote.findUniqueOrThrow({ where: { id: quoteId }, select: { accessToken: true } })
   const rounds: [string, [string, unknown][]][] = [
     ["accept and decline at once", [["/accept", SIGNED], ["/decline", { reason: "dev only" }]]],
     ["two accepts at once", [["/accept", SIGNED], ["/accept", SIGNED]]],
@@ -600,7 +640,7 @@ async function checkResponseRace(
     await setScene(prisma, "awaiting", { b: quoteId, rep: repQuoteId, c: cQuoteId, companyB: b.companyId })
     try {
       const results = await Promise.all(
-        requests.map(([path, body]) => anonymous.request("POST", `/api/portal/${ctx.bClient}${path}`, { json: body }))
+        requests.map(([path, body]) => anonymous.request("POST", `/api/portal/${link}${path}`, { json: body }))
       )
       const won = results.filter((r) => r.status === 200).length
       const lost = results.filter((r) => r.status === 400 && errorText(r.text).includes("already been responded to")).length
@@ -629,33 +669,26 @@ async function checkResponseRace(
 
 // ─── Run ────────────────────────────────────────────────────────────────────
 
-async function main() {
-  const baseUrl = readBaseUrl(process.argv.slice(2))
-  const adminPassword = process.env.TEST_ADMIN_B_PASSWORD
-  const adminCPassword = process.env.TEST_ADMIN_C_PASSWORD
-  const everyonePassword = process.env.TEST_EVERYONE_B_PASSWORD
-  if (!adminPassword || !adminCPassword || !everyonePassword) {
-    throw new HarnessBroken(
-      "Set TEST_ADMIN_B_PASSWORD, TEST_ADMIN_C_PASSWORD, and TEST_EVERYONE_B_PASSWORD in your shell (the passwords create-test-companies printed)."
-    )
-  }
-
+// Runs every scene against this run's data and returns the result (exit code 0
+// all passed, 1 a FAIL or UNEXPECTED). A broken harness throws HarnessBroken.
+export async function checkPortal(prisma: PrismaClient, run: RunData, baseUrl: string): Promise<CheckResult> {
   // Imported only after the guard passed
-  const { prisma } = await import("@/lib/prisma")
   const { newAccessToken } = await import("@/lib/portal-token")
   const rows: Row[] = []
   const startedAt = new Date()
 
-  const b = await loadSampleIds(prisma, "B")
-  const c = await loadSampleIds(prisma, "C")
-  const fx = await loadPermissionFixtureIds(prisma, "B")
+  B = run.companies.B.names
+  C = run.companies.C.names
+  const b = run.companies.B.ids
+  const c = run.companies.C.ids
+  const fx = run.companies.B.fixtures
 
   // Safety: with no Microsoft credentials and no distributor turned on, no
   // email can be sent and no distributor reached even if a check misbehaves
   const external = await findExternalServices(prisma, [b.companyId, c.companyId])
   if (external) throw new HarnessBroken(external)
   if (!b.quoteId || !c.quoteId || !fx.repQuoteId || !b.quoteLineId || !c.quoteLineId) {
-    throw new HarnessBroken("The sample quotes are missing. Run create-test-companies first.")
+    throw new HarnessBroken("The sample quotes are missing from this run's data.")
   }
 
   // Every version of the three quotes, so all of them are put back
@@ -674,8 +707,11 @@ async function main() {
   })
   // Company B's default terms, changed by the default terms scenes
   const originalSettings = await prisma.companySettings.findUnique({ where: { companyId: b.companyId }, select: { quoteTerms: true } })
+  // Marking Company B's sample quote sent makes the app create an
+  // opportunity for it, removed at the end
+  const opportunitiesBefore = await opportunityIdsOf(prisma, [b.companyId, c.companyId])
   if (familyRows.length !== 3) {
-    throw new HarnessBroken("The sample quotes have extra versions. Run create-test-companies again to reset them.")
+    throw new HarnessBroken("The sample quotes have extra versions, so this run's data isn't as it was set up.")
   }
 
   const bRow = await prisma.quote.findUniqueOrThrow({ where: { id: b.quoteId }, select: { accessToken: true, internalAccessToken: true } })
@@ -744,12 +780,13 @@ async function main() {
 
   try {
     const anonymous = new Session("Anonymous", baseUrl)
+    // Signed in once per user for the whole check
     const admin = new Session("Test Admin B", baseUrl)
-    await admin.signIn(B.adminEmail, adminPassword)
+    await run.credentials.signIn(admin, B.adminEmail)
     const adminC = new Session("Test Admin C", baseUrl)
-    await adminC.signIn(C.adminEmail, adminCPassword)
+    await run.credentials.signIn(adminC, C.adminEmail)
     const everyone = new Session("Test Everyone B", baseUrl)
-    await everyone.signIn(B.everyoneEmail, everyonePassword)
+    await run.credentials.signIn(everyone, B.everyoneEmail)
     const sessions: Record<Actor, Session> = { anonymous, admin, adminC, everyone }
     const ACTOR_LABEL: Record<Actor, string> = { anonymous: "", admin: ", Admin B", adminC: ", Admin C", everyone: ", Everyone B" }
     console.log(
@@ -758,7 +795,7 @@ async function main() {
 
     for (const scene of SCENE_ORDER) {
       await setScene(prisma, scene, { b: b.quoteId, rep: fx.repQuoteId, c: c.quoteId, companyB: b.companyId })
-      if (scene === "superseded") await addNewerVersion()
+      if (scene === "superseded" || scene === "supersededSent") await addNewerVersion()
       let before = await snapshot(prisma, familyIds, [b.companyId, c.companyId])
       for (const a of ATTEMPTS.filter((x) => x.scene === scene)) {
         const label = `[${scene}${ACTOR_LABEL[a.as ?? "anonymous"]}] ${a.name}`
@@ -766,6 +803,8 @@ async function main() {
         try {
           res = await sessions[a.as ?? "anonymous"].request(a.method, a.path(ctx), { json: a.body?.(ctx) })
         } catch (err) {
+          // The server stopped answering: no later attempt can run either
+          if (err instanceof ServerUnreachable) throw err
           rows.push({ attempt: label, expected: expectedText(a), actual: "no response", result: "UNEXPECTED", note: err instanceof Error ? err.message : String(err) })
           continue
         }
@@ -784,7 +823,7 @@ async function main() {
         }
         before = await snapshot(prisma, familyIds, [b.companyId, c.companyId])
       }
-      if (scene === "superseded") await removeNewerVersion()
+      if (scene === "superseded" || scene === "supersededSent") await removeNewerVersion()
     }
 
     // Round two, N-19: concurrent responses through the customer link
@@ -793,7 +832,7 @@ async function main() {
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
     console.log(`\n${rows.length} checks: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("UNEXPECTED")} UNEXPECTED`)
-    return count("FAIL") + count("UNEXPECTED") > 0 ? 1 : 0
+    return checkResult(rows)
   } finally {
     // The superseded scene's extra version, if a broken check left it behind
     await removeNewerVersion()
@@ -808,6 +847,9 @@ async function main() {
         await prisma.quoteLineItem.update({ where: { id: li.id }, data: { quantity: li.quantity, optionalSelected: li.optionalSelected } })
       }
     }
+    // The opportunities the app created for the sample quotes, unlinked and
+    // removed with their timeline and audit entries
+    await removeOpportunitiesAddedSince(prisma, [b.companyId, c.companyId], opportunitiesBefore)
     // Nothing above should create these; if a broken rule did, remove them
     await prisma.quoteComment.deleteMany({ where: { quoteId: { in: familyIds }, createdAt: { gte: startedAt } } })
     await prisma.notification.deleteMany({
@@ -820,13 +862,20 @@ async function main() {
       await prisma.companySettings.deleteMany({ where: { companyId: b.companyId } })
     }
     console.log("Sample quotes and Company B's default terms put back the way they were.")
-    await prisma.$disconnect()
   }
 }
 
-main()
-  .then((code) => process.exit(code))
-  .catch((err) => {
-    console.error(err instanceof Error ? err.message : err)
-    process.exit(err instanceof HarnessBroken ? 2 : 1)
-  })
+// On its own: this check's own temporary data, set up and removed around it
+async function main() {
+  const baseUrl = readBaseUrl(process.argv.slice(2))
+  return withRunData("check-portal", (prisma, run) => checkPortal(prisma, run, baseUrl))
+}
+
+if (isEntryScript("check-portal")) {
+  main()
+    .then((result) => process.exit(result.code))
+    .catch((err) => {
+      console.error(err instanceof Error ? err.message : err)
+      process.exit(err instanceof HarnessBroken ? 2 : 1)
+    })
+}

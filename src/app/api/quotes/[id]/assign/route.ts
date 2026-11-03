@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { withoutPortalTokens } from "@/lib/portal-token"
-import { notFound, requireAccess } from "@/lib/api-access"
-import { assertRefs, loadViewableQuote, quoteWhere } from "@/lib/scoped-loaders"
+import { apiError, notFound, requireAccess } from "@/lib/api-access"
+import { assertRefs, loadViewableQuote, mayAssignQuoteTo, quoteWhere, SELF_ASSIGN_ONLY_MESSAGE } from "@/lib/scoped-loaders"
 
 export async function POST(
   req: NextRequest,
@@ -23,6 +23,12 @@ export async function POST(
 
   const quote = await loadViewableQuote(ctx, id)
   if (!quote) return notFound()
+
+  // Without quotes.viewAllUsersQuotes only to themselves, or the quote
+  // would disappear from their view
+  if (!mayAssignQuoteTo(ctx, body.userId)) {
+    return apiError(403, SELF_ASSIGN_ONLY_MESSAGE, "FORBIDDEN")
+  }
 
   // The new owner must be an active user of this company
   const invalid = await assertRefs(ctx, { userId: body.userId })

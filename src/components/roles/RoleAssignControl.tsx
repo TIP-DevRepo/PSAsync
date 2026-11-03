@@ -13,6 +13,25 @@ export interface AssignableRole {
   isGlobalAdmin?: boolean
 }
 
+// A role a user holds because a team they are in gives it (GET /api/users
+// teamRoles), with the teams it comes from
+export interface TeamGrantedRole extends AssignableRole {
+  teams: { id: string; name: string }[]
+}
+
+function listNames(names: string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
+}
+
+// The tooltip of a team granted role: where it comes from, and for a role
+// only a team gives, how to take it away (Manage Users can't)
+export function teamRoleNote(role: TeamGrantedRole, alsoDirect: boolean): string {
+  const from = `team${role.teams.length === 1 ? "" : "s"} ${listNames(role.teams.map((t) => t.name))}`
+  return alsoDirect
+    ? `Given directly and from ${from}`
+    : `From ${from}. Remove the user from the team to take this role away.`
+}
+
 // The Everyone pill every user shows. Everyone is held implicitly by every
 // user, so it is always displayed, locked, and never in the checklist.
 const EVERYONE_PILL = { name: "Everyone", isEveryone: true }
@@ -33,6 +52,11 @@ const COLLAPSED_PILL_COUNT = 2
 // with no assigned roles just shows Everyone. Expanded state is in memory
 // only, so a reload collapses it again.
 //
+// teamRoles are roles the user holds through their teams. They show among
+// the pills once (a role also given directly is marked as both), with a
+// team icon and a tooltip, and can't be removed here: in the checklist a
+// role only a team gives is ticked and disabled.
+//
 // With showEditButton off, only the pills show. That's for rows where the
 // checklist is opened from somewhere else, like the Users table's row menu,
 // which renders RoleChecklist itself.
@@ -46,6 +70,7 @@ export function RoleAssignControl({
   label,
   collapsible = false,
   showEditButton = true,
+  teamRoles = [],
 }: {
   // Every assignable role (never Everyone), highest rank first
   roles: AssignableRole[]
@@ -59,6 +84,7 @@ export function RoleAssignControl({
   label: string
   collapsible?: boolean
   showEditButton?: boolean
+  teamRoles?: TeamGrantedRole[]
 }) {
   const [open, setOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
@@ -78,8 +104,17 @@ export function RoleAssignControl({
   }
 
   const selectedSet = new Set(selectedIds)
-  // Highest rank first, so Global Admin (rank 999999) always leads when held
-  const heldRoles = roles.filter((r) => selectedSet.has(r.id)).sort((a, b) => b.rank - a.rank)
+  const teamRoleById = new Map(teamRoles.map((r) => [r.id, r]))
+  // Highest rank first, so Global Admin (rank 999999) always leads when
+  // held. Each role once, whether given directly, by a team, or both.
+  const heldRoles = [
+    ...roles.filter((r) => selectedSet.has(r.id)),
+    ...teamRoles.filter((r) => !selectedSet.has(r.id)),
+  ].sort((a, b) => b.rank - a.rank)
+  const noteFor = (role: AssignableRole) => {
+    const team = teamRoleById.get(role.id)
+    return team ? teamRoleNote(team, selectedSet.has(role.id)) : undefined
+  }
 
   const canCollapse = collapsible && heldRoles.length > 0
   const collapsed = canCollapse && !expanded
@@ -91,7 +126,7 @@ export function RoleAssignControl({
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1">
       {visibleRoles.map((role) => (
-        <RolePill key={role.id} role={role} />
+        <RolePill key={role.id} role={role} teamNote={noteFor(role)} />
       ))}
       {showEveryone && <RolePill role={EVERYONE_PILL} locked />}
 
@@ -148,6 +183,7 @@ export function RoleAssignControl({
           disabledReason={disabledReason}
           busy={busy}
           label={label}
+          teamRoles={teamRoles}
         />
       )}
     </div>
@@ -173,6 +209,7 @@ export function RoleChecklist({
   busy = false,
   label,
   autoFocus = false,
+  teamRoles = [],
 }: {
   open: boolean
   anchor: MenuAnchor | null
@@ -186,6 +223,8 @@ export function RoleChecklist({
   busy?: boolean
   label: string
   autoFocus?: boolean
+  // Roles the user's teams give them (see RoleAssignControl)
+  teamRoles?: TeamGrantedRole[]
 }) {
   const { menuRef, style: menuStyle } = useFixedMenuPosition(open, anchor)
 
@@ -215,6 +254,7 @@ export function RoleChecklist({
   if (!open) return null
 
   const selectedSet = new Set(selectedIds)
+  const teamRoleById = new Map(teamRoles.map((r) => [r.id, r]))
 
   function toggleRole(roleId: string, checked: boolean) {
     onChange(checked ? [...selectedIds, roleId] : selectedIds.filter((id) => id !== roleId))
@@ -230,7 +270,11 @@ export function RoleChecklist({
     >
       {roles.length === 0 && <p className="px-3 py-2 text-muted-foreground">No roles to assign yet.</p>}
       {roles.map((role) => {
-        const reason = disabledReason(role)
+        const team = teamRoleById.get(role.id)
+        const direct = selectedSet.has(role.id)
+        // Only a team gives it: shown held, and removed only by leaving the team
+        const teamOnly = !!team && !direct
+        const reason = teamOnly ? teamRoleNote(team, false) : disabledReason(role)
         const isDisabled = !!reason || busy
         return (
           <label
@@ -242,13 +286,14 @@ export function RoleChecklist({
             <input
               type="checkbox"
               className="mt-1"
-              checked={selectedSet.has(role.id)}
+              checked={direct || teamOnly}
               disabled={isDisabled}
               onChange={(e) => toggleRole(role.id, e.target.checked)}
             />
             <span className="min-w-0">
-              <RolePill role={role} />
+              <RolePill role={role} teamNote={team ? teamRoleNote(team, direct) : undefined} />
               {reason && <span className="mt-0.5 block text-caption text-muted-foreground">{reason}</span>}
+              {team && direct && <span className="mt-0.5 block text-caption text-muted-foreground">{teamRoleNote(team, true)}</span>}
             </span>
           </label>
         )

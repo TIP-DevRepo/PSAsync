@@ -8,6 +8,10 @@ import { ContactSearchInput, type ContactSearchResult } from "@/components/Conta
 import { formatPhoneInput } from "@/lib/phone"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
+import { clientQuoteDefaults } from "@/lib/quote-client-defaults"
+import { sortUsersByName } from "@/lib/user-picker"
+import { OpportunityPicker } from "@/components/opportunities/OpportunityPicker"
+import { readOpportunityParam } from "@/lib/opportunity-quote-rules"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface UserOption {
@@ -62,16 +66,25 @@ function NewQuoteForm() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const templateId = searchParams.get("template")
+  // Raise Quote from an opportunity: the form starts on its contact (and
+  // client) with the opportunity linked
+  const fromOpportunityId = readOpportunityParam(searchParams.get("opportunity"))
+  const { access, can } = useAccess()
+  // Without seeing everyone's quotes, a quote can only be assigned to its
+  // creator (the API refuses anyone else)
+  const canAssignOthers = can("quotes.viewAllUsersQuotes")
 
   const [users, setUsers] = useState<UserOption[]>([])
   const [template, setTemplate] = useState<Template | null>(null)
   const [selectedContact, setSelectedContact] = useState<ContactSearchResult | null>(null)
+  const [opportunityId, setOpportunityId] = useState<string | null>(null)
 
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
 
   const [form, setForm] = useState({
-    userId: "",
+    // The creator unless another rep is picked
+    userId: access?.userId ?? "",
     title: "",
     introText: "",
     internalNotes: "",
@@ -98,7 +111,9 @@ function NewQuoteForm() {
 
     fetch("/api/users")
       .then((res) => res.json())
-      .then((all: UserOption[]) => setUsers(all.filter((u) => u.active)))
+      .then((all: UserOption[]) =>
+        setUsers(sortUsersByName(all.filter((u) => u.active && (canAssignOthers || u.id === access?.userId))))
+      )
 
     fetch(`/api/quote-templates/${templateId}`)
       .then((res) => res.json())
@@ -113,23 +128,36 @@ function NewQuoteForm() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [templateId])
 
+  // The opportunity's contact, then the opportunity itself once it is chosen
+  useEffect(() => {
+    if (!fromOpportunityId) return
+    let cancelled = false
+    fetch(`/api/opportunities/${fromOpportunityId}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((o: { id: string; contact: { id: string } } | null) =>
+        o ? fetch(`/api/contacts/search?id=${encodeURIComponent(o.contact.id)}`).then((res) => (res.ok ? res.json() : [])).then((list: ContactSearchResult[]) => ({ o, contact: list[0] })) : null
+      )
+      .then((found) => {
+        if (cancelled || !found?.contact) return
+        handleContactSelect(found.contact)
+        setOpportunityId(found.o.id)
+      })
+      .catch(() => undefined)
+    return () => {
+      cancelled = true
+    }
+  }, [fromOpportunityId])
+
   function handleContactSelect(contact: ContactSearchResult) {
     setSelectedContact(contact)
+    // A different contact needs an opportunity of its own
+    setOpportunityId(null)
     // Autofill shipping address from the client's main shipping location,
     // falling back to their main billing location if no shipping location
-    // is set. Stays independently editable from this point on — doesn't
+    // is set, and the client's payment terms (the same rule a quote copy
+    // uses). Stays independently editable from this point on, and doesn't
     // write back to the client's record.
-    const loc = contact.client.mainShippingLocation ?? contact.client.mainBillingLocation
-    setForm((prev) => ({
-      ...prev,
-      shipAddress: loc?.address ?? "",
-      shipAddress2: loc?.address2 ?? "",
-      shipCity: loc?.city ?? "",
-      shipState: loc?.state ?? "",
-      shipZip: loc?.zip ?? "",
-      shipCountry: loc?.country ?? "",
-      paymentTerms: contact.client.paymentTerms ?? "",
-    }))
+    setForm((prev) => ({ ...prev, ...clientQuoteDefaults(contact.client) }))
   }
 
   async function handleSave() {
@@ -149,6 +177,7 @@ function NewQuoteForm() {
         clientId: selectedContact.client.id,
         contactId: selectedContact.id,
         templateId,
+        opportunityId,
       }),
     })
 
@@ -198,6 +227,14 @@ function NewQuoteForm() {
                 {selectedContact.phone && <p className="text-zinc-500">{formatPhoneInput(selectedContact.phone)}</p>}
               </div>
             )}
+
+            <OpportunityPicker
+              record="quote"
+              clientId={selectedContact?.client.id ?? null}
+              contactId={selectedContact?.id ?? null}
+              value={opportunityId}
+              onChange={setOpportunityId}
+            />
           </div>
 
           <div className="rounded-md border p-4 space-y-3">
@@ -249,7 +286,8 @@ function NewQuoteForm() {
                   onChange={(e) => update("userId", e.target.value)}
                   className="w-full rounded-md border px-3 py-2 text-sm"
                 >
-                  <option value="">Me (default)</option>
+                  {/* Until the list loads, the creator (the default) has no name to show */}
+                  {!users.some((u) => u.id === form.userId) && <option value={form.userId}>Loading...</option>}
                   {users.map((u) => (
                     <option key={u.id} value={u.id}>
                       {u.name}

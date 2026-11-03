@@ -1,0 +1,239 @@
+// The ACTION entry keys a timeline records, their data shapes, and the
+// sentence each one reads as. Shared by the server (which writes them) and
+// the timeline component (which shows them), so no React and no database
+// imports. Generic so tickets can record the same keys later.
+//
+// Every reference is stored with its name as well as its id, so an entry
+// still reads correctly after a stage, user, or type is renamed or deleted.
+
+export const TIMELINE_ACTIONS = [
+  "created",
+  "stage_changed",
+  "team_changed",
+  "owner_changed",
+  "type_changed",
+  "client_changed",
+  "contact_changed",
+  "location_changed",
+  "title_changed",
+  "expected_value_changed",
+  "expected_close_date_changed",
+  "attachment_added",
+  "attachment_removed",
+  "restored",
+  // Quotes, sales orders, and purchase orders linked to or unlinked from
+  // the record, and the quote events that can move its stage
+  // (src/lib/opportunity-quotes.ts)
+  "quote_linked",
+  "quote_unlinked",
+  "quote_sent",
+  "quote_accepted",
+  "quote_declined",
+  "quote_expired",
+  "sales_order_linked",
+  "sales_order_unlinked",
+  "purchase_order_linked",
+  "purchase_order_unlinked",
+] as const
+
+export type TimelineActionKey = (typeof TIMELINE_ACTIONS)[number]
+
+// A record another one points at, as it was named when the entry was written
+export interface TimelineRef {
+  id: string
+  name: string
+}
+
+// What each key's data holds. from and to are null for "nothing" (unassigned,
+// no type, no value, no date).
+// A linked record, by id and its number ("Q-2026-0042", "SO-2026-0007").
+// deleted is set when the link went because the record was deleted.
+export interface RecordLinkData {
+  record: TimelineRef
+  deleted?: boolean
+}
+
+export interface TimelineActionData {
+  created: { label: string; number: string; title: string; stage: TimelineRef | null }
+  // reason is set on a move a quote event made, for example "Quote
+  // Q-2026-0042 accepted"
+  stage_changed: { from: TimelineRef | null; to: TimelineRef | null; reason?: string }
+  team_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  owner_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  type_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  client_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  contact_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  location_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  title_changed: { from: string | null; to: string | null }
+  // Decimal text, for example "1250.5"
+  expected_value_changed: { from: string | null; to: string | null }
+  // YYYY-MM-DD
+  expected_close_date_changed: { from: string | null; to: string | null }
+  attachment_added: { attachmentId: string; fileName: string }
+  attachment_removed: { attachmentId: string; fileName: string }
+  // A deleted record restored from the audit log
+  restored: { label: string }
+  quote_linked: RecordLinkData
+  quote_unlinked: RecordLinkData
+  quote_sent: RecordLinkData
+  quote_accepted: RecordLinkData
+  quote_declined: RecordLinkData
+  quote_expired: RecordLinkData
+  sales_order_linked: RecordLinkData
+  sales_order_unlinked: RecordLinkData
+  purchase_order_linked: RecordLinkData
+  purchase_order_unlinked: RecordLinkData
+}
+
+// A NOTE posted with a stage change stores the move in its data as
+// { stageChange: { from, to } }, names and ids (and the stage category, for
+// the pill's tint), instead of a separate stage_changed entry. Editing the
+// note later never changes it.
+export interface NoteStageChange {
+  from: TimelineRef & { category?: string }
+  to: TimelineRef & { category?: string }
+}
+
+// The stage change a note's data holds, or null. Reads stored data without
+// trusting its shape.
+export function noteStageChange(data: unknown): NoteStageChange | null {
+  const change = data && typeof data === "object" ? (data as { stageChange?: unknown }).stageChange : null
+  if (!change || typeof change !== "object") return null
+  const { from, to } = change as { from?: unknown; to?: unknown }
+  const isRef = (r: unknown): r is NoteStageChange["to"] =>
+    !!r && typeof r === "object" && typeof (r as TimelineRef).id === "string" && typeof (r as TimelineRef).name === "string"
+  return isRef(from) && isRef(to) ? { from, to } : null
+}
+
+// An entry made through an action button stores the button as it was named
+// then, { actionButton: { id, label } }, so the entry still reads correctly
+// after the button is renamed or deleted
+export function entryActionButton(data: unknown): TimelineRef | null {
+  const button = data && typeof data === "object" ? (data as { actionButton?: unknown }).actionButton : null
+  if (!button || typeof button !== "object") return null
+  const { id, name, label } = button as { id?: unknown; name?: unknown; label?: unknown }
+  const text = typeof label === "string" ? label : name
+  return typeof id === "string" && typeof text === "string" && text ? { id, name: text } : null
+}
+
+// What an EMAIL_OUT entry's data says about the email, for its card. Reads
+// stored data without trusting its shape; null when it holds none.
+export function emailOutDetails(data: unknown): { from: string; to: string[]; cc: string[]; bcc: string[]; subject: string; attachments: string[] } | null {
+  const email = data && typeof data === "object" ? (data as { email?: unknown }).email : null
+  if (!email || typeof email !== "object") return null
+  const e = email as Record<string, unknown>
+  const list = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [])
+  const from = e.from && typeof e.from === "object" ? (e.from as Record<string, unknown>) : {}
+  const fromEmail = typeof from.email === "string" ? from.email : ""
+  const fromName = typeof from.name === "string" && from.name ? from.name : null
+  return {
+    from: fromName ? `${fromName} (${fromEmail})` : fromEmail,
+    to: list(e.to),
+    cc: list(e.cc),
+    bcc: list(e.bcc),
+    subject: typeof e.subject === "string" ? e.subject : "",
+    attachments: Array.isArray(e.attachments)
+      ? e.attachments.map((a) => (a && typeof a === "object" ? (a as { fileName?: unknown }).fileName : null)).filter((n): n is string => typeof n === "string")
+      : [],
+  }
+}
+
+export type TimelineAction ={ [K in TimelineActionKey]: { action: K; data: TimelineActionData[K] } }[TimelineActionKey]
+
+// True when HTML holds no text at all once its tags are removed (the editor
+// sends "<p></p>" for an empty note). The server checks the sanitized body;
+// the composer uses it to keep Add note disabled.
+export function isBlankHtml(html: string): boolean {
+  return (
+    html
+      .replace(/<[^>]*>/g, "")
+      .replace(/&nbsp;|&#160;|&#xa0;/gi, " ")
+      .trim() === ""
+  )
+}
+
+// ─── Sentences ──────────────────────────────────────────────────────────────
+
+const obj = (value: unknown): Record<string, unknown> => (value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {})
+const refName = (value: unknown, none: string) => {
+  const name = obj(value).name
+  return typeof name === "string" && name ? name : none
+}
+const text = (value: unknown, none: string) => (typeof value === "string" && value ? value : none)
+
+function money(value: unknown): string {
+  if (typeof value !== "string" || !value) return "not set"
+  const n = Number(value)
+  return Number.isFinite(n) ? `$${n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}` : value
+}
+
+function dateOnly(value: unknown): string {
+  if (typeof value !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return "not set"
+  return new Date(`${value}T00:00:00.000Z`).toLocaleDateString(undefined, { timeZone: "UTC" })
+}
+
+const LINK_ACTION_WORDS: Record<string, [string, "linked" | "unlinked"]> = {
+  quote_linked: ["Quote", "linked"],
+  quote_unlinked: ["Quote", "unlinked"],
+  sales_order_linked: ["Sales order", "linked"],
+  sales_order_unlinked: ["Sales order", "unlinked"],
+  purchase_order_linked: ["Purchase order", "linked"],
+  purchase_order_unlinked: ["Purchase order", "unlinked"],
+}
+
+// One plain sentence for an ACTION entry, for example "Stage changed from
+// New to Qualified". Reads whatever data is stored without trusting its shape.
+export function describeTimelineAction(action: string | null, data: unknown): string {
+  const d = obj(data)
+  switch (action) {
+    case "created":
+      return `${text(d.label, "Record")} created${typeof d.number === "string" && d.number ? ` as ${d.number}` : ""}${
+        d.stage ? ` in ${refName(d.stage, "a stage")}` : ""
+      }`
+    case "stage_changed":
+      return `Stage changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}${
+        typeof d.reason === "string" && d.reason ? ` (${d.reason})` : ""
+      }`
+    case "team_changed":
+      return `Team changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
+    case "owner_changed":
+      return `Owner changed from ${refName(d.from, "Unassigned")} to ${refName(d.to, "Unassigned")}`
+    case "type_changed":
+      return `Type changed from ${refName(d.from, "None")} to ${refName(d.to, "None")}`
+    case "client_changed":
+      return `Client changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
+    case "contact_changed":
+      return `Contact changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
+    case "location_changed":
+      return `Location changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
+    case "title_changed":
+      return `Title changed from "${text(d.from, "")}" to "${text(d.to, "")}"`
+    case "expected_value_changed":
+      return `Expected value changed from ${money(d.from)} to ${money(d.to)}`
+    case "expected_close_date_changed":
+      return `Expected close date changed from ${dateOnly(d.from)} to ${dateOnly(d.to)}`
+    case "attachment_added":
+      return `Attachment added: ${text(d.fileName, "a file")}`
+    case "attachment_removed":
+      return `Attachment removed: ${text(d.fileName, "a file")}`
+    case "restored":
+      return `${text(d.label, "Record")} restored after being deleted`
+    case "quote_linked":
+    case "quote_unlinked":
+    case "sales_order_linked":
+    case "sales_order_unlinked":
+    case "purchase_order_linked":
+    case "purchase_order_unlinked": {
+      const [kind, change] = LINK_ACTION_WORDS[action]
+      const name = `${kind} ${refName(d.record, "")}`.trim()
+      return change === "unlinked" && d.deleted === true ? `${name} deleted, so it is no longer linked` : `${name} ${change}`
+    }
+    case "quote_sent":
+    case "quote_accepted":
+    case "quote_declined":
+    case "quote_expired":
+      return `Quote ${refName(d.record, "")} ${action.slice("quote_".length)}`
+    default:
+      return "Updated"
+  }
+}

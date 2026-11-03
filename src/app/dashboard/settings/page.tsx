@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
-import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin } from "lucide-react"
+import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound, MousePointerClick, History } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
@@ -17,6 +17,10 @@ import { NotificationSettingsPanel } from "@/components/settings/NotificationSet
 import { DistributorSettingsPanel } from "@/components/settings/DistributorSettingsPanel"
 import { MicrosoftSettingsPanel } from "@/components/settings/MicrosoftSettingsPanel"
 import { SalesOrderSettingsPanel } from "@/components/settings/SalesOrderSettingsPanel"
+import { OpportunitySettingsPanel } from "@/components/settings/OpportunitySettingsPanel"
+import { TeamsSettingsPanel } from "@/components/settings/TeamsSettingsPanel"
+import { ActionButtonsSettingsPanel } from "@/components/settings/ActionButtonsSettingsPanel"
+import { AuditLogSettingsPanel } from "@/components/settings/AuditLogSettingsPanel"
 import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
 import { NoAccess } from "@/components/NoAccess"
 import { useAccess } from "@/components/AccessProvider"
@@ -25,15 +29,19 @@ type PanelKey =
   | "company"
   | "users"
   | "roles"
+  | "teams"
   | "industries"
   | "contactTags"
   | "categories"
   | "salesOrders"
+  | "opportunities"
+  | "actionButtons"
   | "quotes"
   | "approval-workflows"
   | "notifications"
   | "distributors"
   | "microsoft"
+  | "auditLog"
 
 interface SettingsItem {
   key: PanelKey
@@ -56,6 +64,7 @@ const settingsCategories: SettingsCategory[] = [
     items: [
       { key: "users", label: "Manage Users", icon: UserCog },
       { key: "roles", label: "Roles & Permissions", icon: ShieldCheck },
+      { key: "teams", label: "Teams", icon: UsersRound },
     ],
   },
   {
@@ -77,6 +86,13 @@ const settingsCategories: SettingsCategory[] = [
     ],
   },
   {
+    label: "Opportunities",
+    items: [
+      { key: "opportunities", label: "Opportunity Settings", icon: Target },
+      { key: "actionButtons", label: "Action Buttons", icon: MousePointerClick },
+    ],
+  },
+  {
     label: "Sales Orders",
     items: [{ key: "salesOrders", label: "Sales Order Settings", icon: ClipboardList }],
   },
@@ -91,6 +107,10 @@ const settingsCategories: SettingsCategory[] = [
       { key: "microsoft", label: "Microsoft / Outlook Integration", icon: Mail },
     ],
   },
+  {
+    label: "Audit",
+    items: [{ key: "auditLog", label: "Audit Log", icon: History }],
+  },
 ]
 
 // The permission each panel needs, matching the API rules behind it. null
@@ -101,15 +121,19 @@ const PANEL_PERMISSION: Record<PanelKey, string | null> = {
   company: "settingsSections.company",
   users: "settingsSections.users",
   roles: "settingsSections.users",
+  teams: "settingsSections.teams",
   industries: "settingsSections.company",
   contactTags: "settingsSections.company",
   categories: "settingsSections.company",
   salesOrders: "settingsSections.salesOrders",
+  opportunities: "settingsSections.opportunities",
+  actionButtons: "settingsSections.actionButtons",
   quotes: "settingsSections.quotes",
   "approval-workflows": "settingsSections.approvalWorkflows",
   notifications: "settingsSections.notifications",
   distributors: "settingsSections.integrations",
   microsoft: null,
+  auditLog: "auditLog.view",
 }
 
 const ITEM_LOOKUP = {} as Record<PanelKey, { label: string; category: string }>
@@ -131,6 +155,8 @@ function renderPanel(key: PanelKey | null) {
       return <UsersSettingsPanel />
       case "roles":
       return <RolesPermissionsPanel />
+    case "teams":
+      return <TeamsSettingsPanel />
         case "industries":
       return <IndustriesSettingsPanel />
     case "categories":
@@ -139,6 +165,10 @@ function renderPanel(key: PanelKey | null) {
       return <ContactTagsSettingsPanel />
     case "salesOrders":
       return <SalesOrderSettingsPanel />
+    case "opportunities":
+      return <OpportunitySettingsPanel />
+    case "actionButtons":
+      return <ActionButtonsSettingsPanel />
     case "quotes":
       return <QuoteSettingsPanel />
     case "approval-workflows":
@@ -149,6 +179,8 @@ function renderPanel(key: PanelKey | null) {
       return <DistributorSettingsPanel />
     case "microsoft":
       return <MicrosoftSettingsPanel />
+    case "auditLog":
+      return <AuditLogSettingsPanel />
     default:
       return (
         <p className="text-sm text-muted-foreground">

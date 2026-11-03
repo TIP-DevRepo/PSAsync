@@ -1,19 +1,23 @@
-import { checkAccess, type EffectiveAccess, type RolePermissions } from "@/lib/permissions"
+import type { EffectiveAccess, RolePermissions } from "@/lib/permissions"
+// The database free module, so the grant rule (src/lib/role-grants.ts) can run in the browser too
+import { checkAccess } from "@/lib/access-check"
 
 // Every key a role's permissions JSON may hold, matching RolePermissions,
 // the Roles & Permissions panel, and the default role shapes. A permission
 // added later must be listed here too, or saving a role that has it is
 // rejected as unknown.
 const BOOLEAN_SECTIONS: Record<string, readonly string[]> = {
-  pages: ["clients", "catalog", "vendors", "inventory", "quotes", "settings", "salesOrders", "purchaseOrders"],
+  pages: ["clients", "catalog", "vendors", "inventory", "quotes", "settings", "salesOrders", "purchaseOrders", "opportunities"],
   quotes: ["create", "edit", "delete", "changeStatus", "approve", "sendEmail", "viewAllUsersQuotes", "sendAsOthers"],
   clients: ["create", "edit", "delete"],
   salesOrders: ["create", "edit", "delete", "changeStatus", "generatePO", "viewAll"],
   purchaseOrders: ["create", "edit", "delete", "changeStatus", "send", "viewAll"],
+  opportunities: ["create", "edit", "delete", "viewTeam", "viewAll"],
   catalog: ["delete"],
   inventory: ["delete"],
-  settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders"],
+  settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders", "opportunities", "teams", "actionButtons"],
   dashboards: ["manage"],
+  auditLog: ["view", "restore"],
 }
 
 // Keys that were removed from the catalog but may still be stored on

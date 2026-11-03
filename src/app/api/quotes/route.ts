@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { apiError, requireAccess } from "@/lib/api-access"
-import { assertRefs, quoteListWhere } from "@/lib/scoped-loaders"
+import { userFacingError } from "@/lib/user-error"
+import { isNumberCollision, NUMBER_TAKEN_MESSAGE, takeRecordNumber } from "@/lib/record-number"
+import { assertRefs, mayAssignQuoteTo, quoteListWhere, SELF_ASSIGN_ONLY_MESSAGE } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
 import { termsForStorage } from "@/lib/sanitize-terms"
+import { copiedLineData, COPY_SOURCE_LINE_ORDER } from "@/lib/quote-line-copy"
+import { setQuoteFamilyOpportunity } from "@/lib/opportunity-quotes"
+import { readOptionalId } from "@/lib/opportunity-rules"
+import type { Prisma } from "@/generated/prisma"
 
 export async function GET() {
   const { ctx, response } = await requireAccess({ page: "quotes", message: "You do not have permission to view quotes" })
@@ -96,9 +102,26 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A client is required" }, { status: 400 })
   }
 
-  // The contact must belong to the quote's client. userId is the Assigned
-  // Rep picked on the New Quote form, and has to be an active user here.
-  const invalid = await assertRefs(ctx, { clientId: body.clientId, contactId: body.contactId, userId: body.userId })
+  // userId is the Assigned Rep picked on the New Quote form. Without
+  // quotes.viewAllUsersQuotes it can only be the creator, who would
+  // otherwise lose sight of the quote.
+  if (body.userId && !mayAssignQuoteTo(ctx, body.userId)) {
+    return apiError(403, SELF_ASSIGN_ONLY_MESSAGE, "FORBIDDEN")
+  }
+
+  // The contact must belong to the quote's client, and the Assigned Rep has
+  // to be an active user here. An optional opportunity (the Raise Quote
+  // action, or the form's Opportunity picker) must be an OPEN one of that
+  // client and contact the user may open.
+  const linkRef = readOptionalId(body.opportunityId)
+  if (linkRef.error !== undefined) return apiError(400, "Invalid opportunity", "INVALID_REFERENCE")
+  const opportunityId = linkRef.value
+  const invalid = await assertRefs(ctx, {
+    clientId: body.clientId,
+    contactId: body.contactId,
+    userId: body.userId,
+    quoteOpportunityId: opportunityId,
+  })
   if (invalid) return invalid
 
   const companyId = ctx.companyId
@@ -110,32 +133,11 @@ export async function POST(req: NextRequest) {
   const prefix = settings?.quotePrefix ?? "Q"
 
   // If a template was selected, load it (with its line items) to prefill from.
-  // Every field carries over as-is from the template line item — pricing,
-  // bundles, choice groups, text blocks, recurring settings, everything —
-  // so a template is a true starting point, not just a name/qty shell.
-  let templateLineItems: {
-    catalogItemId: string | null
-    section: string | null
-    sortOrder: number
-    name: string
-    description: string | null
-    sku: string | null
-    quantity: number
-    unitPrice: number
-    cost: number
-    discount: number
-    taxable: boolean
-    isRecurring: boolean
-    recurringInterval: "MONTHLY" | "QUARTERLY" | "ANNUALLY" | null
-    isOptional: boolean
-    optionalSelected: boolean
-    quantityAdjustable: boolean
-    choiceGroup: string | null
-    isTextBlock: boolean
-    bundleName: string | null
-    bundleDisplayMode: string | null
-    isBundleHeader: boolean
-  }[] = []
+  // Every field carries over as-is from the template line item (pricing,
+  // bundles, choice groups, text blocks, recurring settings, everything,
+  // see copiedLineData) so a template is a true starting point, not just a
+  // name/qty shell.
+  let templateLineItems: Prisma.QuoteLineItemUncheckedCreateWithoutQuoteInput[] = []
   let templateTerms: string | null = null
   let templateUsesDefault: boolean | null = null
   let templateSections: string[] = []
@@ -143,7 +145,7 @@ export async function POST(req: NextRequest) {
   if (body.templateId) {
     const template = await prisma.quoteTemplate.findUnique({
       where: { id: body.templateId, companyId },
-      include: { lineItems: true },
+      include: { lineItems: { orderBy: COPY_SOURCE_LINE_ORDER } },
     })
     if (!template) {
       return apiError(400, "Invalid template", "INVALID_REFERENCE")
@@ -153,40 +155,9 @@ export async function POST(req: NextRequest) {
       templateTerms = template.terms
       templateUsesDefault = template.useDefaultTerms
       templateSections = template.sections
-      templateLineItems = template.lineItems.map((tli) => ({
-        catalogItemId: tli.catalogItemId,
-        section: tli.section,
-        sortOrder: tli.sortOrder,
-        name: tli.name,
-        description: tli.description,
-        sku: tli.sku,
-        quantity: tli.quantity,
-        unitPrice: tli.unitPrice,
-        cost: tli.cost,
-        discount: tli.discount,
-        taxable: tli.taxable,
-        isRecurring: tli.isRecurring,
-        recurringInterval: tli.recurringInterval,
-        isOptional: tli.isOptional,
-        optionalSelected: tli.optionalSelected,
-        quantityAdjustable: tli.quantityAdjustable,
-        choiceGroup: tli.choiceGroup,
-        isTextBlock: tli.isTextBlock,
-        bundleName: tli.bundleName,
-        bundleDisplayMode: tli.bundleDisplayMode,
-        isBundleHeader: tli.isBundleHeader,
-      }))
+      templateLineItems = template.lineItems.map(copiedLineData)
     }
   }
-
-  // Generate the next sequential quote number for this company
-  const year = new Date().getFullYear()
-  // Count quote *families*, not every row — each family has exactly one
-  // version-1 row, so counting those (not all versions) keeps numbering
-  // sequential for genuinely new quotes regardless of how many revisions
-  // any existing quote has
-  const existingCount = await prisma.quote.count({ where: { companyId, version: 1 } })
-  const quoteNumber = `${prefix}-${year}-${String(existingCount + 1).padStart(4, "0")}`
 
   // Expiry date: explicit date from the form, or today + expiry days
   const expiryDays = Number(body.expiryDays) || settings?.quoteExpiryDays || 30
@@ -209,35 +180,49 @@ export async function POST(req: NextRequest) {
     ? termsForStorage(settings?.quoteTerms)
     : termsForStorage(body.terms) || termsForStorage(templateTerms) || termsForStorage(settings?.quoteTerms)
 
-  const quote = await prisma.quote.create({
-    data: {
-      companyId,
-      clientId: body.clientId,
-      contactId: body.contactId || null,
-      userId: body.userId || ctx.userId,
-      quoteNumber,
-      accessToken: newAccessToken(),
-      internalAccessToken: newAccessToken(),
-      templateId: body.templateId || null,
-      title: body.title || null,
-      introText: body.introText || null,
-      useDefaultTerms,
-      terms,
-      internalNotes: body.internalNotes || null,
-      shipAddress: body.shipAddress || null,
-      shipAddress2: body.shipAddress2 || null,
-      shipCity: body.shipCity || null,
-      shipState: body.shipState || null,
-      shipZip: body.shipZip || null,
-      shipCountry: body.shipCountry || null,
-      paymentTerms: body.paymentTerms || null,
-      expiresAt,
-      sections: templateSections,
-      lineItems: {
-        create: templateLineItems,
-      },
-    },
-  })
+  // The next number from the company's quote counter, taken in the same
+  // transaction as the create so a failed create gives it back
+  let quote
+  try {
+    quote = await prisma.$transaction(async (tx) => {
+      const quoteNumber = await takeRecordNumber(tx, companyId, "quote", prefix)
+      const created = await tx.quote.create({
+        data: {
+          companyId,
+          clientId: body.clientId,
+          contactId: body.contactId || null,
+          userId: body.userId || ctx.userId,
+          quoteNumber,
+          accessToken: newAccessToken(),
+          internalAccessToken: newAccessToken(),
+          templateId: body.templateId || null,
+          title: body.title || null,
+          introText: body.introText || null,
+          useDefaultTerms,
+          terms,
+          internalNotes: body.internalNotes || null,
+          shipAddress: body.shipAddress || null,
+          shipAddress2: body.shipAddress2 || null,
+          shipCity: body.shipCity || null,
+          shipState: body.shipState || null,
+          shipZip: body.shipZip || null,
+          shipCountry: body.shipCountry || null,
+          paymentTerms: body.paymentTerms || null,
+          expiresAt,
+          sections: templateSections,
+          lineItems: {
+            create: templateLineItems,
+          },
+        },
+      })
+      await setQuoteFamilyOpportunity(tx, { companyId, actorId: ctx.userId, quoteNumber, from: null, to: opportunityId })
+      return { ...created, opportunityId }
+    })
+  } catch (err) {
+    if (isNumberCollision(err)) return apiError(409, NUMBER_TAKEN_MESSAGE, "NUMBER_TAKEN")
+    const { message, status } = userFacingError(err, "Creating a quote")
+    return apiError(status, message)
+  }
 
   return NextResponse.json(withoutPortalTokens(quote))
 }

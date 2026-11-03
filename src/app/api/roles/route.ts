@@ -4,17 +4,20 @@ import { requireAccess } from "@/lib/api-access"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
 import { readRoleColor } from "@/lib/role-colors"
 import { getRegularRolesInOrder, applyRegularRoleOrder } from "@/lib/role-order"
+import { roleGrantProblem } from "@/lib/role-grants"
 
 const DEFAULT_PERMISSIONS = {
-  pages: { clients: false, catalog: false, vendors: false, inventory: false, quotes: false, settings: false, salesOrders: false, purchaseOrders: false },
+  pages: { clients: false, catalog: false, vendors: false, inventory: false, quotes: false, settings: false, salesOrders: false, purchaseOrders: false, opportunities: false },
   quotes: { create: false, edit: false, delete: false, changeStatus: false, approve: false, sendEmail: false, viewAllUsersQuotes: false, sendAsOthers: false },
   clients: { create: false, edit: false, delete: false },
   salesOrders: { create: false, edit: false, delete: false, changeStatus: false, generatePO: false, viewAll: false },
   purchaseOrders: { create: false, edit: false, delete: false, changeStatus: false, send: false, viewAll: false },
+  opportunities: { create: false, edit: false, delete: false, viewTeam: false, viewAll: false },
   catalog: { delete: false },
   inventory: { delete: false },
-  settingsSections: { company: false, users: false, quotes: false, approvalWorkflows: false, notifications: false, integrations: false, salesOrders: false },
+  settingsSections: { company: false, users: false, quotes: false, approvalWorkflows: false, notifications: false, integrations: false, salesOrders: false, opportunities: false, teams: false, actionButtons: false },
   dashboards: { manage: false },
+  auditLog: { view: false, restore: false },
 }
 
 // Any active user, since pickers on other pages (approval workflows, SO
@@ -38,11 +41,15 @@ export async function GET() {
     include: { _count: { select: { userRoles: true } } },
   })
 
+  // grantRefusal says why the caller can't give the role to anyone (the
+  // grant rule, src/lib/role-grants.ts), or null, so pickers can show it
+  // disabled without sending the role's permissions
   return NextResponse.json(
     roles.map(({ _count, permissions, ...role }) => ({
       ...role,
       ...(showPermissions ? { permissions } : {}),
       userCount: _count.userRoles,
+      grantRefusal: roleGrantProblem(ctx.access, [{ name: role.name, rank: role.rank, permissions }], "user"),
     }))
   )
 }

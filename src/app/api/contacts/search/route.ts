@@ -8,23 +8,28 @@ export async function GET(req: NextRequest) {
   const { ctx, response } = await requireAccess()
   if (response) return response
 
+  // ?id= is one contact of the company by id, in the same shape, for a
+  // form opened already filled in (the Raise Quote action)
+  const id = req.nextUrl.searchParams.get("id")?.trim() ?? ""
   const q = req.nextUrl.searchParams.get("q")?.trim() ?? ""
-  if (q.length < 2) {
+  if (!id && q.length < 2) {
     return NextResponse.json([])
   }
 
   const contacts = await prisma.contact.findMany({
-    where: {
-      client: { companyId: ctx.companyId },
-      OR: [
-        { firstName: { contains: q, mode: "insensitive" } },
-        { lastName: { contains: q, mode: "insensitive" } },
-        { email: { contains: q, mode: "insensitive" } },
-        { phone: { contains: q, mode: "insensitive" } },
-        { title: { contains: q, mode: "insensitive" } },
-        { client: { name: { contains: q, mode: "insensitive" } } },
-      ],
-    },
+    where: id
+      ? { id, client: { companyId: ctx.companyId } }
+      : {
+          client: { companyId: ctx.companyId },
+          OR: [
+            { firstName: { contains: q, mode: "insensitive" } },
+            { lastName: { contains: q, mode: "insensitive" } },
+            { email: { contains: q, mode: "insensitive" } },
+            { phone: { contains: q, mode: "insensitive" } },
+            { title: { contains: q, mode: "insensitive" } },
+            { client: { name: { contains: q, mode: "insensitive" } } },
+          ],
+        },
     include: {
       client: {
         select: {

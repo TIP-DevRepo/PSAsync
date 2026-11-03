@@ -38,6 +38,7 @@ interface RolePermissions {
     settings: boolean
     salesOrders: boolean
     purchaseOrders: boolean
+    opportunities: boolean
   }
   quotes: {
     create: boolean
@@ -52,6 +53,7 @@ interface RolePermissions {
   clients: { create: boolean; edit: boolean; delete: boolean }
   salesOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; generatePO: boolean; viewAll: boolean }
   purchaseOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; send: boolean; viewAll: boolean }
+  opportunities: { create: boolean; edit: boolean; delete: boolean; viewTeam: boolean; viewAll: boolean }
   catalog: { delete: boolean }
   inventory: { delete: boolean }
   settingsSections: {
@@ -62,8 +64,12 @@ interface RolePermissions {
     notifications: boolean
     integrations: boolean
     salesOrders: boolean
+    opportunities: boolean
+    teams: boolean
+    actionButtons: boolean
   }
   dashboards: { manage: boolean }
+  auditLog: { view: boolean; restore: boolean }
 }
 
 interface Role {
@@ -87,6 +93,7 @@ const PAGE_LABELS: [keyof RolePermissions["pages"], string][] = [
   ["quotes", "Quotes"],
   ["salesOrders", "Sales Orders"],
   ["purchaseOrders", "Purchase Orders"],
+  ["opportunities", "Opportunities"],
   ["settings", "Settings (whole section)"],
 ]
 
@@ -125,6 +132,14 @@ const PURCHASE_ORDER_LABELS: [keyof RolePermissions["purchaseOrders"], string][]
   ["viewAll", "See all users' purchase orders (not just their own)"],
 ]
 
+const OPPORTUNITY_LABELS: [keyof RolePermissions["opportunities"], string][] = [
+  ["create", "Create opportunities"],
+  ["edit", "Edit opportunities"],
+  ["delete", "Delete opportunities"],
+  ["viewTeam", "View team opportunities"],
+  ["viewAll", "See all users' opportunities (not just their own and unassigned ones)"],
+]
+
 const CATALOG_LABELS: [keyof RolePermissions["catalog"], string][] = [
   ["delete", "Delete catalog items"],
 ]
@@ -141,10 +156,18 @@ const SETTINGS_LABELS: [keyof RolePermissions["settingsSections"], string][] = [
   ["notifications", "Notifications"],
   ["integrations", "Integrations"],
   ["salesOrders", "Sales & Purchase Order Settings"],
+  ["opportunities", "Opportunity Settings"],
+  ["teams", "Teams"],
+  ["actionButtons", "Action Buttons"],
 ]
 
 const DASHBOARD_LABELS: [keyof RolePermissions["dashboards"], string][] = [
   ["manage", "Edit the company's Default dashboard"],
+]
+
+const AUDIT_LOG_LABELS: [keyof RolePermissions["auditLog"], string][] = [
+  ["view", "View audit log"],
+  ["restore", "Restore from audit log"],
 ]
 
 // One row in the role list. Rows that can be dragged get a grip handle in
@@ -442,6 +465,10 @@ export function RolesPermissionsPanel() {
     if (!draft) return
     setDraft({ ...draft, permissions: { ...draft.permissions, purchaseOrders: { ...draft.permissions.purchaseOrders, [key]: value } } })
   }
+  function updateOpportunityPerm(key: keyof RolePermissions["opportunities"], value: boolean) {
+    if (!draft) return
+    setDraft({ ...draft, permissions: { ...draft.permissions, opportunities: { ...draft.permissions.opportunities, [key]: value } } })
+  }
   function updateCatalogPerm(key: keyof RolePermissions["catalog"], value: boolean) {
     if (!draft) return
     setDraft({ ...draft, permissions: { ...draft.permissions, catalog: { ...draft.permissions.catalog, [key]: value } } })
@@ -460,6 +487,10 @@ export function RolesPermissionsPanel() {
   function updateDashboardsPerm(key: keyof RolePermissions["dashboards"], value: boolean) {
     if (!draft) return
     setDraft({ ...draft, permissions: { ...draft.permissions, dashboards: { ...draft.permissions.dashboards, [key]: value } } })
+  }
+  function updateAuditLogPerm(key: keyof RolePermissions["auditLog"], value: boolean) {
+    if (!draft) return
+    setDraft({ ...draft, permissions: { ...draft.permissions, auditLog: { ...draft.permissions.auditLog, [key]: value } } })
   }
 
   if (loading) return <p className="text-sm text-zinc-500">Loading...</p>
@@ -715,6 +746,23 @@ export function RolesPermissionsPanel() {
             </div>
 
             <div>
+              <h3 className="font-semibold text-sm mb-2">Opportunity Actions</h3>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {OPPORTUNITY_LABELS.map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.opportunities?.[key] ?? false}
+                      disabled={isLocked}
+                      onChange={(e) => updateOpportunityPerm(key, e.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
               <h3 className="font-semibold text-sm mb-2">Catalog Actions</h3>
               <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                 {CATALOG_LABELS.map(([key, label]) => (
@@ -775,6 +823,23 @@ export function RolesPermissionsPanel() {
                       checked={draft.isGlobalAdmin ? true : draft.permissions.dashboards?.[key] ?? false}
                       disabled={isLocked}
                       onChange={(e) => updateDashboardsPerm(key, e.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold text-sm mb-2">Audit Log</h3>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {AUDIT_LOG_LABELS.map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.auditLog?.[key] ?? false}
+                      disabled={isLocked}
+                      onChange={(e) => updateAuditLogPerm(key, e.target.checked)}
                     />
                     {label}
                   </label>

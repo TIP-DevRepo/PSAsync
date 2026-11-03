@@ -2,14 +2,14 @@ import { NextRequest, NextResponse } from "next/server"
 import { requireAccess } from "@/lib/api-access"
 import { prisma } from "@/lib/prisma"
 import { getUserRank } from "@/lib/permissions"
-import {
-  readRoleIdsFromBody,
-  loadRolesForAssignment,
-  setUserRoles,
-  assignsRoleAtOrAboveRank,
-  ROLE_AT_OR_ABOVE_RANK_MESSAGE,
-} from "@/lib/user-roles"
+import { readRoleIdsFromBody, loadRolesForAssignment, setUserRoles } from "@/lib/user-roles"
+import { roleGrantProblem } from "@/lib/role-grants"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
+import { effectiveRoles, membershipChangeRefusal, rankOf } from "@/lib/team-roles"
+import { assertRefs } from "@/lib/scoped-loaders"
+import { readIdList, setUserTeams, teamsGrantRefusal, type TeamRefusal } from "@/lib/teams"
+
+const targetRoleFields = { id: true, rank: true, isGlobalAdmin: true, isEveryone: true } as const
 
 export async function PATCH(
   req: NextRequest,
@@ -34,6 +34,16 @@ export async function PATCH(
   if (active !== undefined && typeof active !== "boolean") {
     return NextResponse.json({ error: "Invalid active value" }, { status: 400 })
   }
+  // teamIds replaces the teams the user is in (Manage Users). It also needs
+  // Teams access, and adding a team grants its default roles, so it follows
+  // the same rule as the team members route (checked below).
+  const teamIds = body.teamIds === undefined ? undefined : readIdList(body.teamIds)
+  if (teamIds === null) {
+    return NextResponse.json({ error: "Invalid team", code: "INVALID_REFERENCE" }, { status: 400 })
+  }
+  if (teamIds !== undefined && !ctx.can("settingsSections.teams")) {
+    return NextResponse.json({ error: "You do not have permission to manage teams", code: "FORBIDDEN" }, { status: 403 })
+  }
 
   // Deactivating yourself would sign you out with no way back in, so it's
   // refused outright, before any of the rank rules below
@@ -48,7 +58,12 @@ export async function PATCH(
       active: true,
       userRoles: {
         where: { role: { isEveryone: false } },
-        select: { role: { select: { rank: true, isGlobalAdmin: true } } },
+        select: { role: { select: targetRoleFields } },
+      },
+      // Team default roles count toward the user's rank, as everywhere else
+      teamMemberships: {
+        where: { team: { companyId } },
+        select: { team: { select: { id: true, defaultRoles: { select: { role: { select: targetRoleFields } } } } } },
       },
     },
   })
@@ -57,12 +72,11 @@ export async function PATCH(
   }
 
   // Hierarchy: you can only change the roles of, or activate/deactivate, a
-  // user whose highest role is below your own highest role, and you can't
+  // user whose highest role (direct or from a team) is below your own, and you can't
   // hand out a role at or above your own rank either, otherwise this would
   // let someone edit their way around the same protection.
   const actorRank = await getUserRank(ctx.userId)
-  const targetRanks = targetUser.userRoles.map((ur) => ur.role.rank)
-  const targetRank = targetRanks.length > 0 ? Math.max(...targetRanks) : 0
+  const targetRank = rankOf(effectiveRoles(targetUser.userRoles.map((ur) => ur.role), targetUser.teamMemberships))
 
   if (roleIds !== undefined && targetRank >= actorRank) {
     return NextResponse.json(
@@ -84,10 +98,34 @@ export async function PATCH(
     if (loaded.error !== undefined) {
       return NextResponse.json({ error: loaded.error }, { status: 400 })
     }
-    if (assignsRoleAtOrAboveRank(loaded.roles, actorRank)) {
-      return NextResponse.json({ error: ROLE_AT_OR_ABOVE_RANK_MESSAGE }, { status: 403 })
+    // The grant rule (src/lib/role-grants.ts) for every role the user doesn't
+    // already hold directly: below your rank and every permission held.
+    // Roles kept or removed need nothing more.
+    const heldIds = new Set(targetUser.userRoles.map((ur) => ur.role.id))
+    const problem = roleGrantProblem(ctx.access, loaded.roles.filter((r) => !heldIds.has(r.id)), "user")
+    if (problem) {
+      return NextResponse.json({ error: problem, code: "FORBIDDEN" }, { status: 403 })
     }
     newRoles = loaded.roles
+  }
+
+  let addedTeamIds: string[] = []
+  if (teamIds !== undefined) {
+    const invalidTeam = await assertRefs(ctx, { teamId: teamIds })
+    if (invalidTeam) return invalidTeam
+    const currentTeamIds = new Set(targetUser.teamMemberships.map((m) => m.team.id))
+    addedTeamIds = teamIds.filter((teamId) => !currentTeamIds.has(teamId))
+    const removesTeams = [...currentTeamIds].some((teamId) => !teamIds.includes(teamId))
+    // The membership rank rule: the user must rank below you, except that
+    // you may always take yourself out of a team
+    const actor = { userId: ctx.userId, rank: ctx.access.rank, isGlobalAdmin: ctx.access.isGlobalAdmin }
+    const target = { id, rank: targetRank }
+    const problem =
+      (addedTeamIds.length > 0 ? membershipChangeRefusal(actor, target, "add") : null) ??
+      (removesTeams ? membershipChangeRefusal(actor, target, "remove") : null)
+    if (problem) {
+      return NextResponse.json({ error: problem, code: "FORBIDDEN" }, { status: 403 })
+    }
   }
 
   // A company must never be left without an active Global Admin. If this
@@ -117,6 +155,10 @@ export async function PATCH(
       })
       if (otherGlobalAdmins === 0) return { lastGlobalAdmin: true as const }
     }
+    // Joining a team gives its default roles: the grant rule, read with the
+    // write so a default role added to a team in the meantime counts
+    const teamGrant: TeamRefusal | null = addedTeamIds.length > 0 ? await teamsGrantRefusal(tx, ctx, addedTeamIds) : null
+    if (teamGrant) return { teamGrantRefused: teamGrant }
 
     if (active !== undefined) {
       await tx.user.update({ where: { id, companyId }, data: { active } })
@@ -124,6 +166,9 @@ export async function PATCH(
     if (roleIds !== undefined) {
       // Also keeps the legacy roleId in sync with the highest of these roles
       await setUserRoles(tx, id, roleIds)
+    }
+    if (teamIds !== undefined) {
+      await setUserTeams(tx, companyId, id, teamIds)
     }
 
     return {
@@ -142,6 +187,10 @@ export async function PATCH(
     }
   })
 
+  if ("teamGrantRefused" in result && result.teamGrantRefused) {
+    const refused = result.teamGrantRefused
+    return NextResponse.json({ error: refused.error, code: refused.code }, { status: refused.status })
+  }
   if ("lastGlobalAdmin" in result) {
     return NextResponse.json(
       { error: "This is the last active Global Admin. Give another active user the Global Admin role first." },

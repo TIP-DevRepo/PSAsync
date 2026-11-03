@@ -1,9 +1,14 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { notFound, requireAccess } from "@/lib/api-access"
+import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { quoteListWhere, viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { newAccessToken, withoutPortalTokens } from "@/lib/portal-token"
 import { termsForStorage } from "@/lib/sanitize-terms"
+import { copiedLineData, COPY_SOURCE_LINE_ORDER } from "@/lib/quote-line-copy"
+import { userFacingError } from "@/lib/user-error"
+import { isNumberCollision } from "@/lib/record-number"
+
+const VERSION_TAKEN_MESSAGE = "Another version of this quote was just created. Please try again."
 
 export async function GET(
   req: NextRequest,
@@ -43,7 +48,7 @@ export async function POST(
 
   const current = await prisma.quote.findFirst({
     where: viewableQuoteWhere(ctx, id),
-    include: { lineItems: true },
+    include: { lineItems: { orderBy: COPY_SOURCE_LINE_ORDER } },
   })
   if (!current) return notFound()
 
@@ -54,56 +59,46 @@ export async function POST(
   })
   const nextVersion = (highest?.version ?? current.version) + 1
 
-  const newQuote = await prisma.quote.create({
-    data: {
-      companyId,
-      clientId: current.clientId,
-      contactId: current.contactId,
-      userId: current.userId,
-      quoteNumber: current.quoteNumber,
-      version: nextVersion,
-      // Each version is its own row with its own tokens
-      accessToken: newAccessToken(),
-      internalAccessToken: newAccessToken(),
-      parentId: current.id,
-      isActive: false,
-      status: "DRAFT",
-      title: current.title,
-      introText: current.introText,
-      terms: termsForStorage(current.terms),
-      // The new version is a draft: with the flag ticked it follows the current default
-      useDefaultTerms: current.useDefaultTerms,
-      internalNotes: current.internalNotes,
-      clientPoNumber: current.clientPoNumber,
-      expiresAt: current.expiresAt,
-      taxRate: current.taxRate,
-      lineItems: {
-        create: current.lineItems.map((li) => ({
-          catalogItemId: li.catalogItemId,
-          section: li.section,
-          sortOrder: li.sortOrder,
-          name: li.name,
-          description: li.description,
-          sku: li.sku,
-          quantity: li.quantity,
-          unitPrice: li.unitPrice,
-          cost: li.cost,
-          discount: li.discount,
-          taxable: li.taxable,
-          isRecurring: li.isRecurring,
-          recurringInterval: li.recurringInterval,
-          isOptional: li.isOptional,
-          optionalSelected: li.optionalSelected,
-          quantityAdjustable: li.quantityAdjustable,
-          choiceGroup: li.choiceGroup,
-          isTextBlock: li.isTextBlock,
-          bundleName: li.bundleName,
-          bundleDisplayMode: li.bundleDisplayMode,
-          isBundleHeader: li.isBundleHeader,
-        })),
+  // Two new versions made at the same moment can both pick the same next
+  // version; the number and version are unique together, so the second
+  // is refused
+  let newQuote
+  try {
+    newQuote = await prisma.quote.create({
+      data: {
+        companyId,
+        clientId: current.clientId,
+        contactId: current.contactId,
+        userId: current.userId,
+        quoteNumber: current.quoteNumber,
+        version: nextVersion,
+        // Each version is its own row with its own tokens
+        accessToken: newAccessToken(),
+        internalAccessToken: newAccessToken(),
+        parentId: current.id,
+        isActive: false,
+        status: "DRAFT",
+        title: current.title,
+        introText: current.introText,
+        terms: termsForStorage(current.terms),
+        // The new version is a draft: with the flag ticked it follows the current default
+        useDefaultTerms: current.useDefaultTerms,
+        internalNotes: current.internalNotes,
+        clientPoNumber: current.clientPoNumber,
+        expiresAt: current.expiresAt,
+        taxRate: current.taxRate,
+        // The section list keeps the order and any section with no lines yet
+        sections: current.sections,
+        // The link belongs to the quote family, so every version shares it
+        opportunityId: current.opportunityId,
+        lineItems: { create: current.lineItems.map(copiedLineData) },
       },
-    },
-  })
+    })
+  } catch (err) {
+    if (isNumberCollision(err)) return apiError(409, VERSION_TAKEN_MESSAGE, "NUMBER_TAKEN")
+    const { message, status } = userFacingError(err, "Creating a quote version")
+    return apiError(status, message)
+  }
 
   return NextResponse.json(withoutPortalTokens(newQuote))
 }

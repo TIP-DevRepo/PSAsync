@@ -1,7 +1,11 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
-import { requireAccess } from "@/lib/api-access"
+import { apiError, requireAccess } from "@/lib/api-access"
+import { userFacingError } from "@/lib/user-error"
+import { isNumberCollision, NUMBER_TAKEN_MESSAGE, takeRecordNumber } from "@/lib/record-number"
 import { assertRefs, salesOrderListWhere } from "@/lib/scoped-loaders"
+import { readOptionalId } from "@/lib/opportunity-rules"
+import { recordRecordLink } from "@/lib/opportunity-quotes"
 
 export async function GET() {
   const { ctx, response } = await requireAccess({
@@ -55,7 +59,13 @@ export async function POST(req: NextRequest) {
   if (!body.clientId) {
     return NextResponse.json({ error: "A client is required" }, { status: 400 })
   }
-  const invalid = await assertRefs(ctx, { clientId: body.clientId })
+  // An optional opportunity (from the opportunity's Related tab or the
+  // Won prompt, or the form's picker): one of this client the user may
+  // open, in any stage
+  const linkRef = readOptionalId(body.opportunityId)
+  if (linkRef.error !== undefined) return apiError(400, "Invalid opportunity", "INVALID_REFERENCE")
+  const opportunityId = linkRef.value
+  const invalid = await assertRefs(ctx, { clientId: body.clientId, orderOpportunityId: opportunityId })
   if (invalid) return invalid
 
   const companyId = ctx.companyId
@@ -63,36 +73,56 @@ export async function POST(req: NextRequest) {
   const settings = await prisma.companySettings.findUnique({ where: { companyId } })
   const prefix = settings?.soPrefix ?? "SO"
 
-  const year = new Date().getFullYear()
-  const existingCount = await prisma.salesOrder.count({ where: { companyId } })
-  const soNumber = `${prefix}-${year}-${String(existingCount + 1).padStart(4, "0")}`
-
-  const salesOrder = await prisma.salesOrder.create({
-    data: {
-      companyId,
-      clientId: body.clientId,
-      userId: ctx.userId,
-      soNumber,
-      clientPoNumber: body.clientPoNumber || null,
-      paymentTerms: body.paymentTerms || null,
-      internalNotes: body.internalNotes || null,
-      clientNotes: body.clientNotes || null,
-      billContactName: body.billContactName || null,
-      billAddress: body.billAddress || null,
-      billAddress2: body.billAddress2 || null,
-      billCity: body.billCity || null,
-      billState: body.billState || null,
-      billZip: body.billZip || null,
-      billCountry: body.billCountry || null,
-      shipContactName: body.shipContactName || null,
-      shipAddress: body.shipAddress || null,
-      shipAddress2: body.shipAddress2 || null,
-      shipCity: body.shipCity || null,
-      shipState: body.shipState || null,
-      shipZip: body.shipZip || null,
-      shipCountry: body.shipCountry || null,
-    },
-  })
+  // The next number from the company's sales order counter, taken in the
+  // same transaction as the create so a failed create gives it back
+  let salesOrder
+  try {
+    salesOrder = await prisma.$transaction(async (tx) => {
+      const soNumber = await takeRecordNumber(tx, companyId, "salesOrder", prefix)
+      const created = await tx.salesOrder.create({
+        data: {
+          companyId,
+          clientId: body.clientId,
+          userId: ctx.userId,
+          soNumber,
+          clientPoNumber: body.clientPoNumber || null,
+          paymentTerms: body.paymentTerms || null,
+          internalNotes: body.internalNotes || null,
+          clientNotes: body.clientNotes || null,
+          billContactName: body.billContactName || null,
+          billAddress: body.billAddress || null,
+          billAddress2: body.billAddress2 || null,
+          billCity: body.billCity || null,
+          billState: body.billState || null,
+          billZip: body.billZip || null,
+          billCountry: body.billCountry || null,
+          shipContactName: body.shipContactName || null,
+          shipAddress: body.shipAddress || null,
+          shipAddress2: body.shipAddress2 || null,
+          shipCity: body.shipCity || null,
+          shipState: body.shipState || null,
+          shipZip: body.shipZip || null,
+          shipCountry: body.shipCountry || null,
+          opportunityId,
+        },
+      })
+      if (opportunityId) {
+        await recordRecordLink(tx, {
+          companyId,
+          actorId: ctx.userId,
+          opportunityId,
+          kind: "salesOrder",
+          change: "linked",
+          record: { id: created.id, name: created.soNumber },
+        })
+      }
+      return created
+    })
+  } catch (err) {
+    if (isNumberCollision(err)) return apiError(409, NUMBER_TAKEN_MESSAGE, "NUMBER_TAKEN")
+    const { message, status } = userFacingError(err, "Creating a sales order")
+    return apiError(status, message)
+  }
 
   return NextResponse.json(salesOrder)
 }
