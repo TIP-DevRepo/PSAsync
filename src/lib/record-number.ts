@@ -30,10 +30,9 @@ type Tx = Prisma.TransactionClient
 // versions, since every version shares its family's number)
 const EXISTING: Record<NumberSequenceKey, (tx: Tx, companyId: string) => Promise<{ numbers: string[]; legacyCount: number }>> = {
   quote: async (tx, companyId) => {
-    const [rows, legacyCount] = await Promise.all([
-      tx.quote.findMany({ where: { companyId }, select: { quoteNumber: true } }),
-      tx.quote.count({ where: { companyId, version: 1 } }),
-    ])
+    // One query at a time inside the transaction
+    const rows = await tx.quote.findMany({ where: { companyId }, select: { quoteNumber: true } })
+    const legacyCount = await tx.quote.count({ where: { companyId, version: 1 } })
     return { numbers: rows.map((r) => r.quoteNumber), legacyCount }
   },
   salesOrder: async (tx, companyId) => {
