@@ -59,6 +59,11 @@ function checkFullPolicy(value: string | null): string[] {
   expect("frame-ancestors", "'none'")
   expect("report-uri", CSP_REPORT_PATH)
   if (!parsed.has("report-to")) problems.push("report-to is missing")
+  // Images load from the app's own uploads bucket only: never a wildcard
+  // host, which would let any S3 bucket serve images (an unset or invalid
+  // bucket leaves it out instead)
+  const wildcard = (parsed.get("img-src") ?? []).filter((s) => s.includes("*"))
+  if (wildcard.length > 0) problems.push(`img-src should not hold a wildcard host, has ${wildcard.join(" ")}`)
   return problems
 }
 
