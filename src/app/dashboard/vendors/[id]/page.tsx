@@ -73,7 +73,8 @@ interface PurchaseOrderRow {
 interface VendorAttachmentType {
   id: string
   fileName: string
-  fileUrl: string
+  // The download route (src/lib/attachment-paths.ts), never a bucket URL
+  downloadUrl: string
   fileSize: number | null
   createdAt: string
 }
@@ -741,7 +742,7 @@ function VendorDetailPageContent() {
               {attachments.length === 0 && <p className="text-sm text-muted-foreground">No files attached yet.</p>}
               {attachments.map((a) => (
                 <div key={a.id} className="flex items-center justify-between rounded-md border border-border p-3 text-sm">
-                  <a href={a.fileUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
+                  <a href={a.downloadUrl} target="_blank" rel="noopener noreferrer" className="text-primary hover:underline">
                     {a.fileName}
                   </a>
                   <div className="flex items-center gap-3">

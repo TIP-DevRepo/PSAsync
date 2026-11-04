@@ -5,6 +5,7 @@ import { assertRefs, purchaseOrderWhere, viewablePurchaseOrderWhere } from "@/li
 import { readOptionalId } from "@/lib/opportunity-rules"
 import { recordRecordLink } from "@/lib/opportunity-quotes"
 import { deleteStoredObjects } from "@/lib/uploads"
+import { withDownloadUrl } from "@/lib/attachment-paths"
 
 const VALID_STATUSES = ["DRAFT", "PARTS_ORDERED", "RECEIVED", "ON_HOLD", "BACKORDERED", "CANCELLED"]
 const VALID_PAYMENT_TYPES = ["Due on Receipt", "Net15", "Net30", "Net45", "Net60", "Prepaid", "Credit Card"]
@@ -65,12 +66,15 @@ export async function GET(
 
   if (!po) return notFound()
 
+  // Attachments go out with their download route, never the stored URL
+  const attachments = po.attachments.map((a) => withDownloadUrl("purchase-order", a))
+
   // Line item cost only goes to users who can see cost
   if (!canSeeCost(ctx)) {
-    return NextResponse.json({ ...po, lineItems: po.lineItems.map(omitUnitCost) })
+    return NextResponse.json({ ...po, attachments, lineItems: po.lineItems.map(omitUnitCost) })
   }
 
-  return NextResponse.json(po)
+  return NextResponse.json({ ...po, attachments })
 }
 
 export async function PATCH(
