@@ -13,6 +13,7 @@ import {
 } from "@/components/quotes/LineItemBuilder"
 import { Modal } from "@/components/Modal"
 import { toast } from "@/lib/toast"
+import { downloadPdf } from "@/lib/download-pdf"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { copyText } from "@/lib/clipboard"
 import { formatValidUntil } from "@/lib/quote-expiry"
@@ -743,7 +744,7 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
             <Button
               size="sm"
               variant="outline"
-              onClick={() => window.open(`/api/quotes/${id}/pdf`, "_blank")}
+              onClick={() => downloadPdf(`/api/quotes/${id}/pdf`)}
             >
               Download PDF
             </Button>
@@ -884,16 +885,16 @@ function QuoteDetail({ params }: { params: Promise<{ id: string }> }) {
                 <p><span className="text-muted-foreground">Client:</span> <span className="text-foreground">{quote.client.name}</span></p>
                 <p>
                   <span className="text-muted-foreground">Contact:</span>{" "}
-                  <span className="text-foreground">{quote.contact ? `${quote.contact.firstName} ${quote.contact.lastName}` : "—"}</span>
+                  <span className="text-foreground">{quote.contact ? `${quote.contact.firstName} ${quote.contact.lastName}` : "-"}</span>
                 </p>
                 <p><span className="text-muted-foreground">Rep:</span> <span className="text-foreground">{quote.user.name}</span></p>
                 <p>
                   <span className="text-muted-foreground">Expires:</span>{" "}
-                  <span className="text-foreground">{quote.expiresAt ? formatValidUntil(quote.expiresAt) : "—"}</span>
+                  <span className="text-foreground">{quote.expiresAt ? formatValidUntil(quote.expiresAt) : "-"}</span>
                 </p>
                 <p>
                   <span className="text-muted-foreground">Payment Terms:</span>{" "}
-                  <span className="text-foreground">{quote.paymentTerms || "—"}</span>
+                  <span className="text-foreground">{quote.paymentTerms || "-"}</span>
                 </p>
                 {quote.effectiveTerms && (
                   <CollapsibleField label="Terms & Conditions">

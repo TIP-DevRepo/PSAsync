@@ -201,7 +201,7 @@ export function QuoteSettingsPanel() {
               <span className="font-medium">A specific mailbox</span>
               <br />
               <span className="text-xs text-zinc-500">
-                Every quote sends from the same address, regardless of who created it — e.g. a
+                Every quote sends from the same address, regardless of who created it, e.g. a
                 shared "quotes@" inbox.
               </span>
             </span>

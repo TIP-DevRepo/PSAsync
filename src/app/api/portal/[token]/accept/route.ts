@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { notifyQuoteEvent } from "@/lib/notify"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
+import { errorSummary } from "@/lib/user-error"
 import { alreadyRespondedResponse, AWAITING_RESPONSE_STATUSES, linkInvalidResponse, resolvePortalAccess } from "@/lib/portal-access"
 import { checkAcceptBody, readPortalBody } from "@/lib/portal-input"
 import { portalQuoteSelect, toPortalQuote } from "@/lib/portal-public"
@@ -74,7 +75,7 @@ export async function POST(
   try {
     await createSalesOrderFromAcceptedQuote(quote.id)
   } catch (err) {
-    console.error("createSalesOrderFromAcceptedQuote failed:", err)
+    console.error(`createSalesOrderFromAcceptedQuote failed: ${errorSummary(err)}`)
   }
 
   return NextResponse.json(toPortalQuote(updated, false))

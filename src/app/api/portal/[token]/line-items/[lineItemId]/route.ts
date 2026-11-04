@@ -37,7 +37,7 @@ export async function PATCH(
     // without picking another, and selecting one clears its group-mates
     if (lineItem.choiceGroup && !selected.value) {
       return NextResponse.json(
-        { error: "Pick a different option instead — you can't leave this choice unselected." },
+        { error: "Pick a different option instead. You can't leave this choice unselected." },
         { status: 400 }
       )
     }

@@ -117,11 +117,11 @@ function fileSizeLabel(bytes: number | null) {
 }
 
 function contactName(c: VendorContact | undefined | null) {
-  return c ? `${c.firstName} ${c.lastName}` : "—"
+  return c ? `${c.firstName} ${c.lastName}` : "-"
 }
 
 function locationAddress(loc: VendorLocation | null) {
-  if (!loc) return "—"
+  if (!loc) return "-"
   const cityStateZip = [loc.city, loc.state, loc.zip].filter(Boolean).join(", ")
   return [loc.address, loc.address2, cityStateZip, loc.country].filter(Boolean).join(" · ") || loc.name
 }
@@ -418,12 +418,12 @@ function VendorDetailPageContent() {
                 <>
                   <p><span className="font-medium text-foreground">Type:</span> <span className="text-muted-foreground">{vendor.type}</span></p>
                   <p><span className="font-medium text-foreground">Status:</span> <span className="text-muted-foreground">{vendor.status}</span></p>
-                  <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{vendor.email ?? "—"}</span></p>
+                  <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{vendor.email ?? "-"}</span></p>
                   <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(vendor.phone)}</span></p>
-                  <p><span className="font-medium text-foreground">Website:</span> <span className="text-muted-foreground">{vendor.website ?? "—"}</span></p>
-                  <p><span className="font-medium text-foreground">Address:</span> <span className="text-muted-foreground">{vendor.address ?? "—"}</span></p>
-                  <p><span className="font-medium text-foreground">Payment Terms:</span> <span className="text-muted-foreground">{vendor.paymentTerms ?? "—"}</span></p>
-                  <p><span className="font-medium text-foreground">Lead Time:</span> <span className="text-muted-foreground">{vendor.leadTimeDays ? `${vendor.leadTimeDays} days` : "—"}</span></p>
+                  <p><span className="font-medium text-foreground">Website:</span> <span className="text-muted-foreground">{vendor.website ?? "-"}</span></p>
+                  <p><span className="font-medium text-foreground">Address:</span> <span className="text-muted-foreground">{vendor.address ?? "-"}</span></p>
+                  <p><span className="font-medium text-foreground">Payment Terms:</span> <span className="text-muted-foreground">{vendor.paymentTerms ?? "-"}</span></p>
+                  <p><span className="font-medium text-foreground">Lead Time:</span> <span className="text-muted-foreground">{vendor.leadTimeDays ? `${vendor.leadTimeDays} days` : "-"}</span></p>
                   <p><span className="font-medium text-foreground">Tags:</span>{" "}
                     <span className="text-muted-foreground">
                       {[vendor.isVendor && "Vendor", vendor.isManufacturer && "Manufacturer", vendor.isDistributor && "Distributor"].filter(Boolean).join(", ") || "None"}
@@ -884,11 +884,11 @@ function VendorContactModal({
 
       {!editing ? (
         <div className="space-y-3 text-sm">
-          <p><span className="font-medium text-foreground">Title:</span> <span className="text-muted-foreground">{contact.title ?? "—"}</span></p>
-          <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{contact.email ?? "—"}</span></p>
+          <p><span className="font-medium text-foreground">Title:</span> <span className="text-muted-foreground">{contact.title ?? "-"}</span></p>
+          <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{contact.email ?? "-"}</span></p>
           <p><span className="font-medium text-foreground">Work Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(contact.phone)}</span></p>
           <p><span className="font-medium text-foreground">Cell Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(contact.mobile)}</span></p>
-          <p><span className="font-medium text-foreground">Location:</span> <span className="text-muted-foreground">{currentLocation?.name ?? "—"}</span></p>
+          <p><span className="font-medium text-foreground">Location:</span> <span className="text-muted-foreground">{currentLocation?.name ?? "-"}</span></p>
           {contact.notes && <p><span className="font-medium text-foreground">Notes:</span> <span className="text-muted-foreground">{contact.notes}</span></p>}
         </div>
       ) : (

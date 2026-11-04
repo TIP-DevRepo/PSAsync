@@ -151,11 +151,11 @@ function PlaceholderPanel({
 }
 
 function contactName(c: Contact | null) {
-  return c ? `${c.firstName} ${c.lastName}` : "—"
+  return c ? `${c.firstName} ${c.lastName}` : "-"
 }
 
 function locationAddress(loc: ClientLocation | null) {
-  if (!loc) return "—"
+  if (!loc) return "-"
   const cityStateZip = [loc.city, loc.state, loc.zip].filter(Boolean).join(", ")
   return [loc.address, loc.address2, cityStateZip, loc.country].filter(Boolean).join(" · ") || loc.name
 }
@@ -514,9 +514,9 @@ function ClientDetailPageContent() {
             <div className="rounded-lg border border-border bg-card shadow-card p-4 space-y-3 text-sm">
               {!editingDetails ? (
                 <>
-                  <p><span className="font-medium text-foreground">Company Prefix:</span> <span className="text-muted-foreground">{client.prefix ?? "—"}</span></p>
+                  <p><span className="font-medium text-foreground">Company Prefix:</span> <span className="text-muted-foreground">{client.prefix ?? "-"}</span></p>
                   <p><span className="font-medium text-foreground">Status:</span> <span className="text-muted-foreground">{client.status}</span></p>
-                  <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{client.email ?? "—"}</span></p>
+                  <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{client.email ?? "-"}</span></p>
                   <p><span className="font-medium text-foreground">Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(client.phone)}</span></p>
                   <p>
                     <span className="font-medium text-foreground">Website:</span>{" "}
@@ -530,12 +530,12 @@ function ClientDetailPageContent() {
                         {client.website}
                       </a>
                     ) : (
-                      <span className="text-muted-foreground">—</span>
+                      <span className="text-muted-foreground">-</span>
                     )}
                   </p>
                   <p>
                     <span className="font-medium text-foreground">Payment Terms:</span>{" "}
-                    <span className="text-muted-foreground">{client.paymentTerms || "—"}</span>
+                    <span className="text-muted-foreground">{client.paymentTerms || "-"}</span>
                   </p>
                   {client.isInternal && (
                     <p>
@@ -660,7 +660,7 @@ function ClientDetailPageContent() {
                     This is your own company
                   </label>
                   <p className="text-xs text-muted-foreground">
-                    Marking this client as your own company makes its locations available as ship-to options on Purchase Orders. Only one client can be marked this way — checking this box will unmark any other client currently set.
+                    Marking this client as your own company makes its locations available as ship-to options on Purchase Orders. Only one client can be marked this way: checking this box will unmark any other client currently set.
                   </p>
                 </>
               )}
@@ -827,7 +827,7 @@ function ClientDetailPageContent() {
                   Set as primary location
                 </label>
                 <p className="text-xs text-muted-foreground">
-                  Billing/shipping contacts for this location can be set after creating it — open the location once it's added.
+                  Billing/shipping contacts for this location can be set after creating it. Open the location once it's added.
                 </p>
                 <Button onClick={handleAddLocation}>Save Location</Button>
               </div>
@@ -1111,7 +1111,7 @@ function ClientDetailPageContent() {
           <PlaceholderPanel
             icon={Radar}
             title="Engagement Hub coming soon"
-            description="Client engagement and outreach tracking — this one still needs its own design pass before it's built."
+            description="Client engagement and outreach tracking. This one still needs its own design pass before it's built."
           />
         )}
 
@@ -1443,12 +1443,12 @@ function ContactDetailModal({
 
       {!editing ? (
         <div className="space-y-3 text-sm">
-          <p><span className="font-medium text-foreground">Title:</span> <span className="text-muted-foreground">{contact.title ?? "—"}</span></p>
-          <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{contact.email ?? "—"}</span></p>
+          <p><span className="font-medium text-foreground">Title:</span> <span className="text-muted-foreground">{contact.title ?? "-"}</span></p>
+          <p><span className="font-medium text-foreground">Email:</span> <span className="text-muted-foreground">{contact.email ?? "-"}</span></p>
           <p><span className="font-medium text-foreground">Work Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(contact.phone)}</span></p>
           <p><span className="font-medium text-foreground">Cell Phone:</span> <span className="text-muted-foreground">{formatPhoneDisplay(contact.mobile)}</span></p>
           <p><span className="font-medium text-foreground">Type:</span> <span className="text-muted-foreground">{contact.locationType === "REMOTE" ? "Remote" : "In-Office"}</span></p>
-          <p><span className="font-medium text-foreground">Location:</span> <span className="text-muted-foreground">{currentLocation?.name ?? "—"}</span></p>
+          <p><span className="font-medium text-foreground">Location:</span> <span className="text-muted-foreground">{currentLocation?.name ?? "-"}</span></p>
           {contact.notes && <p><span className="font-medium text-foreground">Notes:</span> <span className="text-muted-foreground">{contact.notes}</span></p>}
           {contact.tags.length > 0 && (
             <div>

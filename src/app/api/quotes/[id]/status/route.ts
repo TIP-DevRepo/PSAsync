@@ -4,6 +4,7 @@ import { withoutPortalTokens } from "@/lib/portal-token"
 import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { viewableQuoteWhere } from "@/lib/scoped-loaders"
 import { createSalesOrderFromAcceptedQuote } from "@/lib/sales-orders"
+import { errorSummary } from "@/lib/user-error"
 import { applyTermsFreeze, isFrozenStatus, loadCompanyDefaultTerms, termsFreezeFor, UNFROZEN_STATUSES } from "@/lib/quote-terms"
 import { approvalsStillGranted, loadMatchingWorkflows } from "@/lib/approval-workflows"
 import { prepareQuoteStatusChange, runQuoteStatusChange } from "@/lib/opportunity-quotes"
@@ -109,7 +110,7 @@ export async function POST(
     try {
       await createSalesOrderFromAcceptedQuote(id, ctx.userId)
     } catch (err) {
-      console.error("createSalesOrderFromAcceptedQuote failed:", err)
+      console.error(`createSalesOrderFromAcceptedQuote failed: ${errorSummary(err)}`)
     }
   }
 

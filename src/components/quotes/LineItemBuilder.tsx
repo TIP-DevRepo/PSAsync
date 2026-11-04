@@ -239,7 +239,7 @@ function EmptyBundlePlaceholder({ bundleName }: { bundleName: string }) {
         isOver ? "border-purple-400 bg-purple-50 text-purple-600 dark:bg-purple-950/30" : "border-zinc-300 text-zinc-400"
       }`}
     >
-      No items in bundle — drop here to add one
+      No items in bundle. Drop here to add one
     </div>
   )
 }
@@ -1073,7 +1073,7 @@ export function LineItemBuilder({
                                 {money(margin)}
                                 <br />
                                 <span className={marginColor(marginPct)}>
-                                  {total > 0 ? `${marginPct.toFixed(0)}%` : "—"}
+                                  {total > 0 ? `${marginPct.toFixed(0)}%` : "-"}
                                 </span>
                               </>
                             ) : (
@@ -1188,7 +1188,7 @@ export function LineItemBuilder({
                                     </select>
                                     {existingBundleNames.length === 0 && (
                                       <p className="text-zinc-400 mt-1">
-                                        No bundles yet — use + Bundle on the section header to create one.
+                                        No bundles yet. Use + Bundle on the section header to create one.
                                       </p>
                                     )}
                                   </div>
@@ -1359,7 +1359,7 @@ export function LineItemBuilder({
             onCreate(addModalSection === NO_SECTION ? null : addModalSection, {
               name: product.name,
               sku: offer.sku || product.partNumber,
-              description: `Via ${offer.distributorLabel}${offer.isMock ? " (mock data — pending live distributor API)" : ""}`,
+              description: `Via ${offer.distributorLabel}${offer.isMock ? " (mock data, pending live distributor API)" : ""}`,
               unitPrice: offer.price,
               cost: offer.cost,
               quantity,
@@ -1616,7 +1616,7 @@ function AddLineItemModal({
                         )}
                         <div className="mt-1 flex items-center gap-3">
                           <span className="text-lg font-bold">
-                            {selected ? (typeof selected.price === "number" ? money(selected.price) : "-") : "—"}
+                            {selected ? (typeof selected.price === "number" ? money(selected.price) : "-") : "-"}
                           </span>
                           {selected && (
                             <span
@@ -1693,7 +1693,7 @@ function AddLineItemModal({
                 )
               })}
               {distProducts.length === 0 && !distLoading && distQuery && (
-                <p className="text-sm text-zinc-500">No results yet — try searching above.</p>
+                <p className="text-sm text-zinc-500">No results yet. Try searching above.</p>
               )}
             </div>
 

@@ -403,14 +403,14 @@ export function AddInventoryItemModal({
                   <p className={`text-xs ${kind === "STOCK" ? "text-danger" : "text-muted-foreground"}`}>
                     {kind === "STOCK"
                       ? "This client isn't onboarded for Inventory management yet, so there's no container to place Pooled Stock in here. Onboard it for Inventory first."
-                      : "This client isn't onboarded for Inventory management yet, so Container selection is disabled — the asset will just be tracked at the location level."}
+                      : "This client isn't onboarded for Inventory management yet, so Container selection is disabled. The asset will just be tracked at the location level."}
                   </p>
                 )}
 
                 {siteId && clientInventoryOnboarded && containers.length === 0 && (
                   <p className={`text-xs ${kind === "STOCK" ? "text-danger" : "text-muted-foreground"}`}>
                     {kind === "STOCK"
-                      ? "This location has no containers set up yet. Pooled Stock always needs one — set one up under this client's Locations first."
+                      ? "This location has no containers set up yet. Pooled Stock always needs one. Set one up under this client's Locations first."
                       : "This location has no containers set up yet, so the asset will just be tracked at the location level."}
                   </p>
                 )}

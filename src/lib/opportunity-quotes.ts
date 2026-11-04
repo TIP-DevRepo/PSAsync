@@ -115,12 +115,11 @@ const stageSelect = { id: true, name: true, category: true } satisfies Prisma.Op
 
 // The stages events move to: the company's quote sent stage (only while it
 // is OPEN), and the first WON and first LOST stages in the company's order
+// One query at a time: a transaction's connection runs one at a time anyway
 async function eventTargets(tx: Tx, companyId: string) {
-  const [settings, firstWon, firstLost] = await Promise.all([
-    tx.opportunitySettings.findUnique({ where: { companyId }, select: { quoteSentStage: { select: stageSelect } } }),
-    tx.opportunityStage.findFirst({ where: { companyId, category: "WON" }, orderBy: STAGE_ORDER, select: stageSelect }),
-    tx.opportunityStage.findFirst({ where: { companyId, category: "LOST" }, orderBy: STAGE_ORDER, select: stageSelect }),
-  ])
+  const settings = await tx.opportunitySettings.findUnique({ where: { companyId }, select: { quoteSentStage: { select: stageSelect } } })
+  const firstWon = await tx.opportunityStage.findFirst({ where: { companyId, category: "WON" }, orderBy: STAGE_ORDER, select: stageSelect })
+  const firstLost = await tx.opportunityStage.findFirst({ where: { companyId, category: "LOST" }, orderBy: STAGE_ORDER, select: stageSelect })
   const sent = settings?.quoteSentStage?.category === "OPEN" ? settings.quoteSentStage : null
   return { sent, firstWon, firstLost }
 }

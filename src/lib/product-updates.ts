@@ -1,7 +1,7 @@
 export type UpdateCategory = "Added" | "Improved" | "Fixed"
 
 export const PSASYNC_OVERVIEW =
-  "PSAsync is a unified PSA (Professional Services Automation) platform built for MSPs and IT resellers. It brings quoting, ticketing, accounting, and HR into one connected system — Quotes, Tickets, Accounting, and HR — so your team isn't juggling five disconnected tools to run the business."
+  "PSAsync is a unified PSA (Professional Services Automation) platform built for MSPs and IT resellers. It brings quoting, ticketing, accounting, and HR into one connected system, so your team isn't juggling five disconnected tools to run the business."
 
 export interface ProductUpdate {
   version: string

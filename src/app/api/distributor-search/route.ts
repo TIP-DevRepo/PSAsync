@@ -242,7 +242,7 @@ export async function GET(req: NextRequest) {
       ? "No matches found across any connected distributor for that search."
       : anyLive
       ? "Live results from connected distributors, mixed with mock data for distributors still pending API approval."
-      : "These are mock results — real distributor pricing/availability will replace this once your distributors approve API access."
+      : "These are mock results. Real distributor pricing/availability will replace this once your distributors approve API access."
 
   const visible = canSeeCost(ctx)
     ? products

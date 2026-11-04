@@ -262,7 +262,7 @@ function SalesOrdersList() {
               >
                 <td className={`${ROW_PADDING[density]} pl-4 pr-3 font-medium text-foreground`}>{so.soNumber}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-foreground`}>{so.clientName}</td>
-                <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{so.owner?.name ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{so.owner?.name ?? "-"}</td>
                 <td className={`${ROW_PADDING[density]} pr-3`}>
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_COLORS[so.status]}`}>
                     {statusLabel(so.status)}

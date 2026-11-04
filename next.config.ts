@@ -1,5 +1,5 @@
 import type { NextConfig } from "next";
-import { securityHeaders } from "./src/lib/security-headers";
+import { securityHeaders, uploadsImageOriginWarning } from "./src/lib/security-headers";
 
 const nextConfig: NextConfig = {
   serverExternalPackages: ["puppeteer-core", "@sparticuz/chromium", "puppeteer"],
@@ -13,7 +13,11 @@ const nextConfig: NextConfig = {
   },
   // Security headers and the Content-Security-Policy (CSP_MODE) on every
   // route, pages and API alike. See src/lib/security-headers.ts.
+  // headers() runs once per build (and once when the dev server starts),
+  // so a policy without the uploads bucket warns once.
   async headers() {
+    const warning = uploadsImageOriginWarning(process.env);
+    if (warning) console.warn(warning);
     return [{ source: "/:path*", headers: securityHeaders(process.env) }];
   },
 };

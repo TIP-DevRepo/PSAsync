@@ -241,7 +241,7 @@ function NewPurchaseOrderForm() {
             >
               <option value="">None</option>
               {salesOrders.map((so) => (
-                <option key={so.id} value={so.id}>{so.soNumber} — {so.clientName}</option>
+                <option key={so.id} value={so.id}>{so.soNumber} - {so.clientName}</option>
               ))}
             </select>
           </div>
@@ -297,7 +297,7 @@ function NewPurchaseOrderForm() {
               onChange={() => update("shipToClient", true)}
               className="accent-primary"
             />
-            Yes — ships to the client
+            Yes, ships to the client
           </label>
           <label className="flex items-center gap-2 text-sm text-foreground">
             <input
@@ -306,7 +306,7 @@ function NewPurchaseOrderForm() {
               onChange={() => update("shipToClient", false)}
               className="accent-primary"
             />
-            No — ships to us
+            No, ships to us
           </label>
         </div>
 
@@ -314,7 +314,7 @@ function NewPurchaseOrderForm() {
           <div className="space-y-3">
             {form.salesOrderId ? (
               <p className="text-xs text-muted-foreground">
-                Shipping address pulled from the linked Sales Order — edit the fields below if needed.
+                Shipping address pulled from the linked Sales Order. Edit the fields below if needed.
               </p>
             ) : (
               <div>

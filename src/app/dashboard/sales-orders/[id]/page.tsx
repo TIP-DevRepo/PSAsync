@@ -547,7 +547,7 @@ function SalesOrderDetail({ params }: { params: Promise<{ id: string }> }) {
                     />
                   </div>
                 ) : (
-                  <p><span className="text-muted-foreground">Client PO #:</span> <span className="text-foreground">{so.clientPoNumber ?? "—"}</span></p>
+                  <p><span className="text-muted-foreground">Client PO #:</span> <span className="text-foreground">{so.clientPoNumber ?? "-"}</span></p>
                 )}
                 {canEditFields ? (
                   <div className="flex items-center gap-2">
@@ -563,7 +563,7 @@ function SalesOrderDetail({ params }: { params: Promise<{ id: string }> }) {
                     </select>
                   </div>
                 ) : (
-                  <p><span className="text-muted-foreground">Payment Terms:</span> <span className="text-foreground">{so.paymentTerms ?? "—"}</span></p>
+                  <p><span className="text-muted-foreground">Payment Terms:</span> <span className="text-foreground">{so.paymentTerms ?? "-"}</span></p>
                 )}
                 <p><span className="text-muted-foreground">Created:</span> <span className="text-foreground">{new Date(so.createdAt).toLocaleDateString()}</span></p>
                 {canEdit && locked && (
@@ -646,8 +646,8 @@ function SalesOrderDetail({ params }: { params: Promise<{ id: string }> }) {
                     </div>
                   ) : (
                     <>
-                      <p className="text-foreground">{so.billContactName ?? "—"}</p>
-                      <p className="text-muted-foreground">{so.billAddress ?? "—"}</p>
+                      <p className="text-foreground">{so.billContactName ?? "-"}</p>
+                      <p className="text-muted-foreground">{so.billAddress ?? "-"}</p>
                       {so.billAddress2 && <p className="text-muted-foreground">{so.billAddress2}</p>}
                       <p className="text-muted-foreground">{[so.billCity, so.billState, so.billZip].filter(Boolean).join(", ")}</p>
                     </>
@@ -725,8 +725,8 @@ function SalesOrderDetail({ params }: { params: Promise<{ id: string }> }) {
                     </div>
                   ) : (
                     <>
-                      <p className="text-foreground">{so.shipContactName ?? "—"}</p>
-                      <p className="text-muted-foreground">{so.shipAddress ?? "—"}</p>
+                      <p className="text-foreground">{so.shipContactName ?? "-"}</p>
+                      <p className="text-muted-foreground">{so.shipAddress ?? "-"}</p>
                       {so.shipAddress2 && <p className="text-muted-foreground">{so.shipAddress2}</p>}
                       <p className="text-muted-foreground">{[so.shipCity, so.shipState, so.shipZip].filter(Boolean).join(", ")}</p>
                     </>

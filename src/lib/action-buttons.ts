@@ -75,11 +75,10 @@ export async function ensureActionButtonDefaults(companyId: string, db: Db = pri
 }
 
 async function defaultButtons(tx: Prisma.TransactionClient, companyId: string): Promise<Prisma.ActionButtonCreateManyInput[]> {
-  const [settings, won, lost] = await Promise.all([
-    tx.companySettings.findUnique({ where: { companyId }, select: { primaryColor: true, accentColor: true } }),
-    firstStageOf(tx, companyId, "WON"),
-    firstStageOf(tx, companyId, "LOST"),
-  ])
+  // One query at a time inside the transaction
+  const settings = await tx.companySettings.findUnique({ where: { companyId }, select: { primaryColor: true, accentColor: true } })
+  const won = await firstStageOf(tx, companyId, "WON")
+  const lost = await firstStageOf(tx, companyId, "LOST")
   const hex = (value: string | null | undefined, fallback: string) => (value && /^#[0-9A-Fa-f]{6}$/.test(value) ? value.toUpperCase() : fallback)
   // A company with no stage of a category (never true once the stage rules
   // hold) gets a button that lets the user choose instead

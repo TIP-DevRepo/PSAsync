@@ -5,7 +5,7 @@ import { Button as HeroButton } from "@heroui/react"
 import { AcceptFlowModal } from "./AcceptFlowModal"
 import { formatValidUntil } from "@/lib/quote-expiry"
 import { PORTAL_COMMENT_MAX, PORTAL_DECLINE_REASON_MAX, PORTAL_QUANTITY_MAX } from "@/lib/portal-input"
-import { toast } from "@/lib/toast"
+import { downloadPdf } from "@/lib/download-pdf"
 
 const pdfButtonStyle = `
   .pdf-download-btn {
@@ -342,7 +342,7 @@ export default function PortalPage({
           )}
           {li.isRecurring && (
             <p className="text-xs text-zinc-400">
-              Recurring — {li.recurringInterval?.toLowerCase()}
+              Recurring: {li.recurringInterval?.toLowerCase()}
             </p>
           )}
         </td>
@@ -377,7 +377,7 @@ export default function PortalPage({
 
   function handleAcceptedFromModal() {
     setShowAcceptFlow(false)
-    setActionMessage("Thank you — this quote has been accepted.")
+    setActionMessage("Thank you, this quote has been accepted.")
     load()
   }
 
@@ -402,29 +402,12 @@ export default function PortalPage({
   }
 
   // Fetched rather than linked, so a link that has been used too often (429)
-  // shows a short note instead of an error page
+  // or a PDF that couldn't be made (503) shows a short note instead of an
+  // error page
   async function handleDownloadPdf() {
     setDownloadingPdf(true)
     try {
-      const res = await fetch(`/api/portal/${token}/pdf`)
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}))
-        if (res.status === 429) toast.warning("Please wait before downloading again", data.error)
-        else toast.error("Couldn't download the PDF", data.error || "Please try again.")
-        return
-      }
-      const blob = await res.blob()
-      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] || "quote.pdf"
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      link.download = name
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      setTimeout(() => URL.revokeObjectURL(url), 1000)
-    } catch {
-      toast.error("Couldn't download the PDF", "Please try again.")
+      await downloadPdf(`/api/portal/${token}/pdf`)
     } finally {
       setDownloadingPdf(false)
     }
@@ -521,7 +504,7 @@ export default function PortalPage({
 
       {quote.isInternalPreview && (
         <div className="bg-amber-100 border-b border-amber-300 text-amber-800 text-sm text-center py-2 font-medium">
-          Internal Preview — this link always shows the latest draft and is never sent to the client. Accept/Decline/Comment actions are disabled here.
+          Internal Preview: this link always shows the latest draft and is never sent to the client. Accept/Decline/Comment actions are disabled here.
         </div>
       )}
 
@@ -537,7 +520,7 @@ export default function PortalPage({
             {quote.title && <p className="text-zinc-600">{quote.title}</p>}
             <p className="text-sm text-zinc-500 mt-1">
               Prepared for {quote.client.name}
-              {quote.contact ? ` — ${quote.contact.firstName} ${quote.contact.lastName}` : ""} by{" "}
+              {quote.contact ? ` - ${quote.contact.firstName} ${quote.contact.lastName}` : ""} by{" "}
               {quote.user.name}
             </p>
             {quote.expiresAt && (
@@ -636,7 +619,7 @@ export default function PortalPage({
                                       <span className="ml-2 text-xs text-zinc-400">(not included)</span>
                                     )}
                                   </td>
-                                  <td className="py-2 pr-4 text-right text-zinc-400">—</td>
+                                  <td className="py-2 pr-4 text-right text-zinc-400">-</td>
                                 </tr>
                               ))}
                             </React.Fragment>
@@ -779,7 +762,7 @@ export default function PortalPage({
           <label className="block text-sm font-medium text-zinc-900">Messages</label>
           <div className="space-y-2 max-h-80 overflow-y-auto">
             {comments.length === 0 && (
-              <p className="text-sm text-zinc-500">No messages yet — ask a question below.</p>
+              <p className="text-sm text-zinc-500">No messages yet. Ask a question below.</p>
             )}
             {comments.map((c) => (
               <div

@@ -122,8 +122,11 @@ export function UsersSettingsPanel() {
     if (!user.roles.some((r) => r.id === role.id)) return grantRefusalOf(role)
     return null
   }
+  // The invite follows the same rule as Manage Users and the server: a role
+  // at or above your rank, or one that fails the grant rule, is disabled
+  // with the reason
   function inviteRoleReason(role: AssignableRole) {
-    if (myRank === null || role.rank > myRank) return "Above your rank"
+    if (myRank === null || role.rank >= myRank) return "At or above your rank"
     return grantRefusalOf(role)
   }
   function userLockedReason(user: User) {

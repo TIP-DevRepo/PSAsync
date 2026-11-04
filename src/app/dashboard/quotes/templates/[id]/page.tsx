@@ -470,7 +470,7 @@ function TemplateDetail({ params }: { params: Promise<{ id: string }> }) {
           </div>
           <div className="flex justify-between">
             <span>Internal: Margin %</span>
-            <span>{!costVisible ? "-" : subtotal > 0 ? `${marginPct.toFixed(1)}%` : "—"}</span>
+            <span>{!costVisible ? "-" : subtotal > 0 ? `${marginPct.toFixed(1)}%` : "-"}</span>
           </div>
         </div>
       </div>

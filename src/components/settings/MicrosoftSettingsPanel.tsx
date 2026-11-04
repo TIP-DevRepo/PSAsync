@@ -113,7 +113,7 @@ export function MicrosoftSettingsPanel() {
       const confirmed = await confirmDialog({
         title: "Turn on Single Sign-On?",
         description:
-          "This disables password login for EVERY user in your company immediately — " +
+          "This disables password login for EVERY user in your company immediately. " +
           "they'll all sign in with Microsoft from now on. Anyone without a matching Microsoft " +
           "account of the same email won't be able to log in.",
         confirmLabel: "Turn On SSO",
@@ -187,7 +187,7 @@ export function MicrosoftSettingsPanel() {
       {managesIntegration ? (
         <p className="text-sm text-zinc-500">
           Connect your own Microsoft 365 tenant so PSAsync can send and receive email through
-          Outlook. This uses your own Azure App Registration — PSAsync never has access to any
+          Outlook. This uses your own Azure App Registration. PSAsync never has access to any
           Microsoft account beyond what's explicitly connected here. You can connect more than
           one mailbox (e.g. a shared "quotes@" inbox alongside individual reps), and choose which
           one to use in other settings pages later (like which mailbox quotes get sent from).
@@ -253,7 +253,7 @@ export function MicrosoftSettingsPanel() {
             </div>
             <div>
               <label className="block text-sm font-medium mb-1">
-                Client Secret {settings.hasClientSecret && <span className="text-zinc-400 font-normal">(already saved — leave blank to keep it)</span>}
+                Client Secret {settings.hasClientSecret && <span className="text-zinc-400 font-normal">(already saved, leave blank to keep it)</span>}
               </label>
               <input
                 type="password"
@@ -343,7 +343,7 @@ export function MicrosoftSettingsPanel() {
           <p className="text-xs text-zinc-500">
             Once turned on, every user in your company signs into PSAsync with their Microsoft
             account instead of a password. Their PSAsync account must already exist (an admin
-            invites them under Settings → Users) — SSO links to that account by matching email, it
+            invites them under Settings → Users). SSO links to that account by matching email, it
             doesn't create new accounts on its own.
           </p>
           <div className="flex items-center justify-between rounded-md border p-3">

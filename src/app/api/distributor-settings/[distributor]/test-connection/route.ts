@@ -80,7 +80,7 @@ export async function POST(
       status = result.status
     } else {
       success = true
-      status = `Connected (mock — real API pending credential approval) [${testEnv}]`
+      status = `Connected (mock, real API pending credential approval) [${testEnv}]`
     }
   }
 

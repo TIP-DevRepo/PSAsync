@@ -213,8 +213,8 @@ export function AcceptFlowModal({
           </div>
           {shipLocked ? (
             <div className="rounded-md border bg-zinc-50 px-3 py-2 text-sm text-zinc-700">
-              <p className="font-medium">{shipContactName || "—"}</p>
-              <p>{shipAddress || "—"}</p>
+              <p className="font-medium">{shipContactName || "-"}</p>
+              <p>{shipAddress || "-"}</p>
               <p>{[shipCity, shipState, shipZip].filter(Boolean).join(", ")}</p>
             </div>
           ) : (

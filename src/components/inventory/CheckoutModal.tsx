@@ -164,7 +164,7 @@ export function CheckoutModal({
     return (
       <Modal maxWidth="sm" onClose={onClose}>
         <h2 className="text-lg font-bold text-foreground">Check Out Asset</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Already sold to this client — pick who it's going to.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Already sold to this client. Pick who it's going to.</p>
 
         <div className="mt-4">
           <label className="block text-xs text-muted-foreground mb-1">Contact</label>

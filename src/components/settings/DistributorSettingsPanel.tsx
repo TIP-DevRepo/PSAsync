@@ -61,7 +61,7 @@ const LIVE_DISTRIBUTORS: DistributorKey[] = ["INGRAM_MICRO", "TD_SYNNEX", "DH", 
 const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fields: FieldConfig[] }> = {
   INGRAM_MICRO: {
     label: "Ingram Micro",
-    note: "OAuth 2.0 + Customer Number. Largest catalog — approval can take 1-2 weeks.",
+    note: "OAuth 2.0 + Customer Number. Largest catalog. Approval can take 1-2 weeks.",
     fields: [
       { key: "clientId", label: "Client ID" },
       { key: "clientSecret", label: "Client Secret" },
@@ -70,7 +70,7 @@ const DISTRIBUTOR_META: Record<DistributorKey, { label: string; note: string; fi
   },
   TD_SYNNEX: {
     label: "TD Synnex",
-    note: "OAuth 2.0 Client ID + Secret. No keyword search — exact part number lookup only.",
+    note: "OAuth 2.0 Client ID + Secret. No keyword search, exact part number lookup only.",
     fields: [
       { key: "clientId", label: "Client ID" },
       { key: "clientSecret", label: "Client Secret" },
@@ -255,7 +255,7 @@ export function DistributorSettingsPanel() {
         title: `Switch ${DISTRIBUTOR_META[key].label} from Production to Sandbox?`,
         description:
           "This distributor will stop returning real pricing/availability and start using " +
-          "sandbox (test) data everywhere it's used — quote builder searches, price lookups, everything.",
+          "sandbox (test) data everywhere it's used: quote builder searches, price lookups, everything.",
         confirmLabel: "Switch to Sandbox",
         variant: "danger",
       })

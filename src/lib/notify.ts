@@ -186,7 +186,7 @@ export async function notifySalesOrderStatusChange(salesOrderId: string, status:
       await sendCompanyNotificationEmail(
         salesOrder.companyId,
         user.email,
-        `${salesOrder.soNumber} — ${label}`,
+        `${salesOrder.soNumber} - ${label}`,
         `<p>Hi ${escapeHtml(user.name)},</p><p>${escapeHtml(message)}.</p><p><a href="${escapeHtml(`${process.env.NEXTAUTH_URL ?? ""}${link}`)}">View the Sales Order</a></p>`,
         userId
       )

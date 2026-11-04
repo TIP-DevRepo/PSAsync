@@ -9,6 +9,7 @@ import { Pencil, Mail, Search, Flag, MessageSquare, MoreVertical, UserPlus, Copy
 import { Modal } from "@/components/Modal"
 import { CopyQuoteModal } from "@/components/quotes/CopyQuoteModal"
 import { toast } from "@/lib/toast"
+import { downloadPdf } from "@/lib/download-pdf"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { copyText } from "@/lib/clipboard"
 import { formatValidUntil } from "@/lib/quote-expiry"
@@ -124,7 +125,7 @@ function initials(name: string) {
 }
 
 function fmtDate(d: string | null) {
-  return d ? new Date(d).toLocaleDateString() : "—"
+  return d ? new Date(d).toLocaleDateString() : "-"
 }
 
 // ─── Data Table sort/density helpers ──────────────────────────────────────
@@ -642,7 +643,7 @@ function QuotesTab() {
                     <p className="font-medium text-foreground">{quote.contactName ?? quote.clientName}</p>
                     {quote.contactName && <p className="text-caption text-muted-foreground">{quote.clientName}</p>}
                   </td>
-                  <td className={`${ROW_PADDING[density]} pr-3 text-foreground`}>{quote.title ?? "—"}</td>
+                  <td className={`${ROW_PADDING[density]} pr-3 text-foreground`}>{quote.title ?? "-"}</td>
                   <td className={`${ROW_PADDING[density]} pr-3 w-40`}>
                     <p className="text-caption font-medium mb-1 text-foreground">{statusLabel(quote.status)}</p>
                     <div className="h-1.5 w-full rounded-full bg-muted">
@@ -798,7 +799,7 @@ function QuickReplyModal({
 
   return (
     <Modal maxWidth="md" scrollable>
-      <h2 className="text-lg font-bold text-foreground">{quote.quoteNumber} — Comments</h2>
+      <h2 className="text-lg font-bold text-foreground">{quote.quoteNumber}: Comments</h2>
 
       <div className="space-y-2 max-h-80 overflow-y-auto">
         {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
@@ -1060,7 +1061,7 @@ function QuoteActionsMenu({
               )}
               <button
                 onClick={() => {
-                  window.open(`/api/quotes/${quote.id}/pdf`, "_blank")
+                  void downloadPdf(`/api/quotes/${quote.id}/pdf`)
                   setOpen(false)
                 }}
                 className="flex items-center justify-between w-full text-left px-3 py-2 text-foreground hover:bg-surface-hover"
@@ -1190,7 +1191,7 @@ function RevisionsModal({ quote, onClose }: { quote: Quote; onClose: () => void 
 
   return (
     <Modal maxWidth="md">
-      <h2 className="text-lg font-bold text-foreground">{quote.quoteNumber} — Revisions</h2>
+      <h2 className="text-lg font-bold text-foreground">{quote.quoteNumber}: Revisions</h2>
 
         {loading && <p className="text-sm text-muted-foreground">Loading...</p>}
 

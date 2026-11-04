@@ -19,17 +19,35 @@ export interface HeaderEnv {
   AWS_REGION?: string
 }
 
+// A plain S3 bucket name (3 to 63 lowercase letters, digits, dots, and
+// hyphens, starting and ending with a letter or digit) and a plain AWS
+// region name (for example us-east-1 or us-gov-west-1)
+const BUCKET_NAME = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/
+const REGION_NAME = /^[a-z]{2}(-[a-z]+)+-\d+$/
+
 // Uploaded images (company and vendor logos, attachment thumbnails) load
 // straight from the uploads bucket, https://<bucket>.s3.<region>.amazonaws.com
-// (src/lib/uploads.ts). Without the bucket settings at build time any S3
-// host is allowed instead.
-export function uploadsImageOrigin(env: HeaderEnv): string {
+// (src/lib/uploads.ts). Null when AWS_S3_BUCKET_NAME or AWS_REGION is
+// missing or isn't a plain name: the policy then leaves the bucket out (no
+// uploaded image loads) rather than allowing every S3 host, which would let
+// any bucket anyone owns serve images to the app.
+export function uploadsImageOrigin(env: HeaderEnv): string | null {
   const bucket = env.AWS_S3_BUCKET_NAME?.trim()
   const region = env.AWS_REGION?.trim()
-  if (bucket && region && /^[a-z0-9.-]+$/.test(bucket) && /^[a-z0-9-]+$/.test(region)) {
+  if (bucket && region && BUCKET_NAME.test(bucket) && !bucket.includes("..") && REGION_NAME.test(region)) {
     return `https://${bucket}.s3.${region}.amazonaws.com`
   }
-  return "https://*.amazonaws.com"
+  return null
+}
+
+// The build time warning for a policy without the uploads bucket, or null.
+// Names the variables, never their values.
+export function uploadsImageOriginWarning(env: HeaderEnv): string | null {
+  if (uploadsImageOrigin(env)) return null
+  return (
+    "Security headers: AWS_S3_BUCKET_NAME or AWS_REGION is missing or not a plain bucket or region name, " +
+    "so img-src leaves out the uploads bucket and uploaded images won't load. Set both and build again."
+  )
 }
 
 // The policy, from an inventory of everything the app loads in the
@@ -42,7 +60,9 @@ export function uploadsImageOrigin(env: HeaderEnv): string {
 // - style-src 'unsafe-inline': inline style attributes (HeroUI, the portal
 //   and company branding colors) and the portal's <style> tag
 // - img-src data: blob: and the uploads bucket: logos and thumbnails from
-//   S3, file previews before upload (blob:), and inline images (data:)
+//   S3, file previews before upload (blob:), and inline images (data:).
+//   Never a wildcard S3 host: without valid bucket settings the bucket is
+//   left out (uploadsImageOrigin).
 // - font-src 'self': next/font serves Geist and Parisienne from this app
 // - connect-src 'self': the browser only calls this app's /api routes
 // - object-src 'none', base-uri 'self': no plugins, no <base> hijacking
@@ -51,11 +71,12 @@ export function uploadsImageOrigin(env: HeaderEnv): string {
 // - frame-ancestors 'none': the app is never shown inside a frame
 export function buildCsp(env: HeaderEnv): string {
   const isDev = env.NODE_ENV === "development"
+  const uploads = uploadsImageOrigin(env)
   const directives: [string, string[]][] = [
     ["default-src", ["'self'"]],
     ["script-src", ["'self'", "'unsafe-inline'", ...(isDev ? ["'unsafe-eval'"] : [])]],
     ["style-src", ["'self'", "'unsafe-inline'"]],
-    ["img-src", ["'self'", "data:", "blob:", uploadsImageOrigin(env)]],
+    ["img-src", ["'self'", "data:", "blob:", ...(uploads ? [uploads] : [])]],
     ["font-src", ["'self'"]],
     ["connect-src", ["'self'"]],
     ["object-src", ["'none'"]],

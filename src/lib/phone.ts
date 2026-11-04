@@ -12,9 +12,9 @@ export function formatPhoneInput(value: string): string {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`
 }
 
-// For read-only display spots that currently fall back to an em-dash-style
-// placeholder when the value is empty.
+// For read-only display spots that fall back to a "-" placeholder
+// when the value is empty.
 export function formatPhoneDisplay(value: string | null | undefined): string {
-  if (!value) return "—"
+  if (!value) return "-"
   return formatPhoneInput(value)
 }

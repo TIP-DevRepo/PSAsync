@@ -217,11 +217,21 @@
 // the route would create the opportunity itself). An opportunity with a
 // linked quote refuses a new client with 409 and takes a new contact of its
 // client (a second contact this step adds and removes).
+//
+// Quote expiry job (checkQuoteExpiryJob): on Test Company B only (the job's
+// companyIds, so no other dev data is touched), a sent quote past its Valid
+// until date and linked to an open opportunity expires and moves the
+// opportunity to the first Lost stage, by System on the timeline and in the
+// audit log, while a sent quote not yet due and a draft past due stay; a
+// second run expires nothing. GET /api/cron/expire-quotes without a secret
+// and with a made up one answers 401 (the dev server has CRON_SECRET) or 503
+// (it doesn't), and the row names which. The real secret is never read or
+// sent. Everything it made is removed.
 
 import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import { PLACEHOLDER_TOKEN, SAMPLE_ITEM_COST, type PermissionFixtureIds, type SampleIds, type TestNames } from "./lib/test-data"
-import { HarnessBroken, ServerUnreachable, Session, checkResult, errorText, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
+import { HarnessBroken, ServerUnreachable, Session, checkResult, errorText, fetchOrExplain, isJsonError, printTable, readBaseUrl, type CheckResult, type Method, type Row } from "./lib/harness"
 import { addRunMailbox, addRunRole, addRunUser, isEntryScript, withRunData, type RunData } from "./lib/run-data"
 // Only imports Prisma types, so loading it can't reach the database
 import { setUserRoles } from "@/lib/user-roles"
@@ -2958,6 +2968,133 @@ async function checkQuoteOpportunityRules(prisma: PrismaClient, sessions: Record
   }
 }
 
+// ─── Quote expiry job ───────────────────────────────────────────────────────
+
+// The daily quote expiry job (expireOverdueQuotes, src/lib/quote-expiry-job.ts)
+// on this run's Test Company B only (companyIds), so no other dev data is
+// ever touched: a sent quote past its Valid until date linked to an open
+// opportunity expires and moves it to the first Lost stage, by System on
+// the timeline and in the audit log; a sent quote not yet due and a draft
+// past due stay as they are; a second run expires nothing. The cron route
+// is called without a secret and with a made up one (401, or 503 when the
+// dev server has no CRON_SECRET; the real secret is never read or sent).
+// Everything it made is removed.
+async function checkQuoteExpiryJob(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[], baseUrl: string) {
+  const companyId = ctx.b.companyId
+  const label = (name: string) => `[System] Quote expiry job: ${name}`
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: label(name), expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const idOf = (text: string) => {
+    try {
+      const id = (JSON.parse(text) as { id?: unknown }).id
+      return typeof id === "string" ? id : null
+    } catch {
+      return null
+    }
+  }
+  // Imported here, after the guard, like the database client
+  const { expireOverdueQuotes } = await import("@/lib/quote-expiry-job")
+
+  const opportunitiesBefore = await opportunityIdsOf(prisma, [companyId])
+  const quoteIds: string[] = []
+  const newQuote = async (title: string) => {
+    const res = await admin.request("POST", "/api/quotes", { json: { clientId: ctx.b.clientId, contactId: ctx.b.contactId, title } })
+    const id = idOf(res.text)
+    if (!id) throw new HarnessBroken(`couldn't create a quote: ${res.status} ${errorText(res.text)}`)
+    quoteIds.push(id)
+    return id
+  }
+  const today = new Date()
+  const dateOnly = (days: number) => new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() + days))
+
+  try {
+    const stages = await prisma.opportunityStage.findMany({ where: { companyId }, select: { id: true, category: true }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] })
+    const firstLost = stages.find((s) => s.category === "LOST")?.id
+    if (!firstLost) throw new HarnessBroken("Test Company B has no Lost stage")
+
+    // An open opportunity with one sent quote, past its date
+    const oppRes = await admin.request("POST", "/api/opportunities", {
+      json: { title: "Dev check quote expiry", clientId: ctx.b.clientId, contactId: ctx.b.contactId, initialNote: OPP_NOTE },
+    })
+    const opportunityId = idOf(oppRes.text)
+    if (!opportunityId) throw new HarnessBroken(`couldn't create an opportunity: ${oppRes.status} ${errorText(oppRes.text)}`)
+    const overdue = await newQuote("Dev check expiry overdue")
+    const link = await admin.request("PATCH", `/api/quotes/${overdue}`, { json: { opportunityId } })
+    const send = await admin.request("POST", `/api/quotes/${overdue}/status`, { json: { status: "SENT" } })
+    if (link.status !== 200 || send.status !== 200) {
+      throw new HarnessBroken(`couldn't link and send the overdue quote: ${link.status} ${errorText(link.text)}, ${send.status} ${errorText(send.text)}`)
+    }
+    await prisma.quote.update({ where: { id: overdue }, data: { expiresAt: dateOnly(-3) } })
+
+    // A sent quote not due yet, and a draft past due (written directly, so
+    // neither gets an opportunity of its own)
+    const notDue = await newQuote("Dev check expiry not due")
+    await prisma.quote.update({ where: { id: notDue }, data: { status: "SENT", sentAt: new Date(), expiresAt: dateOnly(30) } })
+    const draft = await newQuote("Dev check expiry draft")
+    await prisma.quote.update({ where: { id: draft }, data: { expiresAt: dateOnly(-3) } })
+
+    // ── The job ──
+    const startedAt = new Date()
+    const first = await expireOverdueQuotes({ companyIds: [companyId], limit: 200 })
+    const states = await prisma.quote.findMany({ where: { id: { in: [overdue, notDue, draft] } }, select: { id: true, status: true } })
+    const statusOf = (id: string) => states.find((q) => q.id === id)?.status
+    push("only the overdue sent quote expires", "overdue EXPIRED, not due SENT, draft DRAFT, 1 expired, no errors",
+      `${statusOf(overdue)}, ${statusOf(notDue)}, ${statusOf(draft)}, ${first.expired} expired, ${first.errors.length} errors`,
+      first.errors.length > 0
+        ? `errors: ${first.errors.map((e) => e.error).join("; ")}`
+        : statusOf(overdue) !== "EXPIRED" || statusOf(notDue) !== "SENT" || statusOf(draft) !== "DRAFT"
+          ? "a quote has the wrong status"
+          : first.items.length !== 1 || first.items[0].quoteId !== overdue
+            ? `expired ${first.items.map((i) => i.quoteId).join(", ") || "nothing"} in Test Company B`
+            : null)
+
+    const opportunity = await prisma.opportunity.findUniqueOrThrow({ where: { id: opportunityId }, select: { stageId: true, closedAt: true } })
+    push("its opportunity moves to the first Lost stage", "first Lost stage, closedAt set", opportunity.stageId === firstLost ? "Lost" : "another stage",
+      opportunity.stageId !== firstLost ? "the opportunity didn't move to the first Lost stage" : !opportunity.closedAt ? "closedAt isn't set" : null)
+
+    const entries = await prisma.timelineEntry.findMany({ where: { opportunityId, createdAt: { gte: startedAt } }, select: { action: true, authorId: true } })
+    const expiredEntry = entries.find((e) => e.action === "quote_expired")
+    const movedEntry = entries.find((e) => e.action === "stage_changed")
+    push("the timeline shows the expiry and the move by System", "quote_expired and stage_changed, no author", entries.map((e) => e.action).join(", ") || "none",
+      !expiredEntry || !movedEntry ? "an entry is missing" : expiredEntry.authorId || movedEntry.authorId ? "an entry has an author" : null)
+
+    const audit = await prisma.auditLogEntry.findMany({ where: { companyId, recordId: opportunityId, createdAt: { gte: startedAt } }, select: { action: true, field: true, actorId: true, actorName: true } })
+    const auditExpired = audit.find((a) => a.action === "quote_expired")
+    const auditStage = audit.find((a) => a.action === "field_changed" && a.field === "stageId")
+    push("the audit log shows the expiry and the move by System", "quote_expired and field_changed stageId, System", audit.map((a) => `${a.action} by ${a.actorName}`).join(", ") || "none",
+      !auditExpired || !auditStage
+        ? "an audit entry is missing"
+        : [auditExpired, auditStage].some((a) => a.actorId !== null || a.actorName !== "System")
+          ? "an audit entry isn't by System"
+          : null)
+
+    const second = await expireOverdueQuotes({ companyIds: [companyId], limit: 200 })
+    push("a second run expires nothing new", "0 expired", `${second.expired} expired`,
+      second.expired !== 0 || second.errors.length > 0 ? `expired ${second.expired}, ${second.errors.length} errors` : null)
+
+    // ── The cron route refuses without the secret ──
+    const url = `${baseUrl}/api/cron/expire-quotes`
+    const noSecret = await fetchOrExplain(url, { redirect: "manual" }, "GET /api/cron/expire-quotes")
+    const wrongSecret = await fetchOrExplain(url, { redirect: "manual", headers: { Authorization: `Bearer dev-check-${Math.random().toString(16).slice(2)}` } }, "GET /api/cron/expire-quotes")
+    const bodies = [await noSecret.text(), await wrongSecret.text()]
+    const configured = noSecret.status === 401
+    const wanted = configured ? '{"error":"Unauthorized"}' : '{"error":"Not configured"}'
+    const afterRoute = await prisma.quote.findUniqueOrThrow({ where: { id: notDue }, select: { status: true } })
+    push(`the cron route refuses without the secret (${configured ? "401, the server has CRON_SECRET" : "503, the server has no CRON_SECRET"})`,
+      "401 or 503 with no details, both the same", `${noSecret.status}, ${wrongSecret.status}`,
+      ![401, 503].includes(noSecret.status) || wrongSecret.status !== noSecret.status
+        ? `got ${noSecret.status} without and ${wrongSecret.status} with a made up secret`
+        : bodies.some((b) => b !== wanted)
+          ? "the answer says more than it should"
+          : afterRoute.status !== "SENT"
+            ? "a quote changed"
+            : null)
+  } finally {
+    await prisma.quote.deleteMany({ where: { id: { in: quoteIds } } })
+    await removeOpportunitiesAddedSince(prisma, [companyId], opportunitiesBefore)
+  }
+}
+
 // ─── Audit log steps ─────────────────────────────────────────────────────────
 // All three work on one opportunity Test Admin B creates through the API
 // (unassigned, in General, so Test Opp Viewer B can open it too), and remove
@@ -3534,6 +3671,10 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // When an opportunity is created, Create opportunity stages, and the
     // client change rule
     await checkQuoteOpportunityRules(prisma, sessions, ctx, rows)
+
+    // The daily quote expiry job, on Test Company B only, and the cron
+    // route refusing without its secret
+    await checkQuoteExpiryJob(prisma, sessions.admin, ctx, rows, baseUrl)
 
     // Audit log: every action recorded, soft delete and restore, and undo
     const auditOpportunityId = await checkAuditRecording(prisma, sessions.admin, ctx, rows)

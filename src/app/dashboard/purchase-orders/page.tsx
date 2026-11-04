@@ -256,7 +256,7 @@ function PurchaseOrdersList() {
                 <td className={`${ROW_PADDING[density]} pl-4 pr-3 font-medium text-foreground`}>{po.poNumber}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-foreground`}>{po.vendorName}</td>
                 <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{po.ownerName}</td>
-                <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{po.soNumber ?? "—"}</td>
+                <td className={`${ROW_PADDING[density]} pr-3 text-muted-foreground`}>{po.soNumber ?? "-"}</td>
                 <td className={`${ROW_PADDING[density]} pr-3`}>
                   <span className={`rounded-full px-2 py-1 text-xs font-medium ${STATUS_COLORS[po.status]}`}>
                     {statusLabel(po.status)}
