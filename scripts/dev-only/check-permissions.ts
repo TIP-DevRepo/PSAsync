@@ -127,6 +127,14 @@
 // end; its audit entries go with the run's teardown. Attachments and emails
 // are never added, so their entries are covered by the scratch tests.
 //
+// Attachment downloads (checkAttachmentDownloads, fixtures downloadFileIds
+// in lib/run-data.ts): each kind's download route answers 302 to the
+// uploads bucket with a link that expires within 300 seconds for a user
+// who may view the parent, the parent's 403 or 404 for one who may not, 404
+// for a soft deleted opportunity, 404 "File not available" for a dummy
+// example.test link, and no attachment response holds the bucket host.
+// The redirect's link is never printed.
+//
 // Teams (TEAM_ATTEMPTS, fixtures in lib/run-data.ts): the three visibility
 // levels on the list, an opportunity, its timeline, its related records,
 // and the sidebar counts (Test Team Basic B: own plus the team's
@@ -236,6 +244,7 @@ import { addRunMailbox, addRunRole, addRunUser, isEntryScript, withRunData, type
 // Only imports Prisma types, so loading it can't reach the database
 import { setUserRoles } from "@/lib/user-roles"
 import { opportunityIdsOf, removeOpportunitiesAddedSince } from "./lib/quote-opportunities"
+import { ATTACHMENT_KINDS, attachmentDownloadPath, type AttachmentKind } from "@/lib/attachment-paths"
 
 // Must stay first: nothing below may run before the guard has passed
 enforceDevGuard("check-permissions")
@@ -3696,11 +3705,146 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // never gives one back
     await checkRecordNumbering(prisma, sessions.admin, ctx, rows)
 
+    // Attachment downloads: the parent's view check, the redirect, and no
+    // bucket link in any attachment response
+    await checkAttachmentDownloads(prisma, sessions, ACTOR_LABEL, ctx, rows)
+
     printTable(rows)
     const count = (r: Row["result"]) => rows.filter((row) => row.result === r).length
     console.log(`\n${rows.length} checks: ${count("PASS")} PASS, ${count("FAIL")} FAIL, ${count("UNEXPECTED")} UNEXPECTED`)
 
     return checkResult(rows)
+  }
+}
+
+// Attachment downloads (GET /api/files/<kind>/<id>): a user who may view
+// the parent record gets a 302 to the uploads bucket with a link that
+// expires within 300 seconds; one who may not gets the parent's refusal
+// (403 without the page, 404 for a record they can't open); a soft
+// deleted opportunity's attachment is a 404; a dummy example.test link is
+// a 404 "File not available" with no redirect; and no attachment API
+// response carries the bucket host or a stored file link. Each
+// downloadFileIds attachment has a link in the bucket's URL format and a
+// test key with no file behind it (presigning never contacts S3). The
+// redirect's link is never printed, only its host and expiry.
+async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<Actor, Session>, labels: Record<Actor, string>, ctx: AttemptContext, rows: Row[]) {
+  const push = (actor: Actor, name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[${labels[actor]}] Attachment download: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  if (!process.env.AWS_S3_BUCKET_NAME || !process.env.AWS_REGION) {
+    rows.push({
+      attempt: "Attachment downloads",
+      expected: "AWS_S3_BUCKET_NAME and AWS_REGION set",
+      actual: "missing",
+      result: "UNEXPECTED",
+      note: "Set AWS_S3_BUCKET_NAME and AWS_REGION in .env.development.local (the same values the dev server uses), so the download fixtures use the bucket's URL format",
+    })
+    return
+  }
+  const { bucketBaseUrl } = await import("@/lib/uploads")
+  const bucketHost = new URL(bucketBaseUrl()).host
+  const files = ctx.b.downloadFileIds
+  const path = (kind: AttachmentKind, id = files[kind]) => `/api/files/${kind}/${id}`
+
+  const redirects = async (actor: Actor, kind: AttachmentKind) => {
+    const res = await sessions[actor].request("GET", path(kind))
+    let problem: string | null = null
+    if (res.status !== 302) problem = `got ${res.status}: ${errorText(res.text)}`
+    else {
+      try {
+        const link = new URL(res.location)
+        const expires = Number(link.searchParams.get("X-Amz-Expires"))
+        if (link.host !== bucketHost) problem = `redirected to ${link.host}, not the uploads bucket`
+        else if (!link.searchParams.get("X-Amz-Signature")) problem = "the link isn't signed"
+        else if (!Number.isFinite(expires) || expires <= 0 || expires > 300) problem = `the link expires in ${link.searchParams.get("X-Amz-Expires") ?? "no set time"}, not at most 300 seconds`
+      } catch {
+        problem = "the redirect has no usable link"
+      }
+    }
+    push(actor, `${kind} attachment it may view`, "302 to the bucket, at most 300 seconds", String(res.status), problem)
+  }
+  const refused = async (actor: Actor, kind: AttachmentKind, expect: 403 | 404, expectError: string, why: string) => {
+    const res = await sessions[actor].request("GET", path(kind))
+    const problem =
+      res.status !== expect ? `got ${res.status}${res.location ? " with a redirect" : ""}`
+        : res.location ? "redirected anyway"
+          : !isJsonError(res.text) || !errorText(res.text).includes(expectError) ? `refused for another reason: ${errorText(res.text)}`
+            : null
+    push(actor, `${kind} attachment ${why}`, `${expect} "${expectError}"`, String(res.status), problem)
+  }
+
+  // Allowed: the admin for every kind, the clerk for vendors and assets,
+  // and the viewer (both order pages and both viewAll keys) for orders
+  for (const kind of ATTACHMENT_KINDS) await redirects("admin", kind)
+  await redirects("clerk", "vendor")
+  await redirects("clerk", "inventory-asset")
+  await redirects("viewer", "sales-order")
+  await redirects("viewer", "purchase-order")
+
+  // Refused: without the page (403), or a record the user can't open (404)
+  const pageRefusal: Record<AttachmentKind, string> = {
+    vendor: "view vendors",
+    "inventory-asset": "view inventory",
+    "sales-order": "view sales orders",
+    "purchase-order": "view purchase orders",
+    opportunity: "view opportunities",
+  }
+  for (const kind of ATTACHMENT_KINDS) await refused("everyone", kind, 403, pageRefusal[kind], "without the page")
+  await refused("rep", "vendor", 403, pageRefusal.vendor, "without the page")
+  await refused("rep", "sales-order", 403, pageRefusal["sales-order"], "without the page")
+  await refused("clerk", "opportunity", 403, pageRefusal.opportunity, "without the page")
+  await refused("orders", "sales-order", 404, "Not found", "on another user's sales order")
+  await refused("orders", "purchase-order", 404, "Not found", "on another user's purchase order")
+  await refused("rep", "opportunity", 404, "Not found", "on an opportunity it can't open")
+  await refused("oppViewer", "opportunity", 404, "Not found", "on an opportunity it can't open")
+
+  // A soft deleted opportunity's attachment, even for an audit log viewer
+  // (deletedAt written directly and cleared right after)
+  const opportunityId = ctx.b.opportunityId
+  try {
+    await prisma.opportunity.update({ where: { id: opportunityId }, data: { deletedAt: new Date(), deletedById: ctx.b.adminId } })
+    await refused("admin", "opportunity", 404, "Not found", "on a deleted opportunity")
+  } finally {
+    await prisma.opportunity.update({ where: { id: opportunityId }, data: { deletedAt: null, deletedById: null } })
+  }
+
+  // The sample attachments' dummy example.test link: not available, never redirected
+  const dummies: [AttachmentKind, string][] = [
+    ["vendor", ctx.b.vendorAttachmentId],
+    ["sales-order", ctx.b.soAttachmentId],
+    ["purchase-order", ctx.b.poAttachmentId],
+    ["inventory-asset", ctx.b.assetAttachmentId],
+    ["opportunity", ctx.b.opportunityAttachmentId],
+  ]
+  for (const [kind, id] of dummies) {
+    const res = await sessions.admin.request("GET", path(kind, id))
+    const problem =
+      res.status !== 404 ? `got ${res.status}${res.location ? " with a redirect" : ""}`
+        : res.location ? "redirected anyway"
+          : errorText(res.text) !== "File not available" ? `got "${errorText(res.text)}"`
+            : null
+    push("admin", `${kind} attachment with a dummy example.test link`, '404 "File not available"', String(res.status), problem)
+  }
+
+  // No attachment API response carries the bucket host or a stored link,
+  // and each lists its download fixture by its download route
+  const responses: { name: string; path: string; kind: AttachmentKind }[] = [
+    { name: "vendor attachments", path: `/api/vendors/${ctx.b.vendorId}/attachments`, kind: "vendor" },
+    { name: "sales order attachments", path: `/api/sales-orders/${ctx.b.salesOrderId}/attachments`, kind: "sales-order" },
+    { name: "purchase order attachments", path: `/api/purchase-orders/${ctx.b.purchaseOrderId}/attachments`, kind: "purchase-order" },
+    { name: "purchase order detail", path: `/api/purchase-orders/${ctx.b.purchaseOrderId}`, kind: "purchase-order" },
+    { name: "asset attachments", path: `/api/inventory-assets/${ctx.b.assetId}/attachments`, kind: "inventory-asset" },
+    { name: "opportunity attachments", path: `/api/opportunities/${ctx.b.opportunityId}/attachments`, kind: "opportunity" },
+  ]
+  for (const r of responses) {
+    const res = await sessions.admin.request("GET", r.path)
+    const route = attachmentDownloadPath(r.kind, files[r.kind])
+    const problem =
+      res.status !== 200 ? `got ${res.status}: ${errorText(res.text)}`
+        : res.text.includes(bucketHost) || res.text.includes("amazonaws.com") ? "the response holds the bucket host"
+          : res.text.includes('"fileUrl"') ? "the response holds a stored file link"
+            : !res.text.includes(`"downloadUrl":"${route}"`) ? "the download fixture isn't listed with its download route"
+              : null
+    push("admin", `${r.name} hold no bucket link`, "200, download routes only", String(res.status), problem)
   }
 }
 

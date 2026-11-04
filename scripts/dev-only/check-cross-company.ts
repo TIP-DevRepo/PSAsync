@@ -20,7 +20,9 @@
 // the Opportunity panels on a quote, sales order, and purchase order and
 // the opportunity's Related tab (own records only, with the sample records
 // linked to the own opportunity for the check and put back after), then the
-// deactivated user check. The opportunity link attempts send the other
+// deactivated user check. Each admin's own attachment downloads (one per
+// kind) must answer 302 as a control, and the other company's answer 404.
+// The opportunity link attempts send the other
 // company's opportunity on quote, copy, sales order, and purchase order
 // creates and updates (400), and ask for the other company's panels (404)
 // and picker list (400). Any FAIL or UNEXPECTED exits non zero.
@@ -33,6 +35,7 @@
 import type { PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import type { SampleIds, TestLetter, TestNames } from "./lib/test-data"
+import { ATTACHMENT_KINDS } from "@/lib/attachment-paths"
 import { HarnessBroken as SharedHarnessBroken, ServerUnreachable, checkResult, fetchOrExplain, pathForMessage, type CheckResult } from "./lib/harness"
 import { addRunRole, addRunUser, isEntryScript, withRunData, type RunData } from "./lib/run-data"
 
@@ -280,6 +283,15 @@ const ATTEMPTS: Attempt[] = [
   { name: "Own audit log paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/audit-log?cursor=${c.other.auditEntryId}`, expect: 400, expectError: "Invalid cursor" },
   { name: "Own opportunity audit log paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/opportunities/${c.own.opportunityId}/audit?cursor=${c.other.auditEntryId}`, expect: 400, expectError: "Invalid cursor" },
   { name: "Email from own opportunity with other company's actionButtonId", directions: "both", method: "POST", path: (c) => `/api/opportunities/${c.own.opportunityId}/email`, body: (c) => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>", actionButtonId: c.other.actionButtonId }), expect: 400, expectError: "Invalid action button" },
+
+  // ── Attachment downloads (GET /api/files/<kind>/<id>), the other company's
+  // attachment with a link in the bucket's URL format, so a 404 can only
+  // come from the scope check ──
+  { name: "Download other company's vendor attachment", directions: "both", method: "GET", path: (c) => `/api/files/vendor/${c.other.downloadFileIds.vendor}`, expect: 404, expectError: "Not found" },
+  { name: "Download other company's sales order attachment", directions: "both", method: "GET", path: (c) => `/api/files/sales-order/${c.other.downloadFileIds["sales-order"]}`, expect: 404, expectError: "Not found" },
+  { name: "Download other company's purchase order attachment", directions: "both", method: "GET", path: (c) => `/api/files/purchase-order/${c.other.downloadFileIds["purchase-order"]}`, expect: 404, expectError: "Not found" },
+  { name: "Download other company's asset attachment", directions: "both", method: "GET", path: (c) => `/api/files/inventory-asset/${c.other.downloadFileIds["inventory-asset"]}`, expect: 404, expectError: "Not found" },
+  { name: "Download other company's opportunity attachment", directions: "both", method: "GET", path: (c) => `/api/files/opportunity/${c.other.downloadFileIds.opportunity}`, expect: 404, expectError: "Not found" },
 
   // ── Quotes, sales orders, and purchase orders linked to opportunities ──
   { name: "New quote with other company's opportunity", directions: "both", method: "POST", path: () => "/api/quotes", body: (c) => ({ clientId: c.own.clientId, contactId: c.own.contactId, opportunityId: c.other.opportunityId }), expect: 400, expectError: "Invalid opportunity" },
@@ -588,6 +600,18 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       if (!ok) {
         printTable(rows)
         throw new HarnessBroken(`Positive control "${control.name}" failed for Test Admin ${letter}, so the harness itself is broken. No cross company attempts were run.`)
+      }
+    }
+    // Each kind's own attachment download answers a redirect, so the
+    // download refusals below prove the scope check. The link itself is
+    // never printed.
+    for (const kind of ATTACHMENT_KINDS) {
+      const res = await s.request("GET", `/api/files/${kind}/${own.downloadFileIds[kind]}`)
+      const ok = res.status === 302 && res.location.startsWith("https://")
+      rows.push({ attempt: `[control ${letter}] Download own ${kind} attachment`, expected: "302", actual: String(res.status), result: ok ? "PASS" : "FAIL", note: ok ? undefined : errorText(res.text) })
+      if (!ok) {
+        printTable(rows)
+        throw new HarnessBroken(`Positive control "Download own ${kind} attachment" failed for Test Admin ${letter}, so the harness itself is broken. No cross company attempts were run.`)
       }
     }
   }
