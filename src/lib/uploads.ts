@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto"
 import { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3"
+import { getSignedUrl } from "@aws-sdk/s3-request-presigner"
 import { NextResponse } from "next/server"
 import {
   PROFILE_EXTENSIONS,
@@ -9,12 +10,14 @@ import {
   fileExtension,
   type UploadProfile,
 } from "@/lib/upload-rules"
-import { attachmentDisposition } from "@/lib/content-disposition"
+import { attachmentDisposition, inlineDisposition } from "@/lib/content-disposition"
 
 // The only place that validates uploaded files and reads, writes, or
 // deletes in the uploads bucket. Every upload route reads its file with
 // readUpload, stores it with storeUpload, and removes stored objects with
-// deleteStoredObject; readStoredObject reads one back (an email attachment). The allowed types and size limits live in
+// deleteStoredObject; readStoredObject reads one back (an email attachment),
+// and presignedDownloadUrl gives a short lived link to one for the
+// attachment download routes (src/lib/attachment-downloads.ts). The allowed types and size limits live in
 // src/lib/upload-rules.ts so the browser can check them too.
 
 let s3Client: S3Client | null = null
@@ -32,7 +35,7 @@ function client(): S3Client {
   return s3Client
 }
 
-// Every stored file's public URL starts with this, the same format the
+// Every stored file's URL starts with this, the same format the
 // app has always saved
 export function bucketBaseUrl(): string {
   return `https://${process.env.AWS_S3_BUCKET_NAME}.s3.${process.env.AWS_REGION}.amazonaws.com/`
@@ -233,7 +236,10 @@ export function putObjectParams(file: ValidatedFile, key: string, profile: Uploa
   }
 }
 
-// Stores a validated file and returns its public URL
+// Stores a validated file and returns its URL. Attachments are private:
+// the URL is kept in the database for deletes and server side reads, and
+// the browser only ever gets the download route (src/lib/attachment-paths.ts).
+// Logos stay publicly readable by this URL.
 export async function storeUpload(
   file: ValidatedFile,
   target: { folder: string; profile: UploadProfile; namePrefix?: string }
@@ -260,6 +266,45 @@ export async function readStoredObject(url: string | null | undefined, expectedP
     console.error(`readStoredObject: could not read stored file ${key} (${name})`)
     return null
   }
+}
+
+// ─── Private downloads ──────────────────────────────────────────────────
+
+// How long a presigned download link works: five minutes, enough for the
+// browser to follow the redirect and fetch the file
+export const DOWNLOAD_LINK_SECONDS = 300
+
+// Images and PDFs open in the browser; everything else is saved. The type
+// comes from the key's extension (one storeUpload validated), so an object
+// stored with a wrong type is never shown inline as something else. An
+// unknown extension is served as a plain download.
+export function downloadObjectParams(key: string, fileName: string) {
+  const ext = fileExtension(key)
+  const rule = UPLOAD_TYPES[ext]
+  const inline = !!rule && (rule.inline || ext === "pdf")
+  return {
+    Bucket: process.env.AWS_S3_BUCKET_NAME,
+    Key: key,
+    ResponseContentType: rule?.contentType ?? "application/octet-stream",
+    ResponseContentDisposition: inline ? inlineDisposition(fileName, "file") : contentDisposition(fileName),
+  }
+}
+
+// A presigned GET link for a file this app stored, working for
+// DOWNLOAD_LINK_SECONDS, with the record's file name as the download name.
+// Null when the URL is outside the app's bucket or the expected prefix.
+// Presigning is computed locally (no request to S3). The link carries a
+// signature, so it is never logged.
+export async function presignedDownloadUrl(
+  url: string | null | undefined,
+  expectedPrefix: string,
+  fileName: string
+): Promise<string | null> {
+  const key = storedObjectKey(url, expectedPrefix)
+  if (!key) return null
+  return getSignedUrl(client(), new GetObjectCommand(downloadObjectParams(key, fileName)), {
+    expiresIn: DOWNLOAD_LINK_SECONDS,
+  })
 }
 
 export type DeleteResult =
