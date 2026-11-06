@@ -506,7 +506,7 @@ export interface DownloadableAttachment {
 // One attachment by its own id, with its parent record's view check: the
 // vendor or inventory asset in the caller's company (the route holds the
 // page permission), the sales order and purchase order view checks (VSO,
-// VPO), and the opportunity view check (VOP, never a deleted one). A miss,
+// VPO), and the opportunity and ticket view checks (never a deleted one). A miss,
 // another company's, or one the user may not view is null, the parent
 // GET's 404.
 export async function loadDownloadableAttachment(
@@ -553,6 +553,14 @@ export async function loadDownloadableAttachment(
         select: { ...select, opportunityId: true },
       })
       return a && { fileName: a.fileName, fileUrl: a.fileUrl, prefix: `opportunities/${a.opportunityId}/` }
+    }
+    case "ticket": {
+      if (!ctx.can("pages.tickets")) return null
+      const a = await prisma.ticketAttachment.findFirst({
+        where: { id: attachmentId, ticket: ticketListWhere(ctx) },
+        select: { ...select, ticketId: true },
+      })
+      return a && { fileName: a.fileName, fileUrl: a.fileUrl, prefix: `tickets/${a.ticketId}/` }
     }
   }
 }

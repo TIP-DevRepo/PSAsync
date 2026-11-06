@@ -59,6 +59,10 @@ import {
   TEAM_MANAGER_RANK,
   TEAM_VIEWER_PERMISSIONS,
   TEMPLATER_PERMISSIONS,
+  TICKET_BASIC_PERMISSIONS,
+  TICKET_DISPATCHER_PERMISSIONS,
+  TICKET_SETTINGS_PERMISSIONS,
+  TICKET_VIEWER_PERMISSIONS,
   TEST_LETTERS,
   generatePassword,
   testNames,
@@ -222,6 +226,8 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
   const { ensureTeamDefaults } = await import("@/lib/team-defaults")
   const { ensureActionButtonDefaults } = await import("@/lib/action-buttons")
   const { takeOpportunityNumber } = await import("@/lib/opportunity-number")
+  const { ensureTicketDefaults } = await import("@/lib/ticket-defaults")
+  const { takeRecordNumber } = await import("@/lib/record-number")
   const { bucketBaseUrl } = await import("@/lib/uploads")
   const year = new Date().getFullYear()
 
@@ -755,6 +761,123 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
     const salesBasicOpportunity = await createOpportunity(n.salesBasicOpportunity, teamBasicUserId, "sales-basic", salesTeam.id)
     const salesUnassignedOpportunity = await createOpportunity(n.salesUnassignedOpportunity, null, "sales-unassigned", salesTeam.id)
 
+    // ── Tickets ──
+    // The defaults (types, priorities, statuses, settings, and the Helpdesk,
+    // Alerts, and Lv2 Escalation queues), made the way the app makes them on
+    // first use, and recorded for teardown. Then the ticket test users,
+    // their memberships, the Round Robin team, and four sample tickets.
+    await ensureTicketDefaults(companyId, prisma)
+    const byOrder = [{ sortOrder: "asc" as const }, { createdAt: "asc" as const }]
+    const ticketTypes = await prisma.ticketType.findMany({ where: { companyId }, select: { id: true }, orderBy: byOrder })
+    const ticketPriorities = await prisma.ticketPriority.findMany({ where: { companyId }, select: { id: true }, orderBy: byOrder })
+    const ticketStatuses = await prisma.ticketStatus.findMany({ where: { companyId }, select: { id: true, name: true, category: true }, orderBy: byOrder })
+    for (const row of ticketTypes) rec("ticketType", row)
+    for (const row of ticketPriorities) rec("ticketPriority", row)
+    for (const row of ticketStatuses) rec("ticketStatus", { id: row.id })
+    rec("ticketSettings", await prisma.ticketSettings.findUniqueOrThrow({ where: { companyId }, select: { id: true } }))
+    const queue = async (name: string) => rec("team", await prisma.team.findFirstOrThrow({ where: { companyId, name }, select: { id: true } }))
+    const helpdeskTeam = await queue("Helpdesk")
+    const alertsTeam = await queue("Alerts")
+    const lv2Team = await queue("Lv2 Escalation")
+    const firstStatusOf = (category: string) => {
+      const found = ticketStatuses.find((s) => s.category === category)
+      if (!found) throw new HarnessBroken(`The default ticket statuses have no ${category} status`)
+      return found
+    }
+    const openStatus = firstStatusOf("OPEN")
+
+    const ticketBasicRoleId = await addRunRole(prisma, run, { companyId, name: n.ticketBasicRole, rank: 1, permissions: TICKET_BASIC_PERMISSIONS })
+    const ticketViewerRoleId = await addRunRole(prisma, run, { companyId, name: n.ticketViewerRole, rank: 1, permissions: TICKET_VIEWER_PERMISSIONS })
+    const ticketDispatcherRoleId = await addRunRole(prisma, run, { companyId, name: n.ticketDispatcherRole, rank: 1, permissions: TICKET_DISPATCHER_PERMISSIONS })
+    const ticketSettingsRoleId = await addRunRole(prisma, run, { companyId, name: n.ticketSettingsRole, rank: 1, permissions: TICKET_SETTINGS_PERMISSIONS })
+    const ticketBasicUserId = await addRunUser(prisma, run, { companyId, name: n.ticketBasicName, email: n.ticketBasicEmail, roleIds: [ticketBasicRoleId] })
+    const ticketViewerUserId = await addRunUser(prisma, run, { companyId, name: n.ticketViewerName, email: n.ticketViewerEmail, roleIds: [ticketViewerRoleId] })
+    const ticketDispatcherUserId = await addRunUser(prisma, run, { companyId, name: n.ticketDispatcherName, email: n.ticketDispatcherEmail, roleIds: [ticketDispatcherRoleId] })
+    const ticketSettingsUserId = await addRunUser(prisma, run, { companyId, name: n.ticketSettingsName, email: n.ticketSettingsEmail, roleIds: [ticketSettingsRoleId] })
+    // Deactivated, so round robin must skip it
+    const ticketInactiveUserId = await addRunUser(prisma, run, { companyId, name: n.ticketInactiveName, email: n.ticketInactiveEmail, roleIds: [ticketBasicRoleId] })
+    await prisma.user.update({ where: { id: ticketInactiveUserId }, data: { active: false } })
+    await prisma.teamMember.createMany({
+      data: [ticketBasicUserId, ticketViewerUserId, ticketDispatcherUserId].map((userId) => ({ teamId: helpdeskTeam.id, userId })),
+    })
+    const lastTeam = await prisma.team.aggregate({ where: { companyId }, _max: { sortOrder: true } })
+    const roundRobinTeam = rec(
+      "team",
+      await prisma.team.create({
+        data: {
+          companyId,
+          name: n.roundRobinTeam,
+          sortOrder: (lastTeam._max.sortOrder ?? 0) + 1,
+          roundRobinEnabled: true,
+          members: { create: [{ userId: ticketBasicUserId }, { userId: ticketViewerUserId }, { userId: ticketInactiveUserId }] },
+        },
+        select: { id: true },
+      })
+    )
+
+    // Numbered by the app's own counter (key "ticket"), so a ticket a check
+    // creates takes the next number
+    const createTicket = async (title: string, assigneeId: string | null, who: string, teamId = helpdeskTeam.id) => {
+      const ticket = rec(
+        "ticket",
+        await prisma.$transaction(async (tx) =>
+          tx.ticket.create({
+            data: {
+              companyId,
+              number: await takeRecordNumber(tx, companyId, "ticket", "T"),
+              title,
+              clientId: client.id,
+              contactId: contact.id,
+              clientLocationId: clientLocation.id,
+              teamId,
+              assigneeId,
+              typeId: ticketTypes[0].id,
+              priorityId: ticketPriorities[0].id,
+              statusId: openStatus.id,
+              createdById: adminId,
+            },
+            select: { id: true, number: true },
+          })
+        )
+      )
+      // Attachment rows only, with a dummy URL. Nothing is uploaded to S3.
+      const attachment = rec(
+        "ticketAttachment",
+        await prisma.ticketAttachment.create({
+          data: { ticketId: ticket.id, fileName: `${n.ticketAttachmentPrefix}-${who}.txt`, fileUrl: DUMMY_FILE_URL, fileSize: 1, uploadedByUserId: adminId },
+          select: { id: true },
+        })
+      )
+      // Its timeline: the created action (by the admin), a note by the
+      // admin, and a note by Test Ticket Basic, written the way the app writes them
+      const at = (minutesAgo: number) => new Date(Date.now() - minutesAgo * 60_000)
+      const entry = (data: Omit<Prisma.TimelineEntryUncheckedCreateInput, "companyId" | "ticketId">) =>
+        prisma.timelineEntry.create({ data: { companyId, ticketId: ticket.id, ...data }, select: { id: true } })
+      rec("timelineEntry", await entry({ kind: "ACTION", authorId: adminId, action: "created", data: { label: "Ticket", number: ticket.number, title, status: { id: openStatus.id, name: openStatus.name } }, createdAt: at(40) }))
+      const adminNote = rec("timelineEntry", await entry({ kind: "NOTE", authorId: adminId, body: `<p>${n.ticketNotePrefix} by the admin</p>`, createdAt: at(20) }))
+      const basicNote = rec("timelineEntry", await entry({ kind: "NOTE", authorId: ticketBasicUserId, body: `<p>${n.ticketNotePrefix} by Test Ticket Basic</p>`, createdAt: at(10) }))
+      // Its audit log: created, and a status change as a field_changed
+      // entry (New to Open, the first two OPEN statuses)
+      const audit = (data: Omit<Prisma.AuditLogEntryUncheckedCreateInput, "companyId" | "recordType" | "recordId" | "recordLabel" | "actorId" | "actorName">) =>
+        prisma.auditLogEntry.create({
+          data: { companyId, recordType: "TICKET", recordId: ticket.id, recordLabel: `${ticket.number} ${title}`, actorId: adminId, actorName: n.adminName, ...data },
+          select: { id: true },
+        })
+      rec("auditLogEntry", await audit({ action: "created", after: { number: ticket.number, title }, createdAt: at(40) }))
+      const statusAudit = rec(
+        "auditLogEntry",
+        await audit({ action: "field_changed", field: "statusId", before: { id: ticketStatuses[1].id, name: ticketStatuses[1].name }, after: { id: openStatus.id, name: openStatus.name }, createdAt: at(30) })
+      )
+      return { id: ticket.id, attachmentId: attachment.id, adminNoteId: adminNote.id, basicNoteId: basicNote.id, auditEntryId: statusAudit.id }
+    }
+    const basicTicket = await createTicket(n.basicTicket, ticketBasicUserId, "basic")
+    const viewerTicket = await createTicket(n.viewerTicket, ticketViewerUserId, "viewer")
+    const unassignedTicket = await createTicket(n.unassignedTicket, null, "unassigned")
+    const alertsTicket = await createTicket(n.alertsTicket, null, "alerts", alertsTeam.id)
+    // Every team in the company's order (General, Sales, Support, Ops, the
+    // three queues, and the Round Robin team), for a reorder that changes nothing
+    const allTeamIds = (await prisma.team.findMany({ where: { companyId }, select: { id: true }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] })).map((t) => t.id)
+
     // ── Download fixtures ──
     // One attachment per kind whose stored link has the configured bucket's
     // URL format and a test key under its record's folder (the key's file
@@ -776,6 +899,10 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
       opportunity: rec(
         "opportunityAttachment",
         await prisma.opportunityAttachment.create({ data: { opportunityId: adminOpportunity.id, ...checkFile(`opportunities/${adminOpportunity.id}/`) }, select: { id: true } })
+      ).id,
+      ticket: rec(
+        "ticketAttachment",
+        await prisma.ticketAttachment.create({ data: { ticketId: unassignedTicket.id, ...checkFile(`tickets/${unassignedTicket.id}/`) }, select: { id: true } })
       ).id,
     }
 
@@ -870,6 +997,14 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         teamGrantRoleId,
         actionButtonId: customButton.id,
         downloadFileIds,
+        ticketId: unassignedTicket.id,
+        ticketAttachmentId: unassignedTicket.attachmentId,
+        ticketNoteId: unassignedTicket.adminNoteId,
+        ticketAuditEntryId: unassignedTicket.auditEntryId,
+        ticketTypeId: ticketTypes[0].id,
+        ticketPriorityId: ticketPriorities[0].id,
+        ticketStatusId: openStatus.id,
+        helpdeskTeamId: helpdeskTeam.id,
       },
       fixtures: {
         everyoneUserId,
@@ -913,7 +1048,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         unassignedActionId: unassignedOpportunity.actionId,
         unassignedAdminNoteId: unassignedOpportunity.adminNoteId,
         unassignedRepNoteId: unassignedOpportunity.repNoteId,
-        teamIds: [generalTeam.id, salesTeam.id, supportTeam.id, opsTeam.id],
+        teamIds: allTeamIds,
         supportTeamId: supportTeam.id,
         teamHighRoleId,
         opsTeamId: opsTeam.id,
@@ -930,6 +1065,25 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         wonButtonId: defaultButtonId("Won"),
         lostButtonId: defaultButtonId("Lost"),
         customButtonStageId: opportunityStages[1].id,
+        ticketBasicUserId,
+        ticketViewerUserId,
+        ticketDispatcherUserId,
+        ticketSettingsUserId,
+        ticketInactiveUserId,
+        basicTicketId: basicTicket.id,
+        viewerTicketId: viewerTicket.id,
+        alertsTicketId: alertsTicket.id,
+        ticketBasicNoteId: unassignedTicket.basicNoteId,
+        alertsTeamId: alertsTeam.id,
+        lv2TeamId: lv2Team.id,
+        roundRobinTeamId: roundRobinTeam.id,
+        ticketTypeIds: ticketTypes.map((t) => t.id),
+        ticketPriorityIds: ticketPriorities.map((p) => p.id),
+        ticketStatusIds: ticketStatuses.map((s) => s.id),
+        ticketOpenStatusId: openStatus.id,
+        ticketWaitingStatusId: firstStatusOf("WAITING").id,
+        ticketResolvedStatusId: firstStatusOf("RESOLVED").id,
+        ticketClosedStatusId: firstStatusOf("CLOSED").id,
       },
     }
   }
@@ -958,6 +1112,7 @@ const CASCADED_TABLES: { table: string; count: (db: Db, ids: Ids) => Promise<num
   { table: "POComment", count: (db, ids) => db.pOComment.count({ where: { purchaseOrder: { companyId: ids } } }) },
   { table: "POAttachment", count: (db, ids) => db.pOAttachment.count({ where: { purchaseOrder: { companyId: ids } } }) },
   { table: "OpportunityAttachment", count: (db, ids) => db.opportunityAttachment.count({ where: { opportunity: { companyId: ids } } }) },
+  { table: "TicketAttachment", count: (db, ids) => db.ticketAttachment.count({ where: { ticket: { companyId: ids } } }) },
   { table: "InventoryAssetAttachment", count: (db, ids) => db.inventoryAssetAttachment.count({ where: { asset: { companyId: ids } } }) },
   { table: "InventoryAssetEvent", count: (db, ids) => db.inventoryAssetEvent.count({ where: { asset: { companyId: ids } } }) },
   { table: "InventoryCustomFieldValue", count: (db, ids) => db.inventoryCustomFieldValue.count({ where: { asset: { companyId: ids } } }) },
@@ -999,14 +1154,23 @@ const DELETE_STEPS: {
   // that belong to no opportunity
   { table: "TimelineEntry", count: (db, ids) => db.timelineEntry.count({ where: { companyId: ids } }), remove: (db, ids) => db.timelineEntry.deleteMany({ where: { companyId: ids } }) },
   { table: "Opportunity", count: (db, ids) => db.opportunity.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunity.deleteMany({ where: { companyId: ids } }) },
+  // Before the teams, clients, contacts, users, types, priorities, and
+  // statuses they point at (their attachments and timelines cascade).
+  // Ticket settings go before the teams, for the default ticket team.
+  { table: "Ticket", count: (db, ids) => db.ticket.count({ where: { companyId: ids } }), remove: (db, ids) => db.ticket.deleteMany({ where: { companyId: ids } }) },
+  { table: "TicketSettings", count: (db, ids) => db.ticketSettings.count({ where: { companyId: ids } }), remove: (db, ids) => db.ticketSettings.deleteMany({ where: { companyId: ids } }) },
   // After the opportunities in them, before the users and roles their
   // members and default roles point at (both cascade with the team)
   { table: "Team", count: (db, ids) => db.team.count({ where: { companyId: ids } }), remove: (db, ids) => db.team.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunitySettings", count: (db, ids) => db.opportunitySettings.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunitySettings.deleteMany({ where: { companyId: ids } }) },
-  // Before the stages a button moves to
+  // Before the stages and ticket statuses a button moves to
   { table: "ActionButton", count: (db, ids) => db.actionButton.count({ where: { companyId: ids } }), remove: (db, ids) => db.actionButton.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunityStage", count: (db, ids) => db.opportunityStage.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunityStage.deleteMany({ where: { companyId: ids } }) },
   { table: "OpportunityType", count: (db, ids) => db.opportunityType.count({ where: { companyId: ids } }), remove: (db, ids) => db.opportunityType.deleteMany({ where: { companyId: ids } }) },
+  // After the tickets and the action buttons that point at them
+  { table: "TicketStatus", count: (db, ids) => db.ticketStatus.count({ where: { companyId: ids } }), remove: (db, ids) => db.ticketStatus.deleteMany({ where: { companyId: ids } }) },
+  { table: "TicketType", count: (db, ids) => db.ticketType.count({ where: { companyId: ids } }), remove: (db, ids) => db.ticketType.deleteMany({ where: { companyId: ids } }) },
+  { table: "TicketPriority", count: (db, ids) => db.ticketPriority.count({ where: { companyId: ids } }), remove: (db, ids) => db.ticketPriority.deleteMany({ where: { companyId: ids } }) },
   { table: "QuoteTemplate", count: (db, ids) => db.quoteTemplate.count({ where: { companyId: ids } }), remove: (db, ids) => db.quoteTemplate.deleteMany({ where: { companyId: ids } }) },
   { table: "InventoryStock", count: (db, ids) => db.inventoryStock.count({ where: { companyId: ids } }), remove: (db, ids) => db.inventoryStock.deleteMany({ where: { companyId: ids } }) },
   { table: "InventoryAsset", count: (db, ids) => db.inventoryAsset.count({ where: { companyId: ids } }), remove: (db, ids) => db.inventoryAsset.deleteMany({ where: { companyId: ids } }) },
@@ -1050,7 +1214,7 @@ export interface StoredFile {
 // stores that kind of file under (the same prefixes its delete routes use)
 export async function storedFiles(db: Db, companyIds: string[]): Promise<StoredFile[]> {
   const ids = { in: companyIds }
-  const [companies, vendors, vendorAttachments, soAttachments, poAttachments, assetAttachments, opportunityAttachments] = await Promise.all([
+  const [companies, vendors, vendorAttachments, soAttachments, poAttachments, assetAttachments, opportunityAttachments, ticketAttachments] = await Promise.all([
     db.company.findMany({ where: { id: ids }, select: { id: true, logoUrl: true, secondaryLogoUrl: true } }),
     db.vendor.findMany({ where: { companyId: ids }, select: { id: true, logoUrl: true } }),
     db.vendorAttachment.findMany({ where: { vendor: { companyId: ids } }, select: { vendorId: true, fileUrl: true } }),
@@ -1058,6 +1222,7 @@ export async function storedFiles(db: Db, companyIds: string[]): Promise<StoredF
     db.pOAttachment.findMany({ where: { purchaseOrder: { companyId: ids } }, select: { purchaseOrderId: true, fileUrl: true } }),
     db.inventoryAssetAttachment.findMany({ where: { asset: { companyId: ids } }, select: { assetId: true, fileUrl: true } }),
     db.opportunityAttachment.findMany({ where: { opportunity: { companyId: ids } }, select: { opportunityId: true, fileUrl: true } }),
+    db.ticketAttachment.findMany({ where: { ticket: { companyId: ids } }, select: { ticketId: true, fileUrl: true } }),
   ])
   const files: StoredFile[] = []
   for (const c of companies) {
@@ -1069,6 +1234,7 @@ export async function storedFiles(db: Db, companyIds: string[]): Promise<StoredF
   for (const a of poAttachments) files.push({ url: a.fileUrl, prefix: `purchase-orders/${a.purchaseOrderId}/` })
   for (const a of assetAttachments) files.push({ url: a.fileUrl, prefix: `inventory-assets/${a.assetId}/` })
   for (const a of opportunityAttachments) files.push({ url: a.fileUrl, prefix: `opportunities/${a.opportunityId}/` })
+  for (const a of ticketAttachments) files.push({ url: a.fileUrl, prefix: `tickets/${a.ticketId}/` })
   return files
 }
 

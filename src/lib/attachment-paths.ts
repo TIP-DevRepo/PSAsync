@@ -5,7 +5,7 @@
 // that returns an attachment maps it with withDownloadUrl. No server
 // imports, so pages and components can use it.
 
-export const ATTACHMENT_KINDS = ["vendor", "sales-order", "purchase-order", "inventory-asset", "opportunity"] as const
+export const ATTACHMENT_KINDS = ["vendor", "sales-order", "purchase-order", "inventory-asset", "opportunity", "ticket"] as const
 
 export type AttachmentKind = (typeof ATTACHMENT_KINDS)[number]
 

@@ -7,9 +7,9 @@
 // The file link columns, from prisma/schema.prisma (every column storeUpload
 // writes to): Company.logoUrl, Company.secondaryLogoUrl, Vendor.logoUrl,
 // VendorAttachment.fileUrl, SOAttachment.fileUrl, POAttachment.fileUrl,
-// InventoryAssetAttachment.fileUrl, and OpportunityAttachment.fileUrl. A
-// new file column gets a source in
-// SOURCES below.
+// InventoryAssetAttachment.fileUrl, OpportunityAttachment.fileUrl, and
+// TicketAttachment.fileUrl. A new file column gets a source in SOURCES
+// below.
 //
 // By default it follows the dev-only guard (lib/guard.ts): DB_NAME must be
 // exactly psasync_dev, NODE_ENV not production, and --yes passed. Run from
@@ -133,6 +133,14 @@ const SOURCES: { table: string; column: string; load: (db: PrismaClient) => Prom
     load: async (db) =>
       (await db.opportunityAttachment.findMany({ select: { id: true, fileName: true, fileUrl: true, opportunity: { select: { companyId: true, number: true } } } })).map((r) => ({
         table: "OpportunityAttachment", column: "fileUrl", id: r.id, companyId: r.opportunity.companyId, label: `${r.opportunity.number}: ${r.fileName}`, url: r.fileUrl,
+      })),
+  },
+  {
+    table: "TicketAttachment",
+    column: "fileUrl",
+    load: async (db) =>
+      (await db.ticketAttachment.findMany({ select: { id: true, fileName: true, fileUrl: true, ticket: { select: { companyId: true, number: true } } } })).map((r) => ({
+        table: "TicketAttachment", column: "fileUrl", id: r.id, companyId: r.ticket.companyId, label: `${r.ticket.number}: ${r.fileName}`, url: r.fileUrl,
       })),
   },
 ]

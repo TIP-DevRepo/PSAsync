@@ -3787,8 +3787,10 @@ async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<A
     "sales-order": "view sales orders",
     "purchase-order": "view purchase orders",
     opportunity: "view opportunities",
+    ticket: "view tickets",
   }
   for (const kind of ATTACHMENT_KINDS) await refused("everyone", kind, 403, pageRefusal[kind], "without the page")
+  await refused("oppViewer", "ticket", 403, pageRefusal.ticket, "without the page")
   await refused("rep", "vendor", 403, pageRefusal.vendor, "without the page")
   await refused("rep", "sales-order", 403, pageRefusal["sales-order"], "without the page")
   await refused("clerk", "opportunity", 403, pageRefusal.opportunity, "without the page")
@@ -3806,6 +3808,13 @@ async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<A
   } finally {
     await prisma.opportunity.update({ where: { id: opportunityId }, data: { deletedAt: null, deletedById: null } })
   }
+  // The same for a soft deleted ticket
+  try {
+    await prisma.ticket.update({ where: { id: ctx.b.ticketId }, data: { deletedAt: new Date(), deletedById: ctx.b.adminId } })
+    await refused("admin", "ticket", 404, "Not found", "on a deleted ticket")
+  } finally {
+    await prisma.ticket.update({ where: { id: ctx.b.ticketId }, data: { deletedAt: null, deletedById: null } })
+  }
 
   // The sample attachments' dummy example.test link: not available, never redirected
   const dummies: [AttachmentKind, string][] = [
@@ -3814,6 +3823,7 @@ async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<A
     ["purchase-order", ctx.b.poAttachmentId],
     ["inventory-asset", ctx.b.assetAttachmentId],
     ["opportunity", ctx.b.opportunityAttachmentId],
+    ["ticket", ctx.b.ticketAttachmentId],
   ]
   for (const [kind, id] of dummies) {
     const res = await sessions.admin.request("GET", path(kind, id))
@@ -3834,6 +3844,7 @@ async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<A
     { name: "purchase order detail", path: `/api/purchase-orders/${ctx.b.purchaseOrderId}`, kind: "purchase-order" },
     { name: "asset attachments", path: `/api/inventory-assets/${ctx.b.assetId}/attachments`, kind: "inventory-asset" },
     { name: "opportunity attachments", path: `/api/opportunities/${ctx.b.opportunityId}/attachments`, kind: "opportunity" },
+    { name: "ticket attachments", path: `/api/tickets/${ctx.b.ticketId}/attachments`, kind: "ticket" },
   ]
   for (const r of responses) {
     const res = await sessions.admin.request("GET", r.path)
