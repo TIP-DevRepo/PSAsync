@@ -26,6 +26,7 @@ import { SortableContext, verticalListSortingStrategy, useSortable, arrayMove } 
 import type { DraggableAttributes } from "@dnd-kit/core"
 import type { SyntheticListenerMap } from "@dnd-kit/core/dist/hooks/utilities"
 import { DistributorProductGroup, DistributorOffer, DistributorKey } from "@/lib/distributors/types"
+import { useRowDensity } from "@/components/AppearanceProvider"
 
 // A dedicated id for the "No items in bundle" placeholder row shown when
 // a bundle is empty — its own droppable target so an item can still be
@@ -459,7 +460,8 @@ export function LineItemBuilder({
   const [openRowMenu, setOpenRowMenu] = useState<string | null>(null)
   const [menuAnchor, setMenuAnchor] = useState<{ top: number; bottom: number; right: number } | null>(null)
   const { menuRef: rowMenuRef, style: menuStyle } = useFixedMenuPosition(!!openRowMenu, menuAnchor)
-  const [density, setDensity] = useState<Density>("default")
+  // The user's own row density (My settings > Appearance)
+  const density = useRowDensity()
   const pad = ROW_PADDING[density]
   // Which item is currently being dragged (drives the floating DragOverlay
   // preview), and where it would land if dropped right now (drives the
@@ -774,15 +776,6 @@ export function LineItemBuilder({
             <AlignLeft size={13} className="text-zinc-400" /> text block
           </span>
         </div>
-        <select
-          value={density}
-          onChange={(e) => setDensity(e.target.value as Density)}
-          className="rounded-md border px-2 py-1 text-xs"
-        >
-          <option value="compact">Compact rows</option>
-          <option value="default">Default rows</option>
-          <option value="comfortable">Comfortable rows</option>
-        </select>
       </div>
 
       <fieldset disabled={locked} className="space-y-4 border-0 p-0 m-0">

@@ -12,6 +12,7 @@ import { confirmDialog } from "@/lib/confirm-dialog"
 import { toast } from "@/lib/toast"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
+import { useRowDensity } from "@/components/AppearanceProvider"
 
 interface AssetRow {
   id: string
@@ -147,7 +148,8 @@ function InventoryListPageInner() {
   const [locationFilter, setLocationFilter] = useState("ALL")
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
-  const [density, setDensity] = useState<Density>("default")
+  // The user's own row density (My settings > Appearance)
+  const density = useRowDensity()
 
   const [stock, setStock] = useState<StockRow[]>([])
   const [loadingStock, setLoadingStock] = useState(true)
@@ -357,11 +359,6 @@ function InventoryListPageInner() {
                     {locationOptions.map((l) => <option key={l} value={l}>{l}</option>)}
                   </select>
                 </div>
-                <select value={density} onChange={(e) => { setDensity(e.target.value as Density); e.target.blur() }} className={FILTER_SELECT_CLASS}>
-                  <option value="compact">Compact rows</option>
-                  <option value="default">Default rows</option>
-                  <option value="comfortable">Comfortable rows</option>
-                </select>
               </div>
 
               <div className="max-h-[70vh] overflow-y-auto overflow-x-auto rounded-lg border border-border bg-card shadow-card">
