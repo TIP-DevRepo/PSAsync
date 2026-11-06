@@ -14,7 +14,6 @@ import {
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { signOut } from "next-auth/react"
 import { NotificationBell } from "./notification-bell"
-import { ThemeToggle } from "@/components/theme-toggle"
 
 export function Topbar({ userName, pagePermissions }: { userName: string; pagePermissions: PagePermissions }) {
   const initials = userName
@@ -40,7 +39,6 @@ export function Topbar({ userName, pagePermissions }: { userName: string; pagePe
       <div className="hidden md:block" />
 
       <div className="flex items-center gap-2">
-        <ThemeToggle />
         <NotificationBell />
 
       {/* User menu */}
