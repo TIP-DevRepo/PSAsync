@@ -941,6 +941,26 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         select: { id: true },
       })
     )
+    // A ticket only Note button that always moves to Resolved
+    const ticketButton = rec(
+      "actionButton",
+      await prisma.actionButton.create({
+        data: {
+          companyId,
+          label: n.ticketActionButton,
+          icon: "check",
+          color: "#0F766E",
+          forOpportunities: false,
+          forTickets: true,
+          kind: "NOTE",
+          stageMode: "FIXED",
+          fixedTicketStatusId: firstStatusOf("RESOLVED").id,
+          noteMode: "OPTIONAL",
+          sortOrder: defaultButtons.length + 1,
+        },
+        select: { id: true },
+      })
+    )
 
     // The admin's mailbox row
     const adminMailboxId = await addRunMailbox(prisma, run, {
@@ -1059,7 +1079,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         salesViewerOpportunityId: salesViewerOpportunity.id,
         salesBasicOpportunityId: salesBasicOpportunity.id,
         salesUnassignedOpportunityId: salesUnassignedOpportunity.id,
-        actionButtonIds: [...defaultButtons.map((b) => b.id), customButton.id],
+        actionButtonIds: [...defaultButtons.map((b) => b.id), customButton.id, ticketButton.id],
         noteButtonId: defaultButtonId("Note"),
         emailButtonId: defaultButtonId("Email"),
         wonButtonId: defaultButtonId("Won"),
@@ -1084,6 +1104,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         ticketWaitingStatusId: firstStatusOf("WAITING").id,
         ticketResolvedStatusId: firstStatusOf("RESOLVED").id,
         ticketClosedStatusId: firstStatusOf("CLOSED").id,
+        ticketButtonId: ticketButton.id,
       },
     }
   }

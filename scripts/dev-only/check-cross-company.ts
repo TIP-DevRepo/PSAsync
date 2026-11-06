@@ -25,7 +25,11 @@
 // The opportunity link attempts send the other
 // company's opportunity on quote, copy, sales order, and purchase order
 // creates and updates (400), and ask for the other company's panels (404)
-// and picker list (400). Any FAIL or UNEXPECTED exits non zero.
+// and picker list (400). Every ticket route and ticket settings route is
+// tried with the other company's ids (404, 409 for a reorder list), the
+// other company's ids go in ticket bodies and list filters (400), and each
+// admin's ticket list, ticket buttons, ticket audit entries, and ticket
+// sidebar counts hold only its own. Any FAIL or UNEXPECTED exits non zero.
 //
 // The Email action is only called on the other company's opportunity (a
 // 404 before anything is read) or with the other company's attachment or
@@ -319,6 +323,69 @@ const ATTEMPTS: Attempt[] = [
   { name: "Team POST defaultRoleIds", directions: "both", method: "POST", path: () => "/api/teams", body: (c) => ({ name: "Should Not Exist", defaultRoleIds: [c.other.teamGrantRoleId] }), expect: 400, expectError: "Invalid role" },
   { name: "User PATCH teamIds", directions: "both", method: "PATCH", path: (c) => `/api/users/${c.own.adminId}`, body: (c) => ({ teamIds: [c.own.generalTeamId, c.other.salesTeamId] }), expect: 400, expectError: "Invalid team" },
 
+  // ── Tickets: the other company's ids in the URL (404) ──
+  { name: "GET other company's ticket", directions: "both", method: "GET", path: (c) => `/api/tickets/${c.other.ticketId}`, expect: 404 },
+  { name: "PATCH other company's ticket", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.other.ticketId}`, body: () => ({ title: "Changed" }), expect: 404 },
+  { name: "DELETE other company's ticket", directions: "both", method: "DELETE", path: (c) => `/api/tickets/${c.other.ticketId}`, expect: 404 },
+  { name: "Restore other company's ticket", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.other.ticketId}/restore`, expect: 404 },
+  { name: "GET other ticket's timeline", directions: "both", method: "GET", path: (c) => `/api/tickets/${c.other.ticketId}/timeline`, expect: 404 },
+  { name: "POST note on other company's ticket", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.other.ticketId}/timeline`, body: () => ({ body: "<p>Should not exist</p>" }), expect: 404 },
+  { name: "PATCH other ticket's note", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.other.ticketId}/timeline/${c.other.ticketNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 404 },
+  { name: "DELETE other ticket's note", directions: "both", method: "DELETE", path: (c) => `/api/tickets/${c.other.ticketId}/timeline/${c.other.ticketNoteId}`, expect: 404 },
+  { name: "PATCH other note under own ticket", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.own.ticketId}/timeline/${c.other.ticketNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 404 },
+  { name: "Own ticket timeline paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/tickets/${c.own.ticketId}/timeline?cursor=${c.other.ticketNoteId}`, expect: 400, expectError: "Invalid cursor" },
+  { name: "GET other ticket's attachments", directions: "both", method: "GET", path: (c) => `/api/tickets/${c.other.ticketId}/attachments`, expect: 404 },
+  { name: "POST attachment to other ticket", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.other.ticketId}/attachments`, multipart: true, expect: 404 },
+  { name: "DELETE other ticket's attachment", directions: "both", method: "DELETE", path: (c) => `/api/tickets/${c.other.ticketId}/attachments/${c.other.ticketAttachmentId}`, expect: 404 },
+  { name: "DELETE other attachment under own ticket", directions: "both", method: "DELETE", path: (c) => `/api/tickets/${c.own.ticketId}/attachments/${c.other.ticketAttachmentId}`, expect: 404 },
+  { name: "Email from other company's ticket", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.other.ticketId}/email`, body: () => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>" }), expect: 404 },
+  { name: "Email options of other company's ticket", directions: "both", method: "GET", path: (c) => `/api/tickets/${c.other.ticketId}/email-options`, expect: 404 },
+  { name: "GET other ticket's audit log", directions: "both", method: "GET", path: (c) => `/api/tickets/${c.other.ticketId}/audit`, expect: 404 },
+  { name: "Own ticket audit log paged with other company's cursor", directions: "both", method: "GET", path: (c) => `/api/tickets/${c.own.ticketId}/audit?cursor=${c.other.ticketAuditEntryId}`, expect: 400, expectError: "Invalid cursor" },
+  { name: "Undo other company's ticket audit entry", directions: "both", method: "POST", path: (c) => `/api/audit-log/${c.other.ticketAuditEntryId}/undo`, expect: 404 },
+  { name: "Download other company's ticket attachment", directions: "both", method: "GET", path: (c) => `/api/files/ticket/${c.other.downloadFileIds.ticket}`, expect: 404, expectError: "Not found" },
+
+  // ── Ticket settings ──
+  { name: "PATCH other company's ticket type", directions: "both", method: "PATCH", path: (c) => `/api/ticket-types/${c.other.ticketTypeId}`, body: () => ({ name: "Changed" }), expect: 404 },
+  { name: "DELETE other company's ticket type", directions: "both", method: "DELETE", path: (c) => `/api/ticket-types/${c.other.ticketTypeId}`, expect: 404 },
+  { name: "PATCH other company's ticket priority", directions: "both", method: "PATCH", path: (c) => `/api/ticket-priorities/${c.other.ticketPriorityId}`, body: () => ({ name: "Changed" }), expect: 404 },
+  { name: "DELETE other company's ticket priority", directions: "both", method: "DELETE", path: (c) => `/api/ticket-priorities/${c.other.ticketPriorityId}`, expect: 404 },
+  { name: "PATCH other company's ticket status", directions: "both", method: "PATCH", path: (c) => `/api/ticket-statuses/${c.other.ticketStatusId}`, body: () => ({ name: "Changed" }), expect: 404 },
+  { name: "DELETE other company's ticket status", directions: "both", method: "DELETE", path: (c) => `/api/ticket-statuses/${c.other.ticketStatusId}`, expect: 404 },
+  { name: "Reorder with other company's ticket type", directions: "both", method: "POST", path: () => "/api/ticket-types/reorder", body: (c) => ({ typeIds: [c.other.ticketTypeId] }), expect: 409, expectError: "The type list changed" },
+  { name: "Reorder with other company's ticket priority", directions: "both", method: "POST", path: () => "/api/ticket-priorities/reorder", body: (c) => ({ priorityIds: [c.other.ticketPriorityId] }), expect: 409, expectError: "The priority list changed" },
+  { name: "Reorder with other company's ticket status", directions: "both", method: "POST", path: () => "/api/ticket-statuses/reorder", body: (c) => ({ statusIds: [c.other.ticketStatusId] }), expect: 409, expectError: "The status list changed" },
+  { name: "Ticket settings PATCH defaultTeamId", directions: "both", method: "PATCH", path: () => "/api/ticket-settings", body: (c) => ({ defaultTeamId: c.other.helpdeskTeamId }), expect: 400, expectError: "Invalid team" },
+  { name: "PATCH other company's team round robin", directions: "both", method: "PATCH", path: (c) => `/api/teams/${c.other.helpdeskTeamId}`, body: () => ({ roundRobinEnabled: true }), expect: 404 },
+
+  // ── Tickets: the other company's ids in bodies and filters (400) ──
+  { name: "Ticket POST clientId", directions: "both", method: "POST", path: () => "/api/tickets", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.other.clientId }), expect: 400, expectError: "Invalid client" },
+  { name: "Ticket POST contactId", directions: "both", method: "POST", path: () => "/api/tickets", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },
+  { name: "Ticket POST clientLocationId", directions: "both", method: "POST", path: () => "/api/tickets", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", clientId: c.own.clientId, clientLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Ticket POST teamId", directions: "both", method: "POST", path: () => "/api/tickets", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", teamId: c.other.helpdeskTeamId }), expect: 400, expectError: "Invalid team" },
+  { name: "Ticket POST assigneeId", directions: "both", method: "POST", path: () => "/api/tickets", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", assigneeId: c.other.adminId }), expect: 400, expectError: "Invalid user" },
+  { name: "Ticket POST typeId", directions: "both", method: "POST", path: () => "/api/tickets", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", typeId: c.other.ticketTypeId }), expect: 400, expectError: "Invalid ticket type" },
+  { name: "Ticket POST priorityId", directions: "both", method: "POST", path: () => "/api/tickets", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", priorityId: c.other.ticketPriorityId }), expect: 400, expectError: "Invalid priority" },
+  { name: "Ticket POST statusId", directions: "both", method: "POST", path: () => "/api/tickets", body: (c) => ({ initialNote: OPP_NOTE, title: "Should Not Exist", statusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
+  { name: "Ticket PATCH clientId", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.own.ticketId}`, body: (c) => ({ clientId: c.other.clientId }), expect: 400, expectError: "Invalid client" },
+  { name: "Ticket PATCH contactId", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.own.ticketId}`, body: (c) => ({ contactId: c.other.contactId }), expect: 400, expectError: "Invalid contact" },
+  { name: "Ticket PATCH clientLocationId", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.own.ticketId}`, body: (c) => ({ clientLocationId: c.other.clientLocationId }), expect: 400, expectError: "Invalid location" },
+  { name: "Ticket PATCH teamId", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.own.ticketId}`, body: (c) => ({ teamId: c.other.helpdeskTeamId, assigneeId: null }), expect: 400, expectError: "Invalid team" },
+  { name: "Ticket PATCH assigneeId", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.own.ticketId}`, body: (c) => ({ assigneeId: c.other.adminId }), expect: 400, expectError: "Invalid user" },
+  { name: "Ticket PATCH typeId", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.own.ticketId}`, body: (c) => ({ typeId: c.other.ticketTypeId }), expect: 400, expectError: "Invalid ticket type" },
+  { name: "Ticket PATCH priorityId", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.own.ticketId}`, body: (c) => ({ priorityId: c.other.ticketPriorityId }), expect: 400, expectError: "Invalid priority" },
+  { name: "Ticket PATCH statusId", directions: "both", method: "PATCH", path: (c) => `/api/tickets/${c.own.ticketId}`, body: (c) => ({ statusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
+  { name: "Ticket list filtered by other company's team", directions: "both", method: "GET", path: (c) => `/api/tickets?teamId=${c.other.helpdeskTeamId}`, expect: 400, expectError: "Invalid team" },
+  { name: "Ticket list filtered by other company's user", directions: "both", method: "GET", path: (c) => `/api/tickets?assigneeId=${c.other.adminId}`, expect: 400, expectError: "Invalid user" },
+  { name: "Ticket list filtered by other company's status", directions: "both", method: "GET", path: (c) => `/api/tickets?statusId=${c.other.ticketStatusId}`, expect: 400, expectError: "Invalid status" },
+  { name: "Ticket list filtered by other company's priority", directions: "both", method: "GET", path: (c) => `/api/tickets?priorityId=${c.other.ticketPriorityId}`, expect: 400, expectError: "Invalid priority" },
+  { name: "Ticket list filtered by other company's type", directions: "both", method: "GET", path: (c) => `/api/tickets?typeId=${c.other.ticketTypeId}`, expect: 400, expectError: "Invalid ticket type" },
+  { name: "Ticket list filtered by other company's client", directions: "both", method: "GET", path: (c) => `/api/tickets?clientId=${c.other.clientId}`, expect: 400, expectError: "Invalid client" },
+  { name: "Note on own ticket with other company's statusId", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.own.ticketId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", statusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
+  { name: "Note on own ticket with other company's actionButtonId", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.own.ticketId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", actionButtonId: c.other.actionButtonId }), expect: 400, expectError: "Invalid action button" },
+  { name: "Email from own ticket with other company's attachment", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.own.ticketId}/email`, body: (c) => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>", attachmentIds: [c.other.ticketAttachmentId] }), expect: 400, expectError: "Invalid attachment" },
+  { name: "Action button POST fixedTicketStatusId", directions: "both", method: "POST", path: () => "/api/action-buttons", body: (c) => ({ label: "Should Not Exist", icon: "note", color: "#1B3A5C", kind: "NOTE", forOpportunities: false, forTickets: true, stageMode: "FIXED", fixedTicketStatusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
+
   // ── Permission escalation inside one company ──
   { name: "Limited role grants a permission it doesn't hold", directions: "once", sameCompany: true, actor: "limited", method: "PATCH", path: (c) => `/api/roles/${c.targetRoleId}`, body: () => ({ permissions: { quotes: { delete: true } } }), expect: 403, expectError: "You can't grant permissions you don't have yourself" },
 ]
@@ -499,6 +566,11 @@ async function snapshot(prisma: PrismaClient, companyId: string): Promise<Record
     teams: prisma.team.findMany({ where: { companyId }, ...byId, include: { members: byId, defaultRoles: byId } }),
     actionButtons: prisma.actionButton.findMany({ where: { companyId }, ...byId }),
     auditLogEntries: prisma.auditLogEntry.findMany({ where: { companyId }, ...byId }),
+    tickets: prisma.ticket.findMany({ where: { companyId }, ...byId, include: { attachments: byId, timeline: byId } }),
+    ticketTypes: prisma.ticketType.findMany({ where: { companyId }, ...byId }),
+    ticketPriorities: prisma.ticketPriority.findMany({ where: { companyId }, ...byId }),
+    ticketStatuses: prisma.ticketStatus.findMany({ where: { companyId }, ...byId }),
+    ticketSettings: prisma.ticketSettings.findUnique({ where: { companyId } }),
     roles: prisma.role.findMany({ where: { companyId }, ...byId }),
     settings: prisma.companySettings.findUnique({ where: { companyId } }),
     users: prisma.user.findMany({ where: { companyId }, ...byId, select: { id: true, active: true, roleId: true } }),
@@ -589,6 +661,11 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       { name: "GET own action buttons", method: "GET", path: "/api/action-buttons", mustContain: own.actionButtonId },
       { name: "GET own audit log", method: "GET", path: "/api/audit-log", mustContain: own.auditEntryId },
       { name: "GET own opportunity audit log", method: "GET", path: `/api/opportunities/${own.opportunityId}/audit`, mustContain: own.auditEntryId },
+      { name: "GET own ticket", method: "GET", path: `/api/tickets/${own.ticketId}`, mustContain: own.ticketId },
+      { name: "GET own ticket timeline", method: "GET", path: `/api/tickets/${own.ticketId}/timeline`, mustContain: own.ticketNoteId },
+      { name: "GET own ticket attachments", method: "GET", path: `/api/tickets/${own.ticketId}/attachments`, mustContain: own.ticketAttachmentId },
+      { name: "GET own ticket statuses", method: "GET", path: "/api/ticket-statuses", mustContain: own.ticketStatusId },
+      { name: "GET own ticket audit log", method: "GET", path: `/api/tickets/${own.ticketId}/audit`, mustContain: own.ticketAuditEntryId },
       // Writes the values already stored, so nothing visible changes
       { name: "PATCH own vendor contact", method: "PATCH", path: `/api/vendors/${own.vendorId}/contacts/${own.vendorContactId}`, json: { lastName: n.vendorContactLastName }, mustContain: own.vendorContactId },
       { name: "PATCH own PO line item", method: "PATCH", path: `/api/purchase-orders/${own.purchaseOrderId}/line-items/${own.poLineId}`, json: { name: n.poLine }, mustContain: own.poLineId },
@@ -706,7 +783,7 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
   for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
     const own = ids[ownLetter]
     const other = ids[otherLetter]
-    for (const path of ["/api/opportunities/sidebar-counts", "/api/teams"]) {
+    for (const path of ["/api/opportunities/sidebar-counts", "/api/tickets/sidebar-counts", "/api/teams"]) {
       const res = await admins[ownLetter].request("GET", path)
       const leaked = [other.generalTeamId, other.salesTeamId, ...markersFor(other, names[otherLetter])].filter((m) => res.text.includes(m))
       const problem =
@@ -758,6 +835,36 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
               ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
               : null
       rows.push({ attempt: `${ownLetter} ${path} holds only its own entries`, expected: "200, own entries only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+    }
+  }
+
+  // The ticket lists: each admin's ticket list, ticket action buttons, and
+  // ticket audit entries hold its own records and nothing of the other
+  // company's
+  for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+    const own = ids[ownLetter]
+    const other = ids[otherLetter]
+    const ownButton = run.companies[ownLetter].fixtures.ticketButtonId
+    const otherButton = run.companies[otherLetter].fixtures.ticketButtonId
+    const lists = [
+      { path: "/api/tickets", mustHold: own.ticketId, foreign: [other.ticketId] },
+      { path: "/api/action-buttons?for=ticket", mustHold: ownButton, foreign: [otherButton, other.actionButtonId] },
+      { path: "/api/audit-log?recordType=TICKET", mustHold: own.ticketAuditEntryId, foreign: [other.ticketAuditEntryId, other.ticketId] },
+      { path: `/api/tickets/${own.ticketId}/audit`, mustHold: own.ticketAuditEntryId, foreign: [other.ticketAuditEntryId, other.ticketId] },
+      { path: "/api/ticket-statuses", mustHold: own.ticketStatusId, foreign: [other.ticketStatusId] },
+    ]
+    for (const list of lists) {
+      const res = await admins[ownLetter].request("GET", list.path)
+      const leaked = [...list.foreign, ...markersFor(other, names[otherLetter])].filter((m) => res.text.includes(m))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}: ${errorText(res.text)}`
+          : !res.text.includes(list.mustHold)
+            ? "its own record is missing"
+            : leaked.length > 0
+              ? `response contains the other company's data (${leaked.slice(0, 3).join(", ")})`
+              : null
+      rows.push({ attempt: `${ownLetter} ${list.path.replace(/[A-Za-z0-9_-]{20,}/g, "[id]")} holds only its own records`, expected: "200, own records only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
     }
   }
 

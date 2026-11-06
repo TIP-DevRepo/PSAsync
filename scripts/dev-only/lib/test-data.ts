@@ -231,6 +231,9 @@ export function testNames(letter: TestLetter, marker: string) {
     // Each sample ticket's timeline holds a created action, then a note by
     // the admin and a note by Test Ticket Basic starting with this text
     ticketNotePrefix: `${marker} Sample ticket note ${letter}`,
+    // A custom ticket only Note button that always moves to Resolved, with
+    // an optional note
+    ticketActionButton: `${marker} Resolve ${letter}`,
   }
 }
 
@@ -484,4 +487,6 @@ export interface PermissionFixtureIds {
   ticketWaitingStatusId: string
   ticketResolvedStatusId: string
   ticketClosedStatusId: string
+  // The custom ticket button (see testNames)
+  ticketButtonId: string
 }
