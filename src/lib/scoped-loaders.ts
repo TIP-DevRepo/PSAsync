@@ -366,11 +366,40 @@ export const DELETED_OPPORTUNITY = { deletedAt: { not: null } } satisfies Prisma
 // Team membership is matched in the same query (the team's members), so
 // joining or leaving a team applies on the next request.
 export function opportunityVisibilityWhere(ctx: OpportunityViewer): Prisma.OpportunityWhereInput {
-  if (!ctx.can("pages.opportunities")) return NO_OPPORTUNITIES
-  if (ctx.can("opportunities.viewAll")) return {}
-  const inMyTeams: Prisma.OpportunityWhereInput = { team: { members: { some: { userId: ctx.userId } } } }
-  if (ctx.can("opportunities.viewTeam")) return { OR: [{ ownerId: ctx.userId }, inMyTeams] }
-  return { OR: [{ ownerId: ctx.userId }, { ownerId: null, ...inMyTeams }] }
+  return teamRecordVisibility(ctx, OPPORTUNITY_VISIBILITY, NO_OPPORTUNITIES) as Prisma.OpportunityWhereInput
+}
+
+// The three visibility levels opportunities and tickets share, for a
+// record with a team (its queue for tickets) and one person it belongs to
+// (an opportunity's owner, a ticket's assignee):
+//   no page permission: nothing (none)
+//   viewAll (Global Admin too): everything
+//   viewTeam: their own anywhere, plus every one in teams they belong to
+//   basic: their own, plus unassigned ones in teams they belong to
+// Team membership is matched in the same query (the team's members), so
+// joining or leaving a team applies on the next request.
+export interface TeamRecordVisibility {
+  page: string
+  viewAll: string
+  viewTeam: string
+  // The column holding the person the record belongs to
+  personField: "ownerId" | "assigneeId"
+}
+
+const OPPORTUNITY_VISIBILITY: TeamRecordVisibility = {
+  page: "pages.opportunities",
+  viewAll: "opportunities.viewAll",
+  viewTeam: "opportunities.viewTeam",
+  personField: "ownerId",
+}
+
+export function teamRecordVisibility<N>(ctx: OpportunityViewer, rule: TeamRecordVisibility, none: N): N | Record<string, unknown> {
+  if (!ctx.can(rule.page)) return none
+  if (ctx.can(rule.viewAll)) return {}
+  const inMyTeams = { team: { members: { some: { userId: ctx.userId } } } }
+  const mine = { [rule.personField]: ctx.userId }
+  if (ctx.can(rule.viewTeam)) return { OR: [mine, inMyTeams] }
+  return { OR: [mine, { [rule.personField]: null, ...inMyTeams }] }
 }
 
 // Who a user may make an opportunity's owner, given whether they are in

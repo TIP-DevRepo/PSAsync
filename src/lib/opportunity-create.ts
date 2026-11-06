@@ -2,9 +2,8 @@ import type { OpportunitySource, OpportunityStageCategory, Prisma, PrismaClient 
 import { takeOpportunityNumber } from "@/lib/opportunity-number"
 import { opportunityDetailSelect } from "@/lib/opportunity-selects"
 import { closedAtFor } from "@/lib/opportunity-rules"
-import { NOTE_EMPTY_MESSAGE, readNoteBody, recordTimelineActions } from "@/lib/timeline"
+import { initialNoteAuthorId, initialNoteHtml, recordTimelineActions, writeInitialNote, type InitialNote } from "@/lib/timeline"
 import { opportunityCreatedAction } from "@/lib/opportunity-timeline"
-import { UserError } from "@/lib/user-error"
 import { loadDefaultTeamId } from "@/lib/team-defaults"
 import { recordAudit } from "@/lib/audit-log"
 import { opportunityCreatedAudit } from "@/lib/opportunity-audit"
@@ -15,11 +14,8 @@ import { opportunityCreatedAudit } from "@/lib/opportunity-audit"
 // the system writes for an automatic one. The caller has already checked
 // access and every id (assertRefs).
 
-export const INITIAL_NOTE_REQUIRED_MESSAGE = "An initial note is required"
-
-// The first note on the timeline. html is sanitized here; one that has no
-// text after sanitizing is refused.
-export type InitialNote = { by: "person"; userId: string; html: string } | { by: "system"; html: string }
+// The initial note rules are shared with tickets (src/lib/timeline.ts)
+export { INITIAL_NOTE_REQUIRED_MESSAGE, initialNoteHtml, type InitialNote } from "@/lib/timeline"
 
 export interface NewOpportunity {
   companyId: string
@@ -44,14 +40,6 @@ export interface NewOpportunity {
   initialNote: InitialNote
 }
 
-// The sanitized note body, or a UserError (shown to the user as a 400) when
-// it is empty or too long
-export function initialNoteHtml(note: InitialNote): string {
-  const read = readNoteBody(note.html)
-  if (read.error !== undefined) throw new UserError(read.error === NOTE_EMPTY_MESSAGE ? INITIAL_NOTE_REQUIRED_MESSAGE : read.error)
-  return read.value
-}
-
 // Creates the opportunity, its "created" timeline and audit entries, and
 // the initial note a moment after it (so the note reads first, newest
 // first), all in one transaction that also takes the number. The created
@@ -70,7 +58,7 @@ export async function createOpportunityInTransaction(tx: Prisma.TransactionClien
 }
 
 async function createOpportunityIn(tx: Prisma.TransactionClient, input: NewOpportunity, noteHtml: string, now: Date) {
-  const authorId = input.initialNote.by === "person" ? input.initialNote.userId : null
+  const authorId = initialNoteAuthorId(input.initialNote)
   const teamId = input.teamId ?? (await loadDefaultTeamId(input.companyId, tx))
   if (!teamId) throw new Error("The company has no General team; run ensureTeamDefaults first")
   const number = await takeOpportunityNumber(tx, input.companyId, now)
@@ -99,9 +87,6 @@ async function createOpportunityIn(tx: Prisma.TransactionClient, input: NewOppor
   const subject = { opportunityId: created.id }
   await recordTimelineActions(tx, { companyId: input.companyId, authorId, subject, actions: [opportunityCreatedAction(created)], at: now })
   await recordAudit(tx, { companyId: input.companyId, actorId: authorId, entries: [opportunityCreatedAudit(created)], at: now })
-  await tx.timelineEntry.create({
-    data: { companyId: input.companyId, ...subject, kind: "NOTE", authorId, body: noteHtml, createdAt: new Date(now.getTime() + 1) },
-    select: { id: true },
-  })
+  await writeInitialNote(tx, { companyId: input.companyId, subject, authorId, html: noteHtml, createdAt: now })
   return created
 }

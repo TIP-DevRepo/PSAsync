@@ -123,6 +123,12 @@ export const OPPORTUNITY_UNDOABLE_FIELDS = [
   "expectedCloseDate",
 ] as const
 
+// The fields a field_changed entry can be undone for, by record type: every
+// field that record's PATCH takes (the update rules shared with the undo)
+export const UNDOABLE_FIELDS: Partial<Record<AuditRecordTypeKey, readonly string[]>> = {
+  OPPORTUNITY: OPPORTUNITY_UNDOABLE_FIELDS,
+}
+
 const REF_FIELDS = new Set(["clientId", "contactId", "clientLocationId", "teamId", "ownerId", "stageId", "typeId"])
 
 // Fields one change sets together because the update rules tie them: a
@@ -135,8 +141,13 @@ export const LINKED_UNDO_FIELDS: readonly (readonly string[])[] = [
   ["teamId", "ownerId"],
 ]
 
-export function linkedUndoFields(field: string): string[] {
-  return LINKED_UNDO_FIELDS.find((group) => group.includes(field))?.filter((f) => f !== field) ?? []
+const LINKED_UNDO_FIELDS_BY_TYPE: Partial<Record<AuditRecordTypeKey, readonly (readonly string[])[]>> = {
+  OPPORTUNITY: LINKED_UNDO_FIELDS,
+}
+
+export function linkedUndoFields(field: string, recordType: string = "OPPORTUNITY"): string[] {
+  const groups = LINKED_UNDO_FIELDS_BY_TYPE[recordType as AuditRecordTypeKey] ?? []
+  return groups.find((group) => group.includes(field))?.filter((f) => f !== field) ?? []
 }
 
 // ─── Undo ───────────────────────────────────────────────────────────────────
@@ -163,15 +174,23 @@ export const UNDO_MESSAGES = {
   changedSince: "This field has changed since. Only its latest change can be undone.",
 } as const
 
+// The deleted record message for each record type that can be undone
+const RECORD_DELETED_MESSAGES: Partial<Record<AuditRecordTypeKey, string>> = {
+  OPPORTUNITY: UNDO_MESSAGES.recordDeleted,
+}
+
+export function recordDeletedMessage(recordType: string): string {
+  return RECORD_DELETED_MESSAGES[recordType as AuditRecordTypeKey] ?? UNDO_MESSAGES.recordDeleted
+}
+
 // Why an entry can't be undone, or null when it can. The undo route and the
 // list's canUndo both use this.
 export function undoBlockReason(entry: UndoCandidate, ctx: UndoContext): string | null {
   if (entry.action !== "field_changed") return UNDO_MESSAGES.notFieldChange
-  if (entry.recordType !== "OPPORTUNITY" || !entry.field || !(OPPORTUNITY_UNDOABLE_FIELDS as readonly string[]).includes(entry.field)) {
-    return UNDO_MESSAGES.notUndoable
-  }
+  const fields = UNDOABLE_FIELDS[entry.recordType as AuditRecordTypeKey]
+  if (!fields || !entry.field || !fields.includes(entry.field)) return UNDO_MESSAGES.notUndoable
   if (entry.undoneAt) return UNDO_MESSAGES.alreadyUndone
-  if (ctx.recordDeleted) return UNDO_MESSAGES.recordDeleted
+  if (ctx.recordDeleted) return recordDeletedMessage(entry.recordType)
   if (ctx.changedSince) return UNDO_MESSAGES.changedSince
   return null
 }

@@ -3,7 +3,8 @@ import type { Prisma, PrismaClient } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { apiError, type AccessContext } from "@/lib/api-access"
 import { assertRefs, opportunityStageWhere } from "@/lib/scoped-loaders"
-import { ensureOpportunityDefaults, isRefusal, type Refusal } from "@/lib/opportunity-defaults"
+import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
+import { refusableTransaction, type Refusal } from "@/lib/refusal"
 import { readOptionalId } from "@/lib/opportunity-rules"
 import {
   AVAILABLE_ACTION_KINDS,
@@ -149,12 +150,6 @@ async function firstStageOf(tx: Prisma.TransactionClient, companyId: string, cat
   return stage?.id ?? null
 }
 
-class RollBack extends Error {
-  constructor(readonly refusal: Refusal) {
-    super(refusal.error)
-  }
-}
-
 // Runs fn in a transaction that first locks the company's row, so writes
 // that must keep the button list consistent (never deleting the last one,
 // a reorder matching the list) run one after the other. A Refusal rolls
@@ -163,17 +158,10 @@ export async function withActionButtonsLock<T>(
   companyId: string,
   fn: (tx: Prisma.TransactionClient) => Promise<T | Refusal>
 ): Promise<T | Refusal> {
-  try {
-    return await prisma.$transaction(async (tx) => {
-      await tx.$queryRaw`SELECT "id" FROM "Company" WHERE "id" = ${companyId} FOR NO KEY UPDATE`
-      const result = await fn(tx)
-      if (isRefusal(result)) throw new RollBack(result)
-      return result
-    })
-  } catch (err) {
-    if (err instanceof RollBack) return err.refusal
-    throw err
-  }
+  return refusableTransaction(async (tx) => {
+    await tx.$queryRaw`SELECT "id" FROM "Company" WHERE "id" = ${companyId} FOR NO KEY UPDATE`
+    return fn(tx)
+  })
 }
 
 export const LAST_BUTTON_MESSAGE = "A company keeps at least one action button. Hide this one instead of deleting it."
