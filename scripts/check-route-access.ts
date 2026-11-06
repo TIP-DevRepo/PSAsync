@@ -15,10 +15,12 @@ import { join, relative, sep } from "node:path"
 // public, so only add one that must be.
 const PUBLIC_ROUTES = [
   "auth/[...nextauth]",
-  // Vercel Cron calls it with no session. It is protected by CRON_SECRET
-  // instead: it answers 503 and does nothing while the secret isn't set,
-  // and 401 unless the request carries "Authorization: Bearer
-  // <CRON_SECRET>", compared in constant time.
+  // Vercel Cron calls these with no session. They are protected by
+  // CRON_SECRET instead (cronRefusal in src/lib/cron-auth.ts): they answer
+  // 503 and do nothing while the secret isn't set, and 401 unless the
+  // request carries "Authorization: Bearer <CRON_SECRET>", compared in
+  // constant time.
+  "cron/close-resolved-tickets",
   "cron/expire-quotes",
   // Browsers post CSP violation reports without credentials. It stores
   // nothing, logs one line, and is IP rate limited (src/lib/rate-limit.ts).
