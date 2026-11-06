@@ -8,7 +8,7 @@ import { effectiveRoles, rankOf } from "@/lib/team-roles"
 // field required) since it's read with optional chaining throughout —
 // this is just enough structure for autocomplete and safe nested access.
 export interface RolePermissions {
-  pages?: Partial<Record<"clients" | "catalog" | "vendors" | "inventory" | "quotes" | "settings" | "salesOrders" | "purchaseOrders" | "opportunities", boolean>>
+  pages?: Partial<Record<"clients" | "catalog" | "vendors" | "inventory" | "quotes" | "settings" | "salesOrders" | "purchaseOrders" | "opportunities" | "tickets", boolean>>
   quotes?: Partial<Record<
     "create" | "edit" | "delete" | "changeStatus" | "approve" | "sendEmail" | "viewAllUsersQuotes" | "sendAsOthers",
     boolean
@@ -17,10 +17,11 @@ export interface RolePermissions {
   salesOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "generatePO" | "viewAll", boolean>>
   purchaseOrders?: Partial<Record<"create" | "edit" | "delete" | "changeStatus" | "send" | "viewAll", boolean>>
   opportunities?: Partial<Record<"create" | "edit" | "delete" | "viewTeam" | "viewAll", boolean>>
+  tickets?: Partial<Record<"create" | "edit" | "delete" | "assign" | "viewTeam" | "viewAll", boolean>>
   catalog?: Partial<Record<"delete", boolean>>
   inventory?: Partial<Record<"delete", boolean>>
   settingsSections?: Partial<Record<
-    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders" | "opportunities" | "teams" | "actionButtons",
+    "company" | "users" | "quotes" | "approvalWorkflows" | "notifications" | "integrations" | "salesOrders" | "opportunities" | "teams" | "actionButtons" | "tickets",
     boolean
   >>
   dashboards?: Partial<Record<"manage", boolean>>
@@ -195,6 +196,7 @@ export function resolvePagePermissions(
       salesOrders: true,
       purchaseOrders: true,
       opportunities: true,
+      tickets: true,
     }
   }
   const pages = (access?.permissions as RolePermissions | undefined)?.pages
@@ -208,5 +210,6 @@ export function resolvePagePermissions(
     salesOrders: !!pages?.salesOrders,
     purchaseOrders: !!pages?.purchaseOrders,
     opportunities: !!pages?.opportunities,
+    tickets: !!pages?.tickets,
   }
 }
