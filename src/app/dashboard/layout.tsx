@@ -2,8 +2,12 @@ import { auth } from "@/auth"
 import { redirect } from "next/navigation"
 import { Sidebar, type PagePermissions } from "@/components/layout/sidebar"
 import { Topbar } from "@/components/layout/topbar"
+import { TopbarSlotsProvider } from "@/components/layout/TopbarSlots"
 import { resolvePagePermissions } from "@/lib/permissions"
+import { loadAppearance } from "@/lib/appearance"
+import { DEFAULT_DENSITY } from "@/lib/theme"
 import { AccessProvider } from "@/components/AccessProvider"
+import { AppearanceProvider } from "@/components/AppearanceProvider"
 import { SessionKeepAlive } from "@/components/SessionKeepAlive"
 
 export default async function DashboardLayout({
@@ -24,22 +28,33 @@ export default async function DashboardLayout({
   }
 
   const pagePermissions: PagePermissions = resolvePagePermissions(session.user.access)
+  // The same lookup the root layout made for the theme (cached per request)
+  const appearance = session.user.id ? await loadAppearance(session.user.id) : null
+  const sidebar = {
+    pagePermissions,
+    companyName: appearance?.companyName ?? "PSAsync",
+    logoUrl: appearance?.logoUrl ?? null,
+    userName: session.user.name ?? "User",
+  }
 
   return (
-    <div className="flex h-screen">
-      <SessionKeepAlive />
-      {/* Sidebar — permanent on desktop, hidden on mobile */}
-      <aside className="hidden w-64 border-r border-sidebar-border md:block">
-        <Sidebar pagePermissions={pagePermissions} />
-      </aside>
+    <TopbarSlotsProvider>
+      <div className="flex h-screen">
+        <SessionKeepAlive />
+        {/* Sidebar: permanent from md up, a menu button in the top bar below */}
+        <aside className="hidden w-[248px] shrink-0 md:block">
+          <Sidebar {...sidebar} />
+        </aside>
 
-      {/* Main content area */}
-      <div className="flex flex-1 flex-col overflow-hidden">
-        <Topbar userName={session.user.name ?? "User"} pagePermissions={pagePermissions} />
-        <main className="flex-1 overflow-y-auto p-6">
-          <AccessProvider access={session.user.access ?? null}>{children}</AccessProvider>
-        </main>
+        <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+          <Topbar {...sidebar} />
+          <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-7">
+            <AccessProvider access={session.user.access ?? null}>
+              <AppearanceProvider rowDensity={appearance?.rowDensity ?? DEFAULT_DENSITY}>{children}</AppearanceProvider>
+            </AccessProvider>
+          </main>
+        </div>
       </div>
-    </div>
+    </TopbarSlotsProvider>
   )
 }

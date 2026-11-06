@@ -3,12 +3,13 @@ import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { usesMicrosoftSso } from "@/lib/sso-account"
 import { ChangePasswordCard } from "@/components/account/ChangePasswordCard"
-import { Breadcrumbs } from "@/components/Breadcrumbs"
+import { LogOutLink } from "@/components/account/LogOutLink"
+import { PageHeader } from "@/components/ui/blocks"
 
-// Every signed in user can reach their own account page, so this is
-// deliberately not gated by any Roles & Permissions page permission.
-// Laid out as a plain stack of cards so per-user preferences can be
-// added as more cards later.
+// My settings: every signed in user can reach their own, so this is
+// deliberately not gated by any Roles & Permissions page permission. The
+// sidebar's user button opens it, and Log out lives here. Laid out as a
+// plain stack of cards so per-user preferences can be added as more cards.
 export default async function AccountPage() {
   const session = await auth()
   if (!session?.user?.id) {
@@ -31,11 +32,12 @@ export default async function AccountPage() {
 
   return (
     <div className="w-full max-w-2xl space-y-6">
-      <Breadcrumbs current="My Account" />
-      <div>
-        <h1 className="text-display font-semibold tracking-tight text-foreground">My Account</h1>
-        <p className="text-muted-foreground mt-1">Your profile and sign-in details.</p>
-      </div>
+      <PageHeader
+        breadcrumbs={{ current: "My settings" }}
+        title="My settings"
+        subtitle="Your profile, sign in details, and how PSAsync looks for you."
+        actions={<LogOutLink />}
+      />
 
       <section className="rounded-lg border border-border bg-card shadow-card p-6 space-y-4">
         <h2 className="text-heading font-semibold text-foreground">Profile</h2>
