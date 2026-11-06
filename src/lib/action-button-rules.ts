@@ -90,7 +90,10 @@ export function checkActionButton(input: Record<string, unknown>): ButtonCheck {
   if (!STAGE_CHANGING_KINDS.includes(kind) && (stageMode !== "NONE" || fixedStageId)) {
     return { error: ACTION_BUTTON_MESSAGES.stageKinds }
   }
-  if (stageMode === "FIXED" && !fixedStageId) return { error: ACTION_BUTTON_MESSAGES.fixedStageRequired }
+  // A FIXED button needs its stage when it shows on opportunities. One that
+  // shows only on tickets moves to its ticket status instead (and is left
+  // off tickets until it has one).
+  if (stageMode === "FIXED" && input.forOpportunities && !fixedStageId) return { error: ACTION_BUTTON_MESSAGES.fixedStageRequired }
   if (stageMode !== "FIXED" && fixedStageId) return { error: ACTION_BUTTON_MESSAGES.fixedStageOnlyWhenFixed }
 
   return {
