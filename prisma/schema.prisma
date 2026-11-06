@@ -2038,9 +2038,11 @@ model Ticket {
   title            String
   // A ticket may have no client or contact (later, unknown email senders
   // and unmatched NinjaOne alerts). A contact always belongs to the client,
-  // and a location to the client, checked by the API.
+  // and a location to the client, checked by the API. A client with tickets
+  // can't be deleted (RESTRICT, like Opportunity.clientId), so a ticket
+  // never loses its client.
   clientId         String?
-  client           Client?         @relation(fields: [clientId], references: [id])
+  client           Client?         @relation(fields: [clientId], references: [id], onDelete: Restrict)
   contactId        String?
   contact          Contact?        @relation(fields: [contactId], references: [id])
   clientLocationId String?
