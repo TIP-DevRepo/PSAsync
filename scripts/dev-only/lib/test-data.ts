@@ -6,6 +6,7 @@
 // No database imports here, so loading this file never touches the database.
 
 import { randomInt } from "crypto"
+import type { AttachmentKind } from "@/lib/attachment-paths"
 
 export type TestLetter = "B" | "C"
 export const TEST_LETTERS: readonly TestLetter[] = ["B", "C"]
@@ -331,6 +332,9 @@ export interface SampleIds {
   generalTeamId: string
   salesTeamId: string
   teamGrantRoleId: string
+  // One attachment per kind with a link in the bucket's URL format and a
+  // test key (no file behind it), for the download route checks
+  downloadFileIds: Record<AttachmentKind, string>
   // The custom action button (see testNames)
   actionButtonId: string
 }

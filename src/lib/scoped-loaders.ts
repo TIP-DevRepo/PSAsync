@@ -2,6 +2,7 @@ import type { Prisma } from "@/generated/prisma"
 import { mainClientLocation } from "@/lib/client-main-location"
 import { prisma } from "@/lib/prisma"
 import { apiError, type AccessContext } from "@/lib/api-access"
+import type { AttachmentKind } from "@/lib/attachment-paths"
 
 // Company scoped lookups for ids that arrive in an API route's URL. Every
 // where clause goes through the parent record up to the caller's company,
@@ -461,6 +462,70 @@ export function loadOpportunityAttachment(ctx: OpportunityViewer, opportunityId:
     where: { id: attachmentId, opportunityId, opportunity: viewableOpportunityWhere(ctx, opportunityId) },
     select: { id: true },
   })
+}
+
+// Attachment downloads (GET /api/files/<kind>/<id>)
+
+export interface DownloadableAttachment {
+  fileName: string
+  fileUrl: string
+  // The parent's folder in the uploads bucket, the prefix storedObjectKey
+  // checks the stored URL against
+  prefix: string
+}
+
+// One attachment by its own id, with its parent record's view check: the
+// vendor or inventory asset in the caller's company (the route holds the
+// page permission), the sales order and purchase order view checks (VSO,
+// VPO), and the opportunity view check (VOP, never a deleted one). A miss,
+// another company's, or one the user may not view is null, the parent
+// GET's 404.
+export async function loadDownloadableAttachment(
+  ctx: OrderViewer,
+  kind: AttachmentKind,
+  attachmentId: string
+): Promise<DownloadableAttachment | null> {
+  const select = { fileName: true, fileUrl: true } as const
+  switch (kind) {
+    case "vendor": {
+      const a = await prisma.vendorAttachment.findFirst({
+        where: { id: attachmentId, vendor: { companyId: ctx.companyId } },
+        select: { ...select, vendorId: true },
+      })
+      return a && { fileName: a.fileName, fileUrl: a.fileUrl, prefix: `vendors/${a.vendorId}/` }
+    }
+    case "inventory-asset": {
+      const a = await prisma.inventoryAssetAttachment.findFirst({
+        where: { id: attachmentId, asset: { companyId: ctx.companyId } },
+        select: { ...select, assetId: true },
+      })
+      return a && { fileName: a.fileName, fileUrl: a.fileUrl, prefix: `inventory-assets/${a.assetId}/` }
+    }
+    case "sales-order": {
+      if (!ctx.can("pages.salesOrders")) return null
+      const a = await prisma.sOAttachment.findFirst({
+        where: { id: attachmentId, salesOrder: salesOrderListWhere(ctx) },
+        select: { ...select, salesOrderId: true },
+      })
+      return a && { fileName: a.fileName, fileUrl: a.fileUrl, prefix: `sales-orders/${a.salesOrderId}/` }
+    }
+    case "purchase-order": {
+      if (!ctx.can("pages.purchaseOrders")) return null
+      const a = await prisma.pOAttachment.findFirst({
+        where: { id: attachmentId, purchaseOrder: purchaseOrderListWhere(ctx) },
+        select: { ...select, purchaseOrderId: true },
+      })
+      return a && { fileName: a.fileName, fileUrl: a.fileUrl, prefix: `purchase-orders/${a.purchaseOrderId}/` }
+    }
+    case "opportunity": {
+      if (!ctx.can("pages.opportunities")) return null
+      const a = await prisma.opportunityAttachment.findFirst({
+        where: { id: attachmentId, opportunity: opportunityListWhere(ctx) },
+        select: { ...select, opportunityId: true },
+      })
+      return a && { fileName: a.fileName, fileUrl: a.fileUrl, prefix: `opportunities/${a.opportunityId}/` }
+    }
+  }
 }
 
 // A timeline entry of one opportunity, company scoped, for writes after

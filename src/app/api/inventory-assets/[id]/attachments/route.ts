@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
 import { readUploadFromRequest, storeUpload } from "@/lib/uploads"
 import { requireAccess, notFound } from "@/lib/api-access"
+import { withDownloadUrl } from "@/lib/attachment-paths"
 import { loadInventoryAsset } from "@/lib/scoped-loaders"
 
 export async function GET(
@@ -23,7 +24,7 @@ export async function GET(
     orderBy: { createdAt: "desc" },
   })
 
-  return NextResponse.json(attachments)
+  return NextResponse.json(attachments.map((a) => withDownloadUrl("inventory-asset", a)))
 }
 
 export async function POST(
@@ -57,5 +58,5 @@ export async function POST(
     },
   })
 
-  return NextResponse.json(attachment)
+  return NextResponse.json(withDownloadUrl("inventory-asset", attachment))
 }

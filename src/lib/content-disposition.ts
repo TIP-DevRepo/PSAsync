@@ -28,12 +28,23 @@ export function safeDownloadName(name: string, fallback = "download"): string {
   return clean
 }
 
-// attachment; filename="<ascii fallback>"; filename*=UTF-8''<encoded name>
-export function attachmentDisposition(name: string, fallback = "download"): string {
+// <type>; filename="<ascii fallback>"; filename*=UTF-8''<encoded name>
+function dispositionHeader(type: "attachment" | "inline", name: string, fallback: string): string {
   const clean = safeDownloadName(name, fallback)
   const ascii = clean.replace(/[^\x20-\x7e]|["\\%]/g, "_")
   const encoded = encodeURIComponent(clean).replace(/['()*]/g, (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`)
-  return `attachment; filename="${ascii}"; filename*=UTF-8''${encoded}`
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encoded}`
+}
+
+// attachment; filename="<ascii fallback>"; filename*=UTF-8''<encoded name>
+export function attachmentDisposition(name: string, fallback = "download"): string {
+  return dispositionHeader("attachment", name, fallback)
+}
+
+// The same name, opened in the browser instead of saved: images and PDFs
+// served through the attachment download routes
+export function inlineDisposition(name: string, fallback = "download"): string {
+  return dispositionHeader("inline", name, fallback)
 }
 
 // A quote PDF's download name, e.g. Q-2026-0001-v2.pdf

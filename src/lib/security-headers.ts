@@ -25,8 +25,9 @@ export interface HeaderEnv {
 const BUCKET_NAME = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/
 const REGION_NAME = /^[a-z]{2}(-[a-z]+)+-\d+$/
 
-// Uploaded images (company and vendor logos, attachment thumbnails) load
-// straight from the uploads bucket, https://<bucket>.s3.<region>.amazonaws.com
+// Uploaded images (company and vendor logos, and attachments opened
+// through the download routes, which redirect to a presigned link) load
+// from the uploads bucket, https://<bucket>.s3.<region>.amazonaws.com
 // (src/lib/uploads.ts). Null when AWS_S3_BUCKET_NAME or AWS_REGION is
 // missing or isn't a plain name: the policy then leaves the bucket out (no
 // uploaded image loads) rather than allowing every S3 host, which would let

@@ -31,6 +31,7 @@ import { randomBytes } from "crypto"
 import { basename } from "path"
 import bcrypt from "bcryptjs"
 import type { Prisma, PrismaClient } from "@/generated/prisma"
+import type { AttachmentKind } from "@/lib/attachment-paths"
 // These only import Prisma types, so loading them can't reach the database
 import { globalAdminRoleData } from "@/lib/global-admin-role"
 import { ensureEveryoneRole } from "@/lib/everyone-role"
@@ -221,6 +222,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
   const { ensureTeamDefaults } = await import("@/lib/team-defaults")
   const { ensureActionButtonDefaults } = await import("@/lib/action-buttons")
   const { takeOpportunityNumber } = await import("@/lib/opportunity-number")
+  const { bucketBaseUrl } = await import("@/lib/uploads")
   const year = new Date().getFullYear()
 
   async function setUpCompany(letter: TestLetter): Promise<RunCompany> {
@@ -753,6 +755,30 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
     const salesBasicOpportunity = await createOpportunity(n.salesBasicOpportunity, teamBasicUserId, "sales-basic", salesTeam.id)
     const salesUnassignedOpportunity = await createOpportunity(n.salesUnassignedOpportunity, null, "sales-unassigned", salesTeam.id)
 
+    // ── Download fixtures ──
+    // One attachment per kind whose stored link has the configured bucket's
+    // URL format and a test key under its record's folder (the key's file
+    // name carries the run's marker). No file is behind it: presigning a
+    // download link never contacts S3, and teardown never sends these keys
+    // to S3 (isCheckFileKey). The sample attachments above keep their dummy
+    // example.test link, which the download routes answer as not available.
+    const checkFile = (prefix: string) => ({
+      fileName: `${run.marker}-download-${letter.toLowerCase()}.pdf`,
+      fileUrl: `${bucketBaseUrl()}${prefix}${run.marker}-download.pdf`,
+      fileSize: 1,
+      uploadedByUserId: adminId,
+    })
+    const downloadFileIds: Record<AttachmentKind, string> = {
+      vendor: rec("vendorAttachment", await prisma.vendorAttachment.create({ data: { vendorId: vendor.id, ...checkFile(`vendors/${vendor.id}/`) } })).id,
+      "sales-order": rec("sOAttachment", await prisma.sOAttachment.create({ data: { salesOrderId: salesOrder.id, ...checkFile(`sales-orders/${salesOrder.id}/`) } })).id,
+      "purchase-order": rec("pOAttachment", await prisma.pOAttachment.create({ data: { purchaseOrderId: purchaseOrder.id, ...checkFile(`purchase-orders/${purchaseOrder.id}/`) } })).id,
+      "inventory-asset": rec("inventoryAssetAttachment", await prisma.inventoryAssetAttachment.create({ data: { assetId: asset.id, ...checkFile(`inventory-assets/${asset.id}/`) } })).id,
+      opportunity: rec(
+        "opportunityAttachment",
+        await prisma.opportunityAttachment.create({ data: { opportunityId: adminOpportunity.id, ...checkFile(`opportunities/${adminOpportunity.id}/`) }, select: { id: true } })
+      ).id,
+    }
+
     // ── Action buttons ──
     // The five defaults (Note, Email, Raise Quote, Won, Lost), made the way
     // the app makes them on first use, then one custom Note button that
@@ -843,6 +869,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         salesTeamId: salesTeam.id,
         teamGrantRoleId,
         actionButtonId: customButton.id,
+        downloadFileIds,
       },
       fixtures: {
         everyoneUserId,
@@ -1045,17 +1072,30 @@ export async function storedFiles(db: Db, companyIds: string[]): Promise<StoredF
   return files
 }
 
+// The download fixtures' test keys: a file name that starts with a run
+// marker. Real uploads are named with a random UUID, so no real file
+// matches, and nothing is stored behind these keys.
+export function isCheckFileKey(url: string): boolean {
+  const name = url.split("/").pop() ?? ""
+  return name.startsWith(RUN_MARKER_PREFIX)
+}
+
 // Removes the stored files with the app's own delete helper, best effort,
 // once the rows are gone. Links outside the uploads bucket (the checks'
-// dummy attachment links) never reach S3.
-export async function deleteFiles(files: StoredFile[]): Promise<{ deleted: number; failed: number; notInBucket: number }> {
-  const result = { deleted: 0, failed: 0, notInBucket: 0 }
+// dummy attachment links) and the download fixtures' test keys never
+// reach S3.
+export async function deleteFiles(files: StoredFile[]): Promise<{ deleted: number; failed: number; notInBucket: number; checkKeys: number }> {
+  const result = { deleted: 0, failed: 0, notInBucket: 0, checkKeys: 0 }
   if (files.length === 0) return result
   const { bucketBaseUrl, deleteStoredObject } = await import("@/lib/uploads")
   const base = bucketBaseUrl()
   for (const file of files) {
     if (!file.url.startsWith(base)) {
       result.notInBucket++
+      continue
+    }
+    if (isCheckFileKey(file.url)) {
+      result.checkKeys++
       continue
     }
     const outcome = await deleteStoredObject(file.url, file.prefix)
@@ -1068,7 +1108,7 @@ export async function deleteFiles(files: StoredFile[]): Promise<{ deleted: numbe
 // Deletes the companies and every row in them, all or nothing, then their
 // stored files. Callers confirm the companies first.
 export async function deleteCompanies(prisma: PrismaClient, companyIds: string[]): Promise<{ counts: TableCounts; files: Awaited<ReturnType<typeof deleteFiles>> }> {
-  if (companyIds.length === 0) return { counts: {}, files: { deleted: 0, failed: 0, notInBucket: 0 } }
+  if (companyIds.length === 0) return { counts: {}, files: { deleted: 0, failed: 0, notInBucket: 0, checkKeys: 0 } }
   const ids = { in: companyIds }
   const files = await storedFiles(prisma, companyIds)
   const counts = await prisma.$transaction(
