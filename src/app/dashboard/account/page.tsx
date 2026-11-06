@@ -1,10 +1,12 @@
+import Link from "next/link"
 import { redirect } from "next/navigation"
+import { ChevronRight, Palette } from "lucide-react"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { usesMicrosoftSso } from "@/lib/sso-account"
 import { ChangePasswordCard } from "@/components/account/ChangePasswordCard"
 import { LogOutLink } from "@/components/account/LogOutLink"
-import { PageHeader } from "@/components/ui/blocks"
+import { IconTile, PageHeader } from "@/components/ui/blocks"
 
 // My settings: every signed in user can reach their own, so this is
 // deliberately not gated by any Roles & Permissions page permission. The
@@ -52,6 +54,18 @@ export default async function AccountPage() {
           </div>
         </dl>
       </section>
+
+      <Link
+        href="/dashboard/account/appearance"
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-4 shadow-card transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <IconTile icon={Palette} size="md" />
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold text-foreground">Appearance</span>
+          <span className="block text-sm text-muted-foreground">Accent color, sidebar style, light or dark mode, and row density</span>
+        </span>
+        <ChevronRight size={18} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+      </Link>
 
       {isSso ? (
         <section className="rounded-lg border border-border bg-card shadow-card p-6 space-y-2">

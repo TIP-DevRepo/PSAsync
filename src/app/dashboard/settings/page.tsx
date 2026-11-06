@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
-import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound, MousePointerClick, History } from "lucide-react"
+import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound, MousePointerClick, History, Palette } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
+import { CompanyAppearancePanel } from "@/components/settings/CompanyAppearancePanel"
 import { IndustriesSettingsPanel } from "@/components/settings/IndustriesSettingsPanel"
 import { CategoriesSettingsPanel } from "@/components/settings/CategoriesSettingsPanel"
 import { ContactTagsSettingsPanel } from "@/components/settings/ContactTagsSettingsPanel"
@@ -27,6 +28,7 @@ import { useAccess } from "@/components/AccessProvider"
 
 type PanelKey =
   | "company"
+  | "appearance"
   | "users"
   | "roles"
   | "teams"
@@ -57,7 +59,10 @@ interface SettingsCategory {
 const settingsCategories: SettingsCategory[] = [
   {
     label: "Company Settings",
-    items: [{ key: "company", label: "Company Info & Branding", icon: Building2 }],
+    items: [
+      { key: "company", label: "Company Info & Branding", icon: Building2 },
+      { key: "appearance", label: "Appearance", icon: Palette },
+    ],
   },
   {
     label: "Users",
@@ -119,6 +124,7 @@ const settingsCategories: SettingsCategory[] = [
 // and Single Sign-On only with Integrations access.
 const PANEL_PERMISSION: Record<PanelKey, string | null> = {
   company: "settingsSections.company",
+  appearance: "settingsSections.company",
   users: "settingsSections.users",
   roles: "settingsSections.users",
   teams: "settingsSections.teams",
@@ -151,6 +157,8 @@ function renderPanel(key: PanelKey | null) {
   switch (key) {
     case "company":
       return <CompanySettingsPanel />
+    case "appearance":
+      return <CompanyAppearancePanel />
     case "users":
       return <UsersSettingsPanel />
       case "roles":
