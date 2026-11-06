@@ -4,10 +4,10 @@ import { isPrismaError } from "@/lib/opportunity-rules"
 // Record numbers for quotes, sales orders, and purchase orders look like
 // Q-2026-0001: the company's prefix, the year the record is created, and a
 // sequence padded to at least four digits. The sequence keeps counting
-// across years instead of starting over each January. Tickets add their own
-// key here later. Opportunities keep their own counter
+// across years instead of starting over each January. Tickets use the key
+// "ticket" (T-2026-0001). Opportunities keep their own counter
 // (src/lib/opportunity-number.ts).
-export type NumberSequenceKey = "quote" | "salesOrder" | "purchaseOrder"
+export type NumberSequenceKey = "quote" | "salesOrder" | "purchaseOrder" | "ticket"
 
 export function formatRecordNumber(prefix: string, year: number, sequence: number): string {
   return `${prefix}-${year}-${String(sequence).padStart(4, "0")}`
@@ -42,6 +42,11 @@ const EXISTING: Record<NumberSequenceKey, (tx: Tx, companyId: string) => Promise
   purchaseOrder: async (tx, companyId) => {
     const rows = await tx.purchaseOrder.findMany({ where: { companyId }, select: { poNumber: true } })
     return { numbers: rows.map((r) => r.poNumber), legacyCount: rows.length }
+  },
+  // Deleted tickets included: their numbers are never handed out again
+  ticket: async (tx, companyId) => {
+    const rows = await tx.ticket.findMany({ where: { companyId }, select: { number: true } })
+    return { numbers: rows.map((r) => r.number), legacyCount: rows.length }
   },
 }
 

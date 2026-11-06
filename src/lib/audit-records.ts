@@ -11,23 +11,28 @@ import {
   toAuditEntryResponse,
   type AuditRecordState,
 } from "@/lib/audit-log"
-import { auditEntryWhere, opportunityRecordStatesWhere } from "@/lib/scoped-loaders"
+import { auditEntryWhere, opportunityRecordStatesWhere, ticketRecordStatesWhere } from "@/lib/scoped-loaders"
 
 // What the audit routes share: each record's state now (deleted or not) and
 // one page of entries in the response every audit list returns. Uses the
 // shared client; the writes go through recordAudit (src/lib/audit-log.ts).
 
-// Each record's state for these ids. Opportunities are read with deleted
-// ones included (the audit log is the one place that shows them); a record
-// type with no state lookup yet counts as existing and not deleted.
+// Each record's state for these ids. Opportunities and tickets are read
+// with deleted ones included (the audit log is the one place that shows
+// them); a record type with no state lookup yet counts as existing and not
+// deleted.
 export async function loadAuditRecordStates(
   ctx: Pick<AccessContext, "companyId">,
   recordType: AuditRecordType,
   ids: string[]
 ): Promise<Map<string, AuditRecordState>> {
   const states = new Map<string, AuditRecordState>()
-  if (recordType !== "OPPORTUNITY" || ids.length === 0) return states
-  const rows = await prisma.opportunity.findMany({ where: opportunityRecordStatesWhere(ctx, ids), select: { id: true, deletedAt: true } })
+  if (ids.length === 0) return states
+  const select = { id: true, deletedAt: true } as const
+  let rows: { id: string; deletedAt: Date | null }[]
+  if (recordType === "OPPORTUNITY") rows = await prisma.opportunity.findMany({ where: opportunityRecordStatesWhere(ctx, ids), select })
+  else if (recordType === "TICKET") rows = await prisma.ticket.findMany({ where: ticketRecordStatesWhere(ctx, ids), select })
+  else return states
   const found = new Map(rows.map((r) => [r.id, r.deletedAt]))
   for (const id of ids) states.set(id, found.has(id) ? { exists: true, deleted: found.get(id) !== null } : { exists: false, deleted: true })
   return states

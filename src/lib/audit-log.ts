@@ -9,6 +9,7 @@ import {
   type AuditActionKey,
   type UndoCandidate,
 } from "@/lib/audit-values"
+import type { TimelineAction, TimelineActionKey } from "@/lib/timeline-actions"
 
 // The shared audit log (AuditLogEntry): the admin record of every change,
 // kept forever. Opportunities record theirs now; tickets, quotes, sales
@@ -39,6 +40,28 @@ export interface AuditEntryInput {
 }
 
 type AuditDb = Pick<Prisma.TransactionClient, "auditLogEntry" | "user">
+
+// The record an entry is about, as every entry builder stores it
+export type AuditRecordRef = Pick<AuditEntryInput, "recordType" | "recordId" | "recordLabel">
+
+// One field_changed entry per field the timeline actions say changed, with
+// the same before and after values (names next to ids). fields maps each
+// timeline action to the field it is about (its PATCH body key); actions
+// with no field are skipped. Shared by opportunities and tickets, so the
+// timeline and the audit log always agree.
+export function fieldChangedEntries(
+  record: AuditRecordRef,
+  actions: readonly TimelineAction[],
+  fields: Partial<Record<TimelineActionKey, string>>
+): AuditEntryInput[] {
+  const entries: AuditEntryInput[] = []
+  for (const a of actions) {
+    const field = fields[a.action]
+    if (!field || !("from" in a.data)) continue
+    entries.push({ ...record, action: "field_changed", field, before: a.data.from, after: a.data.to })
+  }
+  return entries
+}
 
 const json = (value: unknown) => (value === null || value === undefined ? Prisma.DbNull : (value as Prisma.InputJsonValue))
 

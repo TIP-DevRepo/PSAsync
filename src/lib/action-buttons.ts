@@ -2,18 +2,18 @@ import type { NextResponse } from "next/server"
 import type { Prisma, PrismaClient } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
 import { apiError, type AccessContext } from "@/lib/api-access"
-import { assertRefs, opportunityStageWhere } from "@/lib/scoped-loaders"
+import { assertRefs, opportunityStageWhere, ticketStatusWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { refusableTransaction, type Refusal } from "@/lib/refusal"
 import { readOptionalId } from "@/lib/opportunity-rules"
 import {
-  AVAILABLE_ACTION_KINDS,
+  AVAILABLE_KINDS_BY_RECORD,
   toActionButtonDefinition,
   type ActionButtonDefinition,
   type ActionButtonRecordType,
   type ActionStageModeName,
 } from "@/lib/timeline-buttons"
-import type { OpportunityStageCategory } from "@/generated/prisma"
+import type { OpportunityStageCategory, TicketStatusCategory } from "@/generated/prisma"
 
 // Server side helpers for the admin defined action buttons (the
 // ActionButton model, shared by opportunities and tickets): the starting
@@ -34,6 +34,8 @@ export const actionButtonSelect = {
   stageMode: true,
   fixedStageId: true,
   fixedStage: { select: { id: true, name: true, category: true } },
+  fixedTicketStatusId: true,
+  fixedTicketStatus: { select: { id: true, name: true, category: true } },
   noteMode: true,
   isHidden: true,
   sortOrder: true,
@@ -172,27 +174,30 @@ export const INVALID_ACTION_BUTTON_MESSAGE = "Invalid action button"
 
 // The ?for= value of GET /api/action-buttons, or null when it isn't one
 export function readRecordType(value: string | null): ActionButtonRecordType | null {
-  return value === "opportunity" ? value : null
+  return value === "opportunity" || value === "ticket" ? value : null
 }
 
 // Where a button must be set to show for a record type
 const SHOWS_ON: Record<ActionButtonRecordType, Prisma.ActionButtonWhereInput> = {
   opportunity: { forOpportunities: true },
+  ticket: { forTickets: true },
 }
 
 // The buttons a record of this type shows, in order: not hidden, set to
-// show on the record type, and of a kind whose feature exists
+// show on the record type, and of a kind whose feature exists for it (on a
+// ticket, a FIXED button also needs its ticket status)
 export function visibleButtonsWhere(companyId: string, recordType: ActionButtonRecordType): Prisma.ActionButtonWhereInput {
-  return { companyId, isHidden: false, kind: { in: [...AVAILABLE_ACTION_KINDS] }, ...SHOWS_ON[recordType] }
+  const fixedTarget: Prisma.ActionButtonWhereInput = recordType === "ticket" ? { NOT: { stageMode: "FIXED", fixedTicketStatusId: null } } : {}
+  return { companyId, isHidden: false, kind: { in: [...AVAILABLE_KINDS_BY_RECORD[recordType]] }, ...SHOWS_ON[recordType], ...fixedTarget }
 }
 
 export async function loadRecordButtons(companyId: string, recordType: ActionButtonRecordType): Promise<ActionButtonDefinition[]> {
   const rows = await prisma.actionButton.findMany({
     where: visibleButtonsWhere(companyId, recordType),
     orderBy: ACTION_BUTTON_ORDER,
-    select: { id: true, label: true, icon: true, color: true, kind: true, stageMode: true, fixedStageId: true, noteMode: true },
+    select: { id: true, label: true, icon: true, color: true, kind: true, stageMode: true, fixedStageId: true, fixedTicketStatusId: true, noteMode: true },
   })
-  return rows.map(toActionButtonDefinition).filter((b): b is ActionButtonDefinition => b !== null)
+  return rows.map((row) => toActionButtonDefinition(row, recordType)).filter((b): b is ActionButtonDefinition => b !== null)
 }
 
 export function stageUsedByButtonMessage(label: string): string {
@@ -203,19 +208,26 @@ export function stageUsedByButtonMessage(label: string): string {
 
 export const STAGE_NOT_CHANGED_BY_BUTTON_MESSAGE = "This action doesn't change the stage"
 export const FIXED_STAGE_MISMATCH_MESSAGE = "This action always moves to its own stage"
+export const STATUS_NOT_CHANGED_BY_BUTTON_MESSAGE = "This action doesn't change the status"
+export const FIXED_STATUS_MISMATCH_MESSAGE = "This action always moves to its own status"
 
 // The stage a note or email moves to under a button's stage rule, from
 // the stage the request asked for (null for none):
 //   NONE: no stage; asking for one is refused
 //   CHOOSE: whatever the request asked for, or nothing
 //   FIXED: the button's stage; asking for a different one is refused
+// On a ticket the same rule applies to its status (target "status", with
+// the button's fixedTicketStatusId as fixedStageId).
 export function buttonStageRule(
   button: { stageMode: ActionStageModeName; fixedStageId: string | null },
-  requested: string | null
+  requested: string | null,
+  target: "stage" | "status" = "stage"
 ): { stageId: string | null; error?: undefined } | { error: string; stageId?: undefined } {
-  if (button.stageMode === "NONE") return requested ? { error: STAGE_NOT_CHANGED_BY_BUTTON_MESSAGE } : { stageId: null }
+  const notChanged = target === "stage" ? STAGE_NOT_CHANGED_BY_BUTTON_MESSAGE : STATUS_NOT_CHANGED_BY_BUTTON_MESSAGE
+  const mismatch = target === "stage" ? FIXED_STAGE_MISMATCH_MESSAGE : FIXED_STATUS_MISMATCH_MESSAGE
+  if (button.stageMode === "NONE") return requested ? { error: notChanged } : { stageId: null }
   if (button.stageMode === "CHOOSE") return { stageId: requested }
-  if (requested && requested !== button.fixedStageId) return { error: FIXED_STAGE_MISMATCH_MESSAGE }
+  if (requested && requested !== button.fixedStageId) return { error: mismatch }
   return { stageId: button.fixedStageId }
 }
 
@@ -270,4 +282,57 @@ export async function readActionRequest(
     : null
   if (stageId && !stage) return { response: apiError(400, "Invalid stage", "INVALID_REFERENCE") }
   return { button, stage, noteRequired }
+}
+
+export interface TicketStatusRef {
+  id: string
+  name: string
+  category: TicketStatusCategory
+}
+
+export type TicketActionRequest =
+  | { response: NextResponse; button?: undefined; status?: undefined; noteRequired?: undefined }
+  | { response?: undefined; button: { id: string; label: string } | null; status: TicketStatusRef | null; noteRequired: boolean }
+
+// The same for a note or email on a ticket, with its status in place of a
+// stage: statusId and actionButtonId go through assertRefs, a named button
+// must be one a ticket shows (not hidden, set for tickets, NOTE or EMAIL,
+// a FIXED one with its ticket status) of the expected kind, and its rule
+// applies to the status (buttonStageRule with fixedTicketStatusId).
+// Without a button any company status is allowed and the text is required.
+export async function readTicketActionRequest(
+  ctx: Pick<AccessContext, "companyId" | "userId" | "can">,
+  body: Record<string, unknown>,
+  kind: "NOTE" | "EMAIL"
+): Promise<TicketActionRequest> {
+  const buttonRef = readOptionalId(body.actionButtonId)
+  if (buttonRef.error !== undefined) return { response: apiError(400, INVALID_ACTION_BUTTON_MESSAGE, "INVALID_REFERENCE") }
+  const statusRef = readOptionalId(body.statusId)
+  if (statusRef.error !== undefined) return { response: apiError(400, "Invalid status", "INVALID_REFERENCE") }
+
+  if (buttonRef.value) await ensureActionButtonDefaults(ctx.companyId)
+  const invalid = await assertRefs(ctx, { ticketStatusId: statusRef.value, actionButtonId: buttonRef.value })
+  if (invalid) return { response: invalid }
+
+  let button: { id: string; label: string } | null = null
+  let statusId = statusRef.value
+  let noteRequired = true
+  if (buttonRef.value) {
+    const row = await prisma.actionButton.findFirst({
+      where: { id: buttonRef.value, ...visibleButtonsWhere(ctx.companyId, "ticket") },
+      select: { id: true, label: true, kind: true, stageMode: true, fixedTicketStatusId: true, noteMode: true },
+    })
+    if (!row || row.kind !== kind) return { response: apiError(400, INVALID_ACTION_BUTTON_MESSAGE, "INVALID_REFERENCE") }
+    const rule = buttonStageRule({ stageMode: row.stageMode, fixedStageId: row.fixedTicketStatusId }, statusRef.value, "status")
+    if (rule.error !== undefined) return { response: apiError(400, rule.error) }
+    button = { id: row.id, label: row.label }
+    statusId = rule.stageId
+    noteRequired = row.noteMode === "REQUIRED"
+  }
+
+  const status = statusId
+    ? await prisma.ticketStatus.findFirst({ where: ticketStatusWhere(ctx, statusId), select: { id: true, name: true, category: true } })
+    : null
+  if (statusId && !status) return { response: apiError(400, "Invalid status", "INVALID_REFERENCE") }
+  return { button, status, noteRequired }
 }

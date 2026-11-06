@@ -27,6 +27,8 @@ export const ACTION_BUTTON_MESSAGES = {
   fixedStageRequired: "Choose the stage this button moves to",
   fixedStageOnlyWhenFixed: "A stage can only be set when the button always moves to one stage",
   hidden: "Hidden must be true or false",
+  fixedTicketStatus: "Invalid ticket status",
+  fixedTicketStatusOnlyWhenFixed: "A ticket status can only be set when the button always moves to one status",
   showsOnFlag: "Where the button shows must be true or false",
 } as const
 
@@ -40,6 +42,11 @@ export interface ActionButtonFields {
   kind: ActionButtonKindName
   stageMode: ActionStageModeName
   fixedStageId: string | null
+  // The status a FIXED button moves a ticket to. A FIXED button that shows
+  // on tickets without one is left off tickets until one is chosen. Left
+  // out (undefined) when the input didn't hold it, so a save that doesn't
+  // send it (the Settings dialog) keeps the stored one.
+  fixedTicketStatusId?: string | null
   noteMode: ActionNoteModeName
   isHidden: boolean
 }
@@ -75,6 +82,10 @@ export function checkActionButton(input: Record<string, unknown>): ButtonCheck {
     return { error: ACTION_BUTTON_MESSAGES.fixedStageRequired }
   }
   const fixedStageId = typeof rawStage === "string" && rawStage ? rawStage : null
+  const rawStatus = input.fixedTicketStatusId
+  if (rawStatus !== null && rawStatus !== undefined && rawStatus !== "" && typeof rawStatus !== "string") {
+    return { error: ACTION_BUTTON_MESSAGES.fixedTicketStatus }
+  }
 
   if (!STAGE_CHANGING_KINDS.includes(kind) && (stageMode !== "NONE" || fixedStageId)) {
     return { error: ACTION_BUTTON_MESSAGES.stageKinds }
@@ -92,6 +103,15 @@ export function checkActionButton(input: Record<string, unknown>): ButtonCheck {
       kind,
       stageMode,
       fixedStageId,
+      // Only a FIXED button keeps a ticket status; any other loses it, so
+      // turning a button away from FIXED (the Settings dialog doesn't send
+      // this field) never leaves one behind. The routes refuse a request
+      // that names one for a button that isn't FIXED.
+      fixedTicketStatusId: !("fixedTicketStatusId" in input)
+        ? undefined
+        : stageMode === "FIXED" && typeof rawStatus === "string" && rawStatus
+          ? rawStatus
+          : null,
       noteMode: input.noteMode as ActionNoteModeName,
       isHidden: input.isHidden,
     },
@@ -108,6 +128,7 @@ export const ACTION_BUTTON_FIELDS = [
   "kind",
   "stageMode",
   "fixedStageId",
+  "fixedTicketStatusId",
   "noteMode",
   "isHidden",
 ] as const satisfies readonly (keyof ActionButtonFields)[]

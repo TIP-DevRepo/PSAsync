@@ -53,14 +53,21 @@ export function isAvailableActionKind(kind: string): boolean {
   return (AVAILABLE_ACTION_KINDS as readonly string[]).includes(kind)
 }
 
+// The kinds that show on each record type: tickets have Note and Email (Raise
+// Quote from a ticket isn't built yet)
+export const AVAILABLE_KINDS_BY_RECORD: Record<ActionButtonRecordType, readonly ActionButtonKindName[]> = {
+  opportunity: AVAILABLE_ACTION_KINDS,
+  ticket: ["NOTE", "EMAIL"],
+}
+
 // Only these kinds can change the record's stage
 export const STAGE_CHANGING_KINDS: readonly ActionButtonKindName[] = ["NOTE", "EMAIL"]
 
 export type ActionStageModeName = "NONE" | "CHOOSE" | "FIXED"
 export type ActionNoteModeName = "OPTIONAL" | "REQUIRED"
 
-// The record types a button can show on. Tickets come later.
-export type ActionButtonRecordType = "opportunity"
+// The record types a button can show on
+export type ActionButtonRecordType = "opportunity" | "ticket"
 
 export interface ActionButtonDefinition {
   id: string
@@ -70,29 +77,38 @@ export interface ActionButtonDefinition {
   color: string
   // What the button opens: the note or email composer, with its stage rule
   // (none, the user chooses, or one fixed stage, by id or by the first stage
-  // of a category in the company's order) and whether text is required, or
+  // of a category in the company's order; on a ticket the stage is its
+  // status) and whether text is required, or
   // (quote) the New Quote form filled in from the record, which has no
   // stage or text of its own
   opens: {
     kind: "note" | "email" | "quote"
     stageMode: ActionStageModeName
-    stage?: { id?: string; category?: "OPEN" | "WON" | "LOST" }
+    stage?: { id?: string; category?: string }
     noteRequired: boolean
   }
 }
 
 // A stored button (the fields the API reads) as the bar's definition, or
-// null for a kind the bar can't open yet
-export function toActionButtonDefinition(row: {
-  id: string
-  label: string
-  icon: string
-  color: string
-  kind: string
-  stageMode: string
-  fixedStageId: string | null
-  noteMode: string
-}): ActionButtonDefinition | null {
+// null for a kind the bar can't open yet. On a ticket a FIXED button moves
+// to its ticket status, and one without a ticket status is left off.
+export function toActionButtonDefinition(
+  row: {
+    id: string
+    label: string
+    icon: string
+    color: string
+    kind: string
+    stageMode: string
+    fixedStageId: string | null
+    fixedTicketStatusId?: string | null
+    noteMode: string
+  },
+  recordType: ActionButtonRecordType = "opportunity"
+): ActionButtonDefinition | null {
+  if (!AVAILABLE_KINDS_BY_RECORD[recordType].includes(row.kind as ActionButtonKindName)) return null
+  const fixedId = recordType === "ticket" ? (row.fixedTicketStatusId ?? null) : row.fixedStageId
+  if (recordType === "ticket" && row.stageMode === "FIXED" && !fixedId) return null
   if (row.kind === "RAISE_QUOTE") {
     return {
       id: row.id,
@@ -112,7 +128,7 @@ export function toActionButtonDefinition(row: {
     opens: {
       kind: row.kind === "EMAIL" ? "email" : "note",
       stageMode,
-      ...(stageMode === "FIXED" && row.fixedStageId ? { stage: { id: row.fixedStageId } } : {}),
+      ...(stageMode === "FIXED" && fixedId ? { stage: { id: fixedId } } : {}),
       noteRequired: row.noteMode !== "OPTIONAL",
     },
   }

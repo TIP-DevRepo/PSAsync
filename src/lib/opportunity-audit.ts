@@ -1,4 +1,4 @@
-import type { AuditEntryInput } from "@/lib/audit-log"
+import { fieldChangedEntries, type AuditEntryInput } from "@/lib/audit-log"
 import { plainTextFromHtml } from "@/lib/audit-values"
 import type { OpportunitySnapshot } from "@/lib/opportunity-timeline"
 import type { TimelineAction, TimelineActionKey, TimelineRef } from "@/lib/timeline-actions"
@@ -56,13 +56,7 @@ export const TIMELINE_ACTION_FIELDS: Partial<Record<TimelineActionKey, string>> 
 // One field_changed entry per field the timeline actions say changed, with
 // the same before and after values (names next to ids)
 export function opportunityFieldAudits(o: OpportunityAuditRecord, actions: TimelineAction[]): AuditEntryInput[] {
-  const entries: AuditEntryInput[] = []
-  for (const a of actions) {
-    const field = TIMELINE_ACTION_FIELDS[a.action]
-    if (!field || !("from" in a.data)) continue
-    entries.push(entry(o, { action: "field_changed", field, before: a.data.from, after: a.data.to }))
-  }
-  return entries
+  return fieldChangedEntries({ recordType: "OPPORTUNITY", recordId: o.id, recordLabel: opportunityAuditLabel(o) }, actions, TIMELINE_ACTION_FIELDS)
 }
 
 // A stage moved by a note, an action button, or an email (recorded on the

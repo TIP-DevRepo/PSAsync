@@ -14,6 +14,7 @@ import {
   auditActionLabel,
   auditFieldLabel,
   auditRecordHref,
+  auditRestoreTarget,
   auditValueText,
   isAuditRecordType,
   type AuditRecordTypeKey,
@@ -296,7 +297,11 @@ export function AuditLogTable({
       description: "It shows in lists again, with its attachments and timeline.",
       confirmLabel: "Restore",
     })
-    if (ok) post(`/api/opportunities/${entry.recordId}/restore`, entry.id, "Couldn't restore this opportunity", "Opportunity restored")
+    const target = auditRestoreTarget(entry.recordType, entry.recordId)
+    if (ok && target) {
+      const noun = target.noun
+      post(target.path, entry.id, `Couldn't restore this ${noun}`, `${noun.charAt(0).toUpperCase()}${noun.slice(1)} restored`)
+    }
   }
 
   const cell = "py-3 pr-3 align-top"
