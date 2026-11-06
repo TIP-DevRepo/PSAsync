@@ -13,6 +13,7 @@ export const teamSelect = {
   description: true,
   isDefault: true,
   sortOrder: true,
+  roundRobinEnabled: true,
   members: {
     select: { user: { select: { id: true, name: true, active: true } } },
     orderBy: { user: { name: "asc" } },

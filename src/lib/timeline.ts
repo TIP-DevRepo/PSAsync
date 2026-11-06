@@ -1,6 +1,7 @@
 import type { Prisma } from "@/generated/prisma"
 import { termsForStorage, termsToDisplayHtml } from "@/lib/sanitize-terms"
 import { isBlankHtml, type TimelineAction } from "@/lib/timeline-actions"
+import { UserError } from "@/lib/user-error"
 
 // Server side helpers every timeline uses (opportunities now, tickets
 // later): recording ACTION entries inside the caller's transaction, reading
@@ -18,8 +19,8 @@ export const ONLY_NOTES_EDITABLE_MESSAGE = "Only notes can be edited or deleted"
 export const OWN_NOTES_ONLY_MESSAGE = "You can only edit or delete your own notes"
 export const INVALID_CURSOR_MESSAGE = "Invalid cursor"
 
-// The record an entry belongs to. Tickets add { ticketId } later.
-export type TimelineSubject = { opportunityId: string }
+// The record an entry belongs to
+export type TimelineSubject = { opportunityId: string; ticketId?: undefined } | { ticketId: string; opportunityId?: undefined }
 
 type TimelineDb = Pick<Prisma.TransactionClient, "timelineEntry">
 
@@ -67,6 +68,50 @@ export function readOptionalNoteBody(value: unknown): { value: string | null; er
   const read = readNoteBody(value)
   if (read.error === NOTE_EMPTY_MESSAGE) return { value: null }
   return read
+}
+
+// ─── Initial notes ──────────────────────────────────────────────────────────
+
+// Every new record (opportunities, tickets) starts with a note: a person's
+// own initial note, or a note the system writes for an automatic one
+export const INITIAL_NOTE_REQUIRED_MESSAGE = "An initial note is required"
+
+// The first note on the timeline. html is sanitized here; one that has no
+// text after sanitizing is refused.
+export type InitialNote = { by: "person"; userId: string; html: string } | { by: "system"; html: string }
+
+// The sanitized note body, or a UserError (shown to the user as a 400) when
+// it is empty or too long
+export function initialNoteHtml(note: InitialNote): string {
+  const read = readNoteBody(note.html)
+  if (read.error !== undefined) throw new UserError(read.error === NOTE_EMPTY_MESSAGE ? INITIAL_NOTE_REQUIRED_MESSAGE : read.error)
+  return read.value
+}
+
+// The author of an initial note: the person, or null for the system
+export const initialNoteAuthorId = (note: InitialNote) => (note.by === "person" ? note.userId : null)
+
+// Writes the initial note a moment after the record's created entries (so
+// it reads first, newest first), inside the record's create transaction
+export async function writeInitialNote(
+  db: TimelineDb,
+  opts: { companyId: string; subject: TimelineSubject; authorId: string | null; html: string; createdAt: Date }
+): Promise<void> {
+  await db.timelineEntry.create({
+    data: { companyId: opts.companyId, ...opts.subject, kind: "NOTE", authorId: opts.authorId, body: opts.html, createdAt: new Date(opts.createdAt.getTime() + 1) },
+    select: { id: true },
+  })
+}
+
+// ─── Changing notes ─────────────────────────────────────────────────────────
+
+// Why a user may not edit or delete an entry, or null when they may: only a
+// NOTE, and only its own author (Global Admin included). ACTION and EMAIL
+// entries are never edited or deleted.
+export function noteChangeRefusal(entry: { kind: string; authorId: string | null }, userId: string): string | null {
+  if (entry.kind !== "NOTE") return ONLY_NOTES_EDITABLE_MESSAGE
+  if (entry.authorId !== userId) return OWN_NOTES_ONLY_MESSAGE
+  return null
 }
 
 // What every timeline route returns for an entry. Authors are names only.

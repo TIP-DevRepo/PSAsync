@@ -199,6 +199,41 @@ export function testNames(letter: TestLetter, marker: string) {
     // (Qualified, which no sample opportunity is in) and needs a note.
     // Labels are at most 40 characters.
     customActionButton: `${marker} Qualify ${letter}`,
+    // Tickets: the defaults (types, priorities, statuses, settings, and the
+    // Helpdesk, Alerts, and Lv2 Escalation queues) are made by
+    // ensureTicketDefaults. Helpdesk holds Test Ticket Basic, Test Ticket
+    // Viewer, and Test Ticket Dispatcher. The Round Robin team (round robin
+    // on) holds Test Ticket Basic, Test Ticket Viewer, and Test Ticket
+    // Inactive (deactivated), whose name sorts between them, so a rotation
+    // must skip it. Sample tickets, all on the sample client and contact:
+    // one assigned to Test Ticket Basic, one to Test Ticket Viewer, and one
+    // unassigned in Helpdesk, and one unassigned in Alerts (nobody's team).
+    ticketBasicName: `${marker} Test Ticket Basic ${letter}`,
+    ticketBasicEmail: email("ticket-basic"),
+    ticketBasicRole: `${marker} Ticket Basic ${letter}`,
+    ticketViewerName: `${marker} Test Ticket Viewer ${letter}`,
+    ticketViewerEmail: email("ticket-viewer"),
+    ticketViewerRole: `${marker} Ticket Viewer ${letter}`,
+    ticketDispatcherName: `${marker} Test Ticket Dispatcher ${letter}`,
+    ticketDispatcherEmail: email("ticket-dispatcher"),
+    ticketDispatcherRole: `${marker} Ticket Dispatcher ${letter}`,
+    ticketSettingsName: `${marker} Test Ticket Settings ${letter}`,
+    ticketSettingsEmail: email("ticket-settings"),
+    ticketSettingsRole: `${marker} Ticket Settings ${letter}`,
+    ticketInactiveName: `${marker} Test Ticket Inactive ${letter}`,
+    ticketInactiveEmail: email("ticket-inactive"),
+    roundRobinTeam: `${marker} Round Robin Team ${letter}`,
+    basicTicket: `${marker} Sample Basic Ticket ${letter}`,
+    viewerTicket: `${marker} Sample Viewer Ticket ${letter}`,
+    unassignedTicket: `${marker} Sample Unassigned Ticket ${letter}`,
+    alertsTicket: `${marker} Sample Alerts Ticket ${letter}`,
+    ticketAttachmentPrefix: `${marker}-sample-ticket-${lower}`,
+    // Each sample ticket's timeline holds a created action, then a note by
+    // the admin and a note by Test Ticket Basic starting with this text
+    ticketNotePrefix: `${marker} Sample ticket note ${letter}`,
+    // A custom ticket only Note button that always moves to Resolved, with
+    // an optional note
+    ticketActionButton: `${marker} Resolve ${letter}`,
   }
 }
 
@@ -271,6 +306,15 @@ export const TEAM_HIGH_RANK = 50
 // it holds, so it passes the grant rule. Team Grant (rank 1, the Catalog
 // page, which Test Team Manager doesn't hold) fails it on permissions.
 export const TEAM_LITE_PERMISSIONS = { pages: { settings: true } }
+
+// Tickets: the basic level (own tickets and unassigned ones in its teams),
+// the team level (every ticket in its teams), a dispatcher who may assign
+// anyone in the team, move tickets to any team, and delete them, and a
+// Ticket Settings user (plus the Settings page) with no ticket page
+export const TICKET_BASIC_PERMISSIONS = { pages: { tickets: true }, tickets: { create: true, edit: true } }
+export const TICKET_VIEWER_PERMISSIONS = { pages: { tickets: true }, tickets: { create: true, edit: true, viewTeam: true } }
+export const TICKET_DISPATCHER_PERMISSIONS = { pages: { tickets: true }, tickets: { create: true, edit: true, assign: true, delete: true } }
+export const TICKET_SETTINGS_PERMISSIONS = { pages: { settings: true }, settingsSections: { tickets: true } }
 export const TEAM_LITE_RANK = 1
 
 const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
@@ -337,6 +381,17 @@ export interface SampleIds {
   downloadFileIds: Record<AttachmentKind, string>
   // The custom action button (see testNames)
   actionButtonId: string
+  // Tickets: the unassigned Helpdesk sample ticket, its attachment, the
+  // admin's note on it, and its field_changed (status) audit entry; the
+  // first type, priority, and status; and the Helpdesk team
+  ticketId: string
+  ticketAttachmentId: string
+  ticketNoteId: string
+  ticketAuditEntryId: string
+  ticketTypeId: string
+  ticketPriorityId: string
+  ticketStatusId: string
+  helpdeskTeamId: string
 }
 
 export interface PermissionFixtureIds {
@@ -387,7 +442,8 @@ export interface PermissionFixtureIds {
   unassignedActionId: string
   unassignedAdminNoteId: string
   unassignedRepNoteId: string
-  // Teams (see testNames): every team id in the company's order, Support,
+  // Teams (see testNames): every team id in the company's order (the
+  // ticket queues and the Round Robin team included), Support,
   // Team High, the team test users, and the Sales opportunities
   teamIds: string[]
   supportTeamId: string
@@ -408,4 +464,29 @@ export interface PermissionFixtureIds {
   wonButtonId: string
   lostButtonId: string
   customButtonStageId: string
+  // Tickets (see testNames)
+  ticketBasicUserId: string
+  ticketViewerUserId: string
+  ticketDispatcherUserId: string
+  ticketSettingsUserId: string
+  ticketInactiveUserId: string
+  basicTicketId: string
+  viewerTicketId: string
+  alertsTicketId: string
+  // Test Ticket Basic's note on the unassigned Helpdesk ticket
+  ticketBasicNoteId: string
+  alertsTeamId: string
+  lv2TeamId: string
+  roundRobinTeamId: string
+  // Every id in the company's order, for a reorder that changes nothing
+  ticketTypeIds: string[]
+  ticketPriorityIds: string[]
+  ticketStatusIds: string[]
+  // The first status of each category
+  ticketOpenStatusId: string
+  ticketWaitingStatusId: string
+  ticketResolvedStatusId: string
+  ticketClosedStatusId: string
+  // The custom ticket button (see testNames)
+  ticketButtonId: string
 }

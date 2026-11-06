@@ -101,6 +101,9 @@ export const AUDIT_FIELD_LABELS: Record<string, string> = {
   expectedValue: "Expected value",
   expectedCloseDate: "Expected close date",
   closedAt: "Closed date",
+  assigneeId: "Assignee",
+  priorityId: "Priority",
+  statusId: "Status",
 }
 
 export function auditFieldLabel(field: string | null): string {
@@ -123,7 +126,28 @@ export const OPPORTUNITY_UNDOABLE_FIELDS = [
   "expectedCloseDate",
 ] as const
 
-const REF_FIELDS = new Set(["clientId", "contactId", "clientLocationId", "teamId", "ownerId", "stageId", "typeId"])
+// The ticket fields a field_changed entry can be undone for: every field
+// the ticket PATCH takes
+export const TICKET_UNDOABLE_FIELDS = [
+  "title",
+  "clientId",
+  "contactId",
+  "clientLocationId",
+  "teamId",
+  "assigneeId",
+  "typeId",
+  "priorityId",
+  "statusId",
+] as const
+
+// The fields a field_changed entry can be undone for, by record type: every
+// field that record's PATCH takes (the update rules shared with the undo)
+export const UNDOABLE_FIELDS: Partial<Record<AuditRecordTypeKey, readonly string[]>> = {
+  OPPORTUNITY: OPPORTUNITY_UNDOABLE_FIELDS,
+  TICKET: TICKET_UNDOABLE_FIELDS,
+}
+
+const REF_FIELDS = new Set(["clientId", "contactId", "clientLocationId", "teamId", "ownerId", "stageId", "typeId", "assigneeId", "priorityId", "statusId"])
 
 // Fields one change sets together because the update rules tie them: a
 // contact must belong to the client (and a client change resets the
@@ -135,8 +159,18 @@ export const LINKED_UNDO_FIELDS: readonly (readonly string[])[] = [
   ["teamId", "ownerId"],
 ]
 
-export function linkedUndoFields(field: string): string[] {
-  return LINKED_UNDO_FIELDS.find((group) => group.includes(field))?.filter((f) => f !== field) ?? []
+const LINKED_UNDO_FIELDS_BY_TYPE: Partial<Record<AuditRecordTypeKey, readonly (readonly string[])[]>> = {
+  OPPORTUNITY: LINKED_UNDO_FIELDS,
+  // A contact and location belong to the client, an assignee is in the team
+  TICKET: [
+    ["clientId", "contactId", "clientLocationId"],
+    ["teamId", "assigneeId"],
+  ],
+}
+
+export function linkedUndoFields(field: string, recordType: string = "OPPORTUNITY"): string[] {
+  const groups = LINKED_UNDO_FIELDS_BY_TYPE[recordType as AuditRecordTypeKey] ?? []
+  return groups.find((group) => group.includes(field))?.filter((f) => f !== field) ?? []
 }
 
 // ─── Undo ───────────────────────────────────────────────────────────────────
@@ -163,15 +197,24 @@ export const UNDO_MESSAGES = {
   changedSince: "This field has changed since. Only its latest change can be undone.",
 } as const
 
+// The deleted record message for each record type that can be undone
+const RECORD_DELETED_MESSAGES: Partial<Record<AuditRecordTypeKey, string>> = {
+  OPPORTUNITY: UNDO_MESSAGES.recordDeleted,
+  TICKET: "This ticket is deleted. Restore it first.",
+}
+
+export function recordDeletedMessage(recordType: string): string {
+  return RECORD_DELETED_MESSAGES[recordType as AuditRecordTypeKey] ?? UNDO_MESSAGES.recordDeleted
+}
+
 // Why an entry can't be undone, or null when it can. The undo route and the
 // list's canUndo both use this.
 export function undoBlockReason(entry: UndoCandidate, ctx: UndoContext): string | null {
   if (entry.action !== "field_changed") return UNDO_MESSAGES.notFieldChange
-  if (entry.recordType !== "OPPORTUNITY" || !entry.field || !(OPPORTUNITY_UNDOABLE_FIELDS as readonly string[]).includes(entry.field)) {
-    return UNDO_MESSAGES.notUndoable
-  }
+  const fields = UNDOABLE_FIELDS[entry.recordType as AuditRecordTypeKey]
+  if (!fields || !entry.field || !fields.includes(entry.field)) return UNDO_MESSAGES.notUndoable
   if (entry.undoneAt) return UNDO_MESSAGES.alreadyUndone
-  if (ctx.recordDeleted) return UNDO_MESSAGES.recordDeleted
+  if (ctx.recordDeleted) return recordDeletedMessage(entry.recordType)
   if (ctx.changedSince) return UNDO_MESSAGES.changedSince
   return null
 }
@@ -195,6 +238,7 @@ export function undoBodyValue(field: string, value: unknown): string | null {
 // value rather than the request
 export function undoRefusalMessage(error: string, code?: string): string {
   if (code === "OWNER_NOT_IN_TEAM") return "This owner is no longer in the team"
+  if (code === "ASSIGNEE_NOT_IN_TEAM") return "This assignee is no longer in the team"
   const byError: Record<string, string> = {
     "Invalid client": "This client no longer exists",
     "Invalid contact": "This contact no longer belongs to the client",
@@ -203,6 +247,9 @@ export function undoRefusalMessage(error: string, code?: string): string {
     "Invalid team": "This team no longer exists",
     "Invalid stage": "This stage no longer exists",
     "Invalid opportunity type": "This type no longer exists",
+    "Invalid ticket type": "This type no longer exists",
+    "Invalid priority": "This priority no longer exists",
+    "Invalid status": "This status no longer exists",
   }
   return byError[error] ?? error
 }
@@ -226,7 +273,7 @@ function money(value: string): string {
 
 // "Nothing" for a field: Unassigned for the owner, None for the type
 function noneText(field: string | null): string {
-  if (field === "ownerId") return "Unassigned"
+  if (field === "ownerId" || field === "assigneeId") return "Unassigned"
   if (field === "typeId") return "None"
   if (field === "closedAt") return "Not closed"
   return "-"
@@ -298,7 +345,16 @@ export function fieldKeysMatching(text: string): string[] {
 }
 
 // Where a record's page is, for the Record column's link (opened in a new
-// tab), or null for record types that have no page yet
+// tab), or null for record types that have no page yet (tickets get theirs
+// with the ticket screens)
 export function auditRecordHref(recordType: string, recordId: string): string | null {
   return recordType === "OPPORTUNITY" ? `/dashboard/opportunities/${recordId}` : null
+}
+
+// The restore route for a deleted record, with the words its messages use,
+// or null for a record type that can't be restored
+export function auditRestoreTarget(recordType: string, recordId: string): { path: string; noun: string } | null {
+  if (recordType === "OPPORTUNITY") return { path: `/api/opportunities/${encodeURIComponent(recordId)}/restore`, noun: "opportunity" }
+  if (recordType === "TICKET") return { path: `/api/tickets/${encodeURIComponent(recordId)}/restore`, noun: "ticket" }
+  return null
 }

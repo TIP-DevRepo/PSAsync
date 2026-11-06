@@ -366,11 +366,40 @@ export const DELETED_OPPORTUNITY = { deletedAt: { not: null } } satisfies Prisma
 // Team membership is matched in the same query (the team's members), so
 // joining or leaving a team applies on the next request.
 export function opportunityVisibilityWhere(ctx: OpportunityViewer): Prisma.OpportunityWhereInput {
-  if (!ctx.can("pages.opportunities")) return NO_OPPORTUNITIES
-  if (ctx.can("opportunities.viewAll")) return {}
-  const inMyTeams: Prisma.OpportunityWhereInput = { team: { members: { some: { userId: ctx.userId } } } }
-  if (ctx.can("opportunities.viewTeam")) return { OR: [{ ownerId: ctx.userId }, inMyTeams] }
-  return { OR: [{ ownerId: ctx.userId }, { ownerId: null, ...inMyTeams }] }
+  return teamRecordVisibility(ctx, OPPORTUNITY_VISIBILITY, NO_OPPORTUNITIES) as Prisma.OpportunityWhereInput
+}
+
+// The three visibility levels opportunities and tickets share, for a
+// record with a team (its queue for tickets) and one person it belongs to
+// (an opportunity's owner, a ticket's assignee):
+//   no page permission: nothing (none)
+//   viewAll (Global Admin too): everything
+//   viewTeam: their own anywhere, plus every one in teams they belong to
+//   basic: their own, plus unassigned ones in teams they belong to
+// Team membership is matched in the same query (the team's members), so
+// joining or leaving a team applies on the next request.
+export interface TeamRecordVisibility {
+  page: string
+  viewAll: string
+  viewTeam: string
+  // The column holding the person the record belongs to
+  personField: "ownerId" | "assigneeId"
+}
+
+const OPPORTUNITY_VISIBILITY: TeamRecordVisibility = {
+  page: "pages.opportunities",
+  viewAll: "opportunities.viewAll",
+  viewTeam: "opportunities.viewTeam",
+  personField: "ownerId",
+}
+
+export function teamRecordVisibility<N>(ctx: OpportunityViewer, rule: TeamRecordVisibility, none: N): N | Record<string, unknown> {
+  if (!ctx.can(rule.page)) return none
+  if (ctx.can(rule.viewAll)) return {}
+  const inMyTeams = { team: { members: { some: { userId: ctx.userId } } } }
+  const mine = { [rule.personField]: ctx.userId }
+  if (ctx.can(rule.viewTeam)) return { OR: [mine, inMyTeams] }
+  return { OR: [mine, { [rule.personField]: null, ...inMyTeams }] }
 }
 
 // Who a user may make an opportunity's owner, given whether they are in
@@ -477,7 +506,7 @@ export interface DownloadableAttachment {
 // One attachment by its own id, with its parent record's view check: the
 // vendor or inventory asset in the caller's company (the route holds the
 // page permission), the sales order and purchase order view checks (VSO,
-// VPO), and the opportunity view check (VOP, never a deleted one). A miss,
+// VPO), and the opportunity and ticket view checks (never a deleted one). A miss,
 // another company's, or one the user may not view is null, the parent
 // GET's 404.
 export async function loadDownloadableAttachment(
@@ -525,8 +554,144 @@ export async function loadDownloadableAttachment(
       })
       return a && { fileName: a.fileName, fileUrl: a.fileUrl, prefix: `opportunities/${a.opportunityId}/` }
     }
+    case "ticket": {
+      if (!ctx.can("pages.tickets")) return null
+      const a = await prisma.ticketAttachment.findFirst({
+        where: { id: attachmentId, ticket: ticketListWhere(ctx) },
+        select: { ...select, ticketId: true },
+      })
+      return a && { fileName: a.fileName, fileUrl: a.fileUrl, prefix: `tickets/${a.ticketId}/` }
+    }
   }
 }
+
+// Tickets
+
+type TicketViewer = Pick<AccessContext, "companyId" | "userId" | "can">
+
+// Matches no row, for callers who may not open any ticket
+const NO_TICKETS = { id: { in: [] as string[] } } satisfies Prisma.TicketWhereInput
+
+// Deleting a ticket only hides it (deletedAt), so admins can restore it from
+// the audit log. This is the one "not deleted" condition: every ticket query
+// uses it through the builders below, and any new ticket query must too.
+// Only the ticket's audit log, restore, and undo read deleted ones, through
+// the *IncludingDeleted and deleted builders.
+export const NOT_DELETED_TICKET = { deletedAt: null } satisfies Prisma.TicketWhereInput
+export const DELETED_TICKET = { deletedAt: { not: null } } satisfies Prisma.TicketWhereInput
+
+const TICKET_VISIBILITY: TeamRecordVisibility = {
+  page: "pages.tickets",
+  viewAll: "tickets.viewAll",
+  viewTeam: "tickets.viewTeam",
+  personField: "assigneeId",
+}
+
+// Which of the company's tickets a user may open (VT), the same three
+// levels as opportunities (teamRecordVisibility), with the ticket's team as
+// its queue and its assignee as the person it belongs to:
+//   basic: tickets assigned to them, plus unassigned ones in their teams
+//   tickets.viewTeam: theirs anywhere, plus every one in their teams
+//   tickets.viewAll: every one (Global Admin too)
+export function ticketVisibilityWhere(ctx: TicketViewer): Prisma.TicketWhereInput {
+  return teamRecordVisibility(ctx, TICKET_VISIBILITY, NO_TICKETS) as Prisma.TicketWhereInput
+}
+
+// Who a user may assign a ticket to: unassigned (null) and themselves
+// always, anyone with tickets.assign. The assignee must also be an active
+// member of the ticket's team, checked separately with a 400.
+export function mayAssignTicketTo(ctx: Pick<AccessContext, "userId" | "can">, assigneeId: string | null): boolean {
+  return assigneeId === null || assigneeId === ctx.userId || ctx.can("tickets.assign")
+}
+
+// Whether a user may put a ticket in a team (choose it on create, or move
+// one there): a team they belong to, or any team with tickets.assign (a
+// dispatcher escalating to another queue) or tickets.viewAll. The default
+// ticket team is open to every creator on create.
+export function mayUseTicketTeam(ctx: Pick<AccessContext, "can">, actorInTeam: boolean): boolean {
+  return actorInTeam || ctx.can("tickets.assign") || ctx.can("tickets.viewAll")
+}
+
+// The list filter for every ticket the user may open (never deleted ones)
+export const ticketListWhere = (ctx: TicketViewer) =>
+  ({ companyId: ctx.companyId, ...NOT_DELETED_TICKET, AND: [ticketVisibilityWhere(ctx)] }) satisfies Prisma.TicketWhereInput
+
+// Company scoping only, for writes after loadViewableTicket has passed. A
+// deleted ticket is never matched.
+export const ticketWhere = (ctx: Scope, ticketId: string) =>
+  ({ id: ticketId, companyId: ctx.companyId, ...NOT_DELETED_TICKET }) satisfies Prisma.TicketWhereUniqueInput
+
+// One ticket the user may open, for reads that need their own select
+export const viewableTicketWhere = (ctx: TicketViewer, ticketId: string) =>
+  ({ id: ticketId, companyId: ctx.companyId, ...NOT_DELETED_TICKET, AND: [ticketVisibilityWhere(ctx)] }) satisfies Prisma.TicketWhereUniqueInput
+
+// The same view check with deleted ones included: only for the ticket's
+// audit log, restore, and undo
+export const viewableTicketIncludingDeletedWhere = (ctx: TicketViewer, ticketId: string) =>
+  ({ id: ticketId, companyId: ctx.companyId, AND: [ticketVisibilityWhere(ctx)] }) satisfies Prisma.TicketWhereUniqueInput
+
+// A deleted ticket of the company, for the restore write
+export const deletedTicketWhere = (ctx: Scope, ticketId: string) =>
+  ({ id: ticketId, companyId: ctx.companyId, ...DELETED_TICKET }) satisfies Prisma.TicketWhereUniqueInput
+
+// The company's tickets with these ids, deleted ones included, for the
+// audit log's record states
+export const ticketRecordStatesWhere = (ctx: Scope, ticketIds: string[]) =>
+  ({ companyId: ctx.companyId, id: { in: ticketIds } }) satisfies Prisma.TicketWhereInput
+
+export const ticketAttachmentWhere = (ctx: Scope, ticketId: string, attachmentId: string) =>
+  ({ id: attachmentId, ticketId, ticket: ticketWhere(ctx, ticketId) }) satisfies Prisma.TicketAttachmentWhereUniqueInput
+
+// Every attachment of one ticket (not deleted), for lists
+export const ticketAttachmentsWhere = (ctx: Scope, ticketId: string) =>
+  ({ ticketId, ticket: ticketWhere(ctx, ticketId) }) satisfies Prisma.TicketAttachmentWhereInput
+
+// Every timeline entry of one ticket (not deleted), for its timeline
+export const ticketTimelineWhere = (ctx: Scope, ticketId: string) =>
+  ({ companyId: ctx.companyId, ticketId, ticket: ticketWhere(ctx, ticketId) }) satisfies Prisma.TimelineEntryWhereInput
+
+// A timeline entry of one ticket, company scoped, for writes after
+// loadTicketTimelineEntry has passed
+export const ticketTimelineEntryWhere = (ctx: Scope, ticketId: string, entryId: string) =>
+  ({ id: entryId, companyId: ctx.companyId, ticketId, ticket: ticketWhere(ctx, ticketId) }) satisfies Prisma.TimelineEntryWhereUniqueInput
+
+// The ticket view check every ticket route runs on its URL id. One the
+// user can't open is a miss, same as one that doesn't exist.
+export function loadViewableTicket(ctx: TicketViewer, ticketId: string) {
+  if (!ctx.can("pages.tickets")) return Promise.resolve(null)
+  return prisma.ticket.findFirst({
+    where: viewableTicketWhere(ctx, ticketId),
+    select: { id: true, number: true, title: true, assigneeId: true, contactId: true, clientId: true },
+  })
+}
+
+// Runs the ticket view check on the parent ticket
+export function loadTicketAttachment(ctx: TicketViewer, ticketId: string, attachmentId: string) {
+  if (!ctx.can("pages.tickets")) return Promise.resolve(null)
+  return prisma.ticketAttachment.findFirst({
+    where: { id: attachmentId, ticketId, ticket: viewableTicketWhere(ctx, ticketId) },
+    select: { id: true },
+  })
+}
+
+// A timeline entry by its URL id (or a paging cursor), only under the ticket
+// it belongs to, with the view check on that ticket
+export function loadTicketTimelineEntry(ctx: TicketViewer, ticketId: string, entryId: string) {
+  if (!ctx.can("pages.tickets")) return Promise.resolve(null)
+  return prisma.timelineEntry.findFirst({
+    where: { id: entryId, companyId: ctx.companyId, ticketId, ticket: viewableTicketWhere(ctx, ticketId) },
+    select: { id: true, kind: true, authorId: true, ticket: { select: { id: true, number: true, title: true } } },
+  })
+}
+
+export const ticketTypeWhere = (ctx: Scope, typeId: string) =>
+  ({ id: typeId, companyId: ctx.companyId }) satisfies Prisma.TicketTypeWhereUniqueInput
+
+export const ticketPriorityWhere = (ctx: Scope, priorityId: string) =>
+  ({ id: priorityId, companyId: ctx.companyId }) satisfies Prisma.TicketPriorityWhereUniqueInput
+
+export const ticketStatusWhere = (ctx: Scope, statusId: string) =>
+  ({ id: statusId, companyId: ctx.companyId }) satisfies Prisma.TicketStatusWhereUniqueInput
 
 // A timeline entry of one opportunity, company scoped, for writes after
 // loadOpportunityTimelineEntry has passed
@@ -664,6 +829,15 @@ export interface BodyRefs {
   // caller may open (VOP, never a deleted one), in any stage, of clientId
   // when it's given. Needs a ctx with userId and can.
   orderOpportunityId?: unknown
+  ticketTypeId?: unknown
+  ticketPriorityId?: unknown
+  ticketStatusId?: unknown
+  // A ticket of the company (never a deleted one); the parent of
+  // ticketAttachmentId
+  ticketId?: unknown
+  // Attachments of ticketId when it is given, otherwise of any company
+  // ticket (one id or a list)
+  ticketAttachmentId?: unknown
 }
 
 type RefKey = keyof BodyRefs
@@ -695,6 +869,11 @@ const REF_LABELS: Record<RefKey, string> = {
   opportunityAttachmentId: "attachment",
   quoteOpportunityId: "opportunity",
   orderOpportunityId: "opportunity",
+  ticketTypeId: "ticket type",
+  ticketPriorityId: "priority",
+  ticketStatusId: "status",
+  ticketId: "ticket",
+  ticketAttachmentId: "attachment",
 }
 
 // Turns a single id *Where builder's clause into one matching every id in
@@ -721,7 +900,16 @@ function readIds(value: unknown): string[] | null {
 // view rule (viewableSalesOrderId) read userId and can
 type RefScope = Scope & Partial<Pick<AccessContext, "userId" | "can">>
 
-function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string, vendorId?: string, opportunityId?: string, contactId?: string) {
+function countRefs(
+  ctx: RefScope,
+  key: RefKey,
+  ids: string[],
+  clientId?: string,
+  vendorId?: string,
+  opportunityId?: string,
+  contactId?: string,
+  ticketId?: string
+) {
   const [first] = ids
   const company = { companyId: ctx.companyId }
   switch (key) {
@@ -796,6 +984,18 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
         where: { AND: [opportunityListWhere({ ...ctx, userId, can }), { id: { in: ids }, ...(clientId ? { clientId } : {}) }] },
       })
     }
+    case "ticketTypeId":
+      return prisma.ticketType.count({ where: whereIds(ticketTypeWhere(ctx, first), ids) })
+    case "ticketPriorityId":
+      return prisma.ticketPriority.count({ where: whereIds(ticketPriorityWhere(ctx, first), ids) })
+    case "ticketStatusId":
+      return prisma.ticketStatus.count({ where: whereIds(ticketStatusWhere(ctx, first), ids) })
+    case "ticketId":
+      return prisma.ticket.count({ where: whereIds(ticketWhere(ctx, first), ids) })
+    case "ticketAttachmentId":
+      return prisma.ticketAttachment.count({
+        where: ticketId ? whereIds(ticketAttachmentWhere(ctx, ticketId, first), ids) : { id: { in: ids }, ticket: { ...company, ...NOT_DELETED_TICKET } },
+      })
   }
 }
 
@@ -808,12 +1008,14 @@ function countRefs(ctx: RefScope, key: RefKey, ids: string[], clientId?: string,
 // contactId and clientLocationId are tied to clientId, vendorLocationId
 // to vendorId, and opportunityAttachmentId to opportunityId, when that
 // parent is a single id. quoteOpportunityId is tied to clientId and
-// contactId, and orderOpportunityId to clientId.
+// contactId, orderOpportunityId to clientId, and ticketAttachmentId to
+// ticketId.
 export async function assertRefs(ctx: RefScope, refs: BodyRefs) {
   const clientId = typeof refs.clientId === "string" && refs.clientId ? refs.clientId : undefined
   const vendorId = typeof refs.vendorId === "string" && refs.vendorId ? refs.vendorId : undefined
   const opportunityId = typeof refs.opportunityId === "string" && refs.opportunityId ? refs.opportunityId : undefined
   const contactId = typeof refs.contactId === "string" && refs.contactId ? refs.contactId : undefined
+  const ticketId = typeof refs.ticketId === "string" && refs.ticketId ? refs.ticketId : undefined
 
   const checks: { key: RefKey; ids: string[] | null }[] = []
   for (const key of Object.keys(REF_LABELS) as RefKey[]) {
@@ -823,7 +1025,7 @@ export async function assertRefs(ctx: RefScope, refs: BodyRefs) {
   }
 
   const counts = await Promise.all(
-    checks.map(({ key, ids }) => (ids ? countRefs(ctx, key, ids, clientId, vendorId, opportunityId, contactId) : Promise.resolve(-1)))
+    checks.map(({ key, ids }) => (ids ? countRefs(ctx, key, ids, clientId, vendorId, opportunityId, contactId, ticketId) : Promise.resolve(-1)))
   )
 
   const failed = checks.find(({ ids }, i) => !ids || counts[i] !== ids.length)

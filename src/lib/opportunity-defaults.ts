@@ -1,5 +1,9 @@
 import type { OpportunityStageCategory, Prisma } from "@/generated/prisma"
 import { prisma } from "@/lib/prisma"
+import { refusableTransaction, type Refusal } from "@/lib/refusal"
+
+// Shared with the ticket settings and action button locks (src/lib/refusal.ts)
+export { isRefusal, refuse, type Refusal } from "@/lib/refusal"
 
 // A company's opportunity stages, types, and settings are created the first
 // time any opportunity, stage, type, or settings route runs for it, never
@@ -64,28 +68,6 @@ export async function ensureOpportunityDefaults(companyId: string): Promise<void
   })
 }
 
-// A request refused inside withOpportunitySettingsLock
-export interface Refusal {
-  refused: true
-  status: 400 | 404 | 409
-  error: string
-  code?: string
-}
-
-export function refuse(status: Refusal["status"], error: string, code?: string): Refusal {
-  return { refused: true, status, error, code }
-}
-
-export function isRefusal(value: unknown): value is Refusal {
-  return !!value && typeof value === "object" && (value as Refusal).refused === true
-}
-
-class RollBack extends Error {
-  constructor(readonly refusal: Refusal) {
-    super(refusal.error)
-  }
-}
-
 // Runs fn in a transaction that first locks the company's opportunity
 // settings row, which it is handed. Writes that must keep the stage rules
 // true together (at least one stage per category, the quote sent stage
@@ -98,19 +80,12 @@ export async function withOpportunitySettingsLock<T>(
   companyId: string,
   fn: (tx: Prisma.TransactionClient, settings: { prefix: string; quoteSentStageId: string | null }) => Promise<T | Refusal>
 ): Promise<T | Refusal> {
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const settings = await tx.opportunitySettings.update({
-        where: { companyId },
-        data: { updatedAt: new Date() },
-        select: { prefix: true, quoteSentStageId: true },
-      })
-      const result = await fn(tx, settings)
-      if (isRefusal(result)) throw new RollBack(result)
-      return result
+  return refusableTransaction(async (tx) => {
+    const settings = await tx.opportunitySettings.update({
+      where: { companyId },
+      data: { updatedAt: new Date() },
+      select: { prefix: true, quoteSentStageId: true },
     })
-  } catch (err) {
-    if (err instanceof RollBack) return err.refusal
-    throw err
-  }
+    return fn(tx, settings)
+  })
 }

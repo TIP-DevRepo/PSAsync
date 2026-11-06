@@ -1,7 +1,8 @@
 // The ACTION entry keys a timeline records, their data shapes, and the
 // sentence each one reads as. Shared by the server (which writes them) and
 // the timeline component (which shows them), so no React and no database
-// imports. Generic so tickets can record the same keys later.
+// imports. Opportunities and tickets record the same keys (tickets add
+// status_changed, priority_changed, and assignee_changed).
 //
 // Every reference is stored with its name as well as its id, so an entry
 // still reads correctly after a stage, user, or type is renamed or deleted.
@@ -21,6 +22,10 @@ export const TIMELINE_ACTIONS = [
   "attachment_added",
   "attachment_removed",
   "restored",
+  // Tickets
+  "status_changed",
+  "priority_changed",
+  "assignee_changed",
   // Quotes, sales orders, and purchase orders linked to or unlinked from
   // the record, and the quote events that can move its stage
   // (src/lib/opportunity-quotes.ts)
@@ -54,7 +59,8 @@ export interface RecordLinkData {
 }
 
 export interface TimelineActionData {
-  created: { label: string; number: string; title: string; stage: TimelineRef | null }
+  // stage for an opportunity, status for a ticket
+  created: { label: string; number: string; title: string; stage?: TimelineRef | null; status?: TimelineRef | null }
   // reason is set on a move a quote event made, for example "Quote
   // Q-2026-0042 accepted"
   stage_changed: { from: TimelineRef | null; to: TimelineRef | null; reason?: string }
@@ -73,6 +79,12 @@ export interface TimelineActionData {
   attachment_removed: { attachmentId: string; fileName: string }
   // A deleted record restored from the audit log
   restored: { label: string }
+  // reason is set on a move the system made, for example "No customer
+  // reply for 7 days"
+  status_changed: { from: TimelineRef | null; to: TimelineRef | null; reason?: string }
+  priority_changed: { from: TimelineRef | null; to: TimelineRef | null }
+  // reason is set on an assignment round robin made ("Round robin")
+  assignee_changed: { from: TimelineRef | null; to: TimelineRef | null; reason?: string }
   quote_linked: RecordLinkData
   quote_unlinked: RecordLinkData
   quote_sent: RecordLinkData
@@ -97,7 +109,18 @@ export interface NoteStageChange {
 // The stage change a note's data holds, or null. Reads stored data without
 // trusting its shape.
 export function noteStageChange(data: unknown): NoteStageChange | null {
-  const change = data && typeof data === "object" ? (data as { stageChange?: unknown }).stageChange : null
+  return readMove(data, "stageChange")
+}
+
+// A ticket's NOTE or EMAIL_OUT posted with a status change stores it the
+// same way, as { statusChange: { from, to } } (the category is the
+// status's), never as a separate status_changed entry
+export function noteStatusChange(data: unknown): NoteStageChange | null {
+  return readMove(data, "statusChange")
+}
+
+function readMove(data: unknown, key: "stageChange" | "statusChange"): NoteStageChange | null {
+  const change = data && typeof data === "object" ? (data as Record<string, unknown>)[key] : null
   if (!change || typeof change !== "object") return null
   const { from, to } = change as { from?: unknown; to?: unknown }
   const isRef = (r: unknown): r is NoteStageChange["to"] =>
@@ -188,7 +211,7 @@ export function describeTimelineAction(action: string | null, data: unknown): st
   switch (action) {
     case "created":
       return `${text(d.label, "Record")} created${typeof d.number === "string" && d.number ? ` as ${d.number}` : ""}${
-        d.stage ? ` in ${refName(d.stage, "a stage")}` : ""
+        d.stage ? ` in ${refName(d.stage, "a stage")}` : d.status ? ` in ${refName(d.status, "a status")}` : ""
       }`
     case "stage_changed":
       return `Stage changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}${
@@ -218,6 +241,16 @@ export function describeTimelineAction(action: string | null, data: unknown): st
       return `Attachment removed: ${text(d.fileName, "a file")}`
     case "restored":
       return `${text(d.label, "Record")} restored after being deleted`
+    case "status_changed":
+      return `Status changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}${
+        typeof d.reason === "string" && d.reason ? ` (${d.reason})` : ""
+      }`
+    case "priority_changed":
+      return `Priority changed from ${refName(d.from, "none")} to ${refName(d.to, "none")}`
+    case "assignee_changed":
+      return `Assignee changed from ${refName(d.from, "Unassigned")} to ${refName(d.to, "Unassigned")}${
+        typeof d.reason === "string" && d.reason ? ` (${d.reason})` : ""
+      }`
     case "quote_linked":
     case "quote_unlinked":
     case "sales_order_linked":

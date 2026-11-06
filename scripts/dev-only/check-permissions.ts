@@ -188,6 +188,20 @@
 // button doesn't allow (400). The test companies have no Microsoft
 // credentials either (findExternalServices), so nothing could go out.
 //
+// Tickets (TICKET_ATTEMPTS and the ticket steps): the three visibility
+// levels on the list, a ticket, its timeline, attachments, and email
+// options, and the sidebar counts; the assignment rules with and without
+// tickets.assign; the team change rules; the required initial note; the
+// ticket settings routes needing settingsSections.tickets, with their 409s
+// (in use, the last status of a category, a status a button moves to) and
+// 400s; the ticket action button list; and delete, restore, and the ticket
+// audit log. checkTicketRoundRobin checks the rotation skips the inactive
+// member and is recorded by System, checkTicketStatusTimestamps the
+// resolvedAt and closedAt rules, checkTicketAuditFlow undo, soft delete, and
+// restore, and checkTicketAutoClose the daily job on Test Company B only
+// (closeResolvedTickets with companyIds) and its cron route without a
+// secret. Ticket emails are only ever refused before anything is sent.
+//
 // Record numbers (checkRecordNumbering): Test Admin B creates several
 // quotes, sales orders, and purchase orders at the same time with parallel
 // requests, and every number must be different, in the company prefix,
@@ -303,6 +317,10 @@ type Actor =
   | "teamViewer"
   | "teamManager"
   | "auditViewer"
+  | "ticketBasic"
+  | "ticketViewer"
+  | "ticketDispatcher"
+  | "ticketSettings"
 
 interface AttemptContext {
   b: SampleIds
@@ -837,6 +855,173 @@ const AUDIT_ATTEMPTS: Attempt[] = [
   { name: "Audit log with a broken date", actor: "admin", kind: "refused", method: "GET", path: () => "/api/audit-log?from=not-a-date", expect: 400, expectError: "date range" },
   { name: "Audit log paged with a made up cursor", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/audit-log?cursor=${c.fakeId}`, expect: 400, expectError: "Invalid cursor" },
   { name: "Opportunity audit log paged with another opportunity's entry", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/opportunities/${c.fx.unassignedOpportunityId}/audit?cursor=${c.b.auditEntryId}`, expect: 400, expectError: "Invalid cursor" },
+]
+
+// ─── TICKETS ─────────────────────────────────────────────────────────────────
+// The ticket routes need pages.tickets (reads), tickets.create, tickets.edit
+// (fields, notes, attachments, email), tickets.delete, and
+// settingsSections.tickets (types, priorities, statuses, settings). The
+// visibility levels: Test Ticket Basic B (basic: its own and the unassigned
+// ones in its teams), Test Ticket Viewer B (tickets.viewTeam: every one in
+// its teams), and Test Admin B (Global Admin: every one). Test Ticket
+// Dispatcher B holds tickets.assign (assign anyone in the team, move to any
+// team) and tickets.delete; Test Ticket Settings B holds only Ticket
+// Settings and the Settings page. Created tickets are removed once checked.
+// The steps after the list (checkTicketRoundRobin,
+// checkTicketStatusTimestamps, checkTicketAuditFlow, checkTicketAutoClose)
+// put back everything they change.
+
+const TICKET_NOTE = "<p>Dev check ticket note</p>"
+const TICKET_WRITE = "manage ticket settings"
+const ticketBody = (c: AttemptContext, extra: Record<string, unknown> = {}) => ({
+  initialNote: TICKET_NOTE,
+  title: "Dev check ticket",
+  clientId: c.b.clientId,
+  contactId: c.b.contactId,
+  ...extra,
+})
+
+// A created ticket must be assigned as expected (null for unassigned). It
+// is removed again once checked.
+function createdTicketAssignedTo(assigneeId: (c: AttemptContext) => string | null) {
+  return async (json: unknown, c: AttemptContext, prisma: PrismaClient): Promise<string | null> => {
+    const created = json as { id?: string; assignee?: { id?: string } | null; number?: string }
+    if (!created.id) return "no ticket id in the response"
+    try {
+      const expected = assigneeId(c)
+      if (!created.number || !/^T-\d{4}-\d{4,}$/.test(created.number)) return `the number is ${created.number ?? "missing"}, not T-YYYY-NNNN`
+      return (created.assignee?.id ?? null) === expected ? null : `assigned to ${created.assignee?.id ?? "nobody"}, expected ${expected ?? "nobody"}`
+    } finally {
+      await prisma.ticket.deleteMany({ where: { id: created.id } })
+    }
+  }
+}
+
+const TICKET_ATTEMPTS: Attempt[] = [
+  // Sidebar counts first, before anything else adds a ticket
+  { name: "Ticket sidebar counts: own team, only itself", actor: "ticketBasic", kind: "allowed", method: "GET", path: () => "/api/tickets/sidebar-counts", expect: 200, check: sidebarShows((c) => ({ teamIds: [c.b.helpdeskTeamId, c.fx.roundRobinTeamId], team: c.b.helpdeskTeamId, members: [c.fx.ticketBasicUserId], count: 2, unassigned: 1 })) },
+  { name: "Ticket sidebar counts: own team, every member", actor: "ticketViewer", kind: "allowed", method: "GET", path: () => "/api/tickets/sidebar-counts", expect: 200, check: sidebarShows((c) => ({ teamIds: [c.b.helpdeskTeamId, c.fx.roundRobinTeamId], team: c.b.helpdeskTeamId, members: [c.fx.ticketBasicUserId, c.fx.ticketViewerUserId, c.fx.ticketDispatcherUserId], count: 3, unassigned: 1 })) },
+  { name: "Ticket sidebar counts: every team", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/tickets/sidebar-counts", expect: 200, check: sidebarShows((c) => ({ teamIds: c.fx.teamIds, team: c.b.helpdeskTeamId, members: [c.fx.ticketBasicUserId, c.fx.ticketViewerUserId, c.fx.ticketDispatcherUserId], count: 3, unassigned: 1 })) },
+  { name: "Ticket sidebar counts", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/tickets/sidebar-counts", expect: 403, expectError: "view tickets" },
+
+  // Visibility, basic: its own anywhere, plus the unassigned ones in its teams
+  { name: "List tickets: every one", actor: "admin", kind: "control", method: "GET", path: () => "/api/tickets", expect: 200, contains: (c) => [c.fx.basicTicketId, c.fx.viewerTicketId, c.b.ticketId, c.fx.alertsTicketId] },
+  { name: "List tickets: own and the team's unassigned", actor: "ticketBasic", kind: "allowed", method: "GET", path: () => "/api/tickets", expect: 200, contains: (c) => [c.fx.basicTicketId, c.b.ticketId], notContains: (c) => [c.fx.viewerTicketId, c.fx.alertsTicketId] },
+  { name: "Open a teammate's ticket", actor: "ticketBasic", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.fx.viewerTicketId}`, expect: 404, expectError: "Not found" },
+  { name: "Open the team's unassigned ticket", actor: "ticketBasic", kind: "allowed", method: "GET", path: (c) => `/api/tickets/${c.b.ticketId}`, expect: 200, contains: (c) => [c.b.ticketId, c.b.helpdeskTeamId] },
+  { name: "Open another team's unassigned ticket", actor: "ticketBasic", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.fx.alertsTicketId}`, expect: 404, expectError: "Not found" },
+  { name: "Timeline of a teammate's ticket", actor: "ticketBasic", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.fx.viewerTicketId}/timeline`, expect: 404, expectError: "Not found" },
+  { name: "Attachments of a teammate's ticket", actor: "ticketBasic", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.fx.viewerTicketId}/attachments`, expect: 404, expectError: "Not found" },
+  { name: "Email options of a teammate's ticket", actor: "ticketBasic", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.fx.viewerTicketId}/email-options`, expect: 404, expectError: "Not found" },
+  { name: "Timeline of own ticket", actor: "ticketBasic", kind: "allowed", method: "GET", path: (c) => `/api/tickets/${c.fx.basicTicketId}/timeline`, expect: 200, contains: () => ["entries"] },
+  // Visibility, viewTeam: every one in its teams, nothing outside them
+  { name: "List tickets: every one in its team", actor: "ticketViewer", kind: "allowed", method: "GET", path: () => "/api/tickets", expect: 200, contains: (c) => [c.fx.basicTicketId, c.fx.viewerTicketId, c.b.ticketId], notContains: (c) => [c.fx.alertsTicketId] },
+  { name: "Open a teammate's ticket", actor: "ticketViewer", kind: "allowed", method: "GET", path: (c) => `/api/tickets/${c.fx.basicTicketId}`, expect: 200, contains: (c) => [c.fx.basicTicketId] },
+  { name: "Timeline of a teammate's ticket", actor: "ticketViewer", kind: "allowed", method: "GET", path: (c) => `/api/tickets/${c.fx.basicTicketId}/timeline`, expect: 200, contains: () => ["entries"] },
+  { name: "Attachments of a teammate's ticket", actor: "ticketViewer", kind: "allowed", method: "GET", path: (c) => `/api/tickets/${c.fx.basicTicketId}/attachments`, expect: 200, contains: () => ["downloadUrl"] },
+  { name: "Open another team's ticket", actor: "ticketViewer", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.fx.alertsTicketId}`, expect: 404, expectError: "Not found" },
+  // Visibility, viewAll (Global Admin)
+  { name: "Open another team's ticket", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/tickets/${c.fx.alertsTicketId}`, expect: 200, contains: (c) => [c.fx.alertsTicketId] },
+  { name: "List tickets filtered to a team's unassigned", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/tickets?teamId=${c.b.helpdeskTeamId}&assigneeId=unassigned`, expect: 200, contains: (c) => [c.b.ticketId], notContains: (c) => [c.fx.basicTicketId, c.fx.alertsTicketId] },
+  { name: "List tickets filtered to closed ones", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/tickets?statusCategory=CLOSED", expect: 200, notContains: (c) => [c.b.ticketId, c.fx.basicTicketId] },
+  { name: "List tickets filtered by a made up category", actor: "admin", kind: "refused", method: "GET", path: () => "/api/tickets?statusCategory=NOPE", expect: 400, expectError: "Invalid status category" },
+  { name: "List tickets", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/tickets", expect: 403, expectError: "view tickets" },
+  { name: "List tickets", actor: "oppViewer", kind: "refused", method: "GET", path: () => "/api/tickets", expect: 403, expectError: "view tickets" },
+  { name: "List tickets", actor: "ticketSettings", kind: "refused", method: "GET", path: () => "/api/tickets", expect: 403, expectError: "view tickets" },
+
+  // Assignment and team rules
+  { name: "Create for a teammate", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.b.helpdeskTeamId, assigneeId: c.fx.ticketViewerUserId }), expect: 403, expectError: "yourself or leave them unassigned" },
+  { name: "Create for itself in its team", actor: "ticketBasic", kind: "allowed", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.b.helpdeskTeamId, assigneeId: c.fx.ticketBasicUserId }), expect: 200, check: createdTicketAssignedTo((c) => c.fx.ticketBasicUserId) },
+  { name: "Create in a team it isn't in", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.fx.alertsTeamId }), expect: 403, expectError: "teams you belong to" },
+  { name: "Create unassigned in the default team", actor: "ticketBasic", kind: "allowed", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c), expect: 200, check: createdTicketAssignedTo(() => null) },
+  { name: "Create for a teammate", actor: "ticketDispatcher", kind: "allowed", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.b.helpdeskTeamId, assigneeId: c.fx.ticketViewerUserId }), expect: 200, check: createdTicketAssignedTo((c) => c.fx.ticketViewerUserId) },
+  { name: "Create in another queue (dispatch)", actor: "ticketDispatcher", kind: "allowed", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.fx.alertsTeamId }), expect: 200, check: createdTicketAssignedTo(() => null) },
+  { name: "Create with no client", actor: "ticketBasic", kind: "allowed", method: "POST", path: () => "/api/tickets", body: () => ({ initialNote: TICKET_NOTE, title: "Dev check ticket" }), expect: 200, check: createdTicketAssignedTo(() => null) },
+  { name: "Create for someone outside the team", actor: "admin", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.b.helpdeskTeamId, assigneeId: c.repUserId }), expect: 400, expectError: "Assignee is not in this team" },
+  { name: "Assign a ticket to a teammate", actor: "ticketBasic", kind: "refused", method: "PATCH", path: (c) => `/api/tickets/${c.b.ticketId}`, body: (c) => ({ assigneeId: c.fx.ticketViewerUserId }), expect: 403, expectError: "yourself or leave them unassigned" },
+  { name: "Move to a team it isn't in", actor: "ticketBasic", kind: "refused", method: "PATCH", path: (c) => `/api/tickets/${c.fx.basicTicketId}`, body: (c) => ({ teamId: c.fx.alertsTeamId, assigneeId: null }), expect: 403, expectError: "teams you belong to" },
+  { name: "Move away from its assignee's team, keeping the assignee", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/tickets/${c.fx.viewerTicketId}`, body: (c) => ({ teamId: c.fx.alertsTeamId }), expect: 400, expectError: "not in the new team" },
+  { name: "Clear the team", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/tickets/${c.b.ticketId}`, body: () => ({ teamId: null }), expect: 400, expectError: "A team is required" },
+  { name: "Clear the client, keeping a contact", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/tickets/${c.b.ticketId}`, body: (c) => ({ clientId: null, contactId: c.b.contactId }), expect: 400, expectError: "A contact needs a client" },
+  { name: "Clear the type", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/tickets/${c.b.ticketId}`, body: () => ({ typeId: "" }), expect: 400, expectError: "A type is required" },
+  { name: "Edit a ticket", actor: "ticketSettings", kind: "refused", method: "PATCH", path: (c) => `/api/tickets/${c.b.ticketId}`, body: () => ({ title: "Changed" }), expect: 403, expectError: "edit tickets" },
+  { name: "Create a ticket", actor: "everyone", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c), expect: 403, expectError: "create tickets" },
+
+  // The initial note is required, judged after sanitizing
+  { name: "Create with no initial note", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ({ ...ticketBody(c), initialNote: undefined }), expect: 400, expectError: "An initial note is required" },
+  { name: "Create with an empty initial note", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { initialNote: "<p></p>" }), expect: 400, expectError: "An initial note is required" },
+  { name: "Create with a script only initial note", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { initialNote: "<script>alert(1)</script>" }), expect: 400, expectError: "An initial note is required" },
+  { name: "Create with a contact and no client", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ({ initialNote: TICKET_NOTE, title: "Should Not Exist", contactId: c.b.contactId }), expect: 400, expectError: "A contact needs a client" },
+
+  // Ticket settings
+  { name: "List ticket types", actor: "ticketSettings", kind: "allowed", method: "GET", path: () => "/api/ticket-types", expect: 200, contains: (c) => [c.b.ticketTypeId] },
+  { name: "List ticket priorities", actor: "ticketSettings", kind: "allowed", method: "GET", path: () => "/api/ticket-priorities", expect: 200, contains: (c) => [c.b.ticketPriorityId] },
+  { name: "List ticket statuses", actor: "ticketSettings", kind: "allowed", method: "GET", path: () => "/api/ticket-statuses", expect: 200, contains: (c) => [c.b.ticketStatusId, "WAITING"] },
+  { name: "Read ticket settings", actor: "ticketSettings", kind: "allowed", method: "GET", path: () => "/api/ticket-settings", expect: 200, contains: (c) => ["autoCloseResolvedDays", c.b.helpdeskTeamId] },
+  { name: "Read ticket settings", actor: "ticketBasic", kind: "allowed", method: "GET", path: () => "/api/ticket-settings", expect: 200, contains: () => ['"prefix":"T"'] },
+  { name: "Reorder ticket types, same order", actor: "ticketSettings", kind: "allowed", method: "POST", path: () => "/api/ticket-types/reorder", body: (c) => ({ typeIds: c.fx.ticketTypeIds }), expect: 200, contains: (c) => [c.b.ticketTypeId] },
+  { name: "Reorder ticket statuses, same order", actor: "ticketSettings", kind: "allowed", method: "POST", path: () => "/api/ticket-statuses/reorder", body: (c) => ({ statusIds: c.fx.ticketStatusIds }), expect: 200, contains: (c) => [c.b.ticketStatusId] },
+  { name: "Add a ticket type", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/ticket-types", body: () => ({ name: "Should Not Exist" }), expect: 403, expectError: TICKET_WRITE },
+  { name: "Add a ticket priority", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/ticket-priorities", body: () => ({ name: "Should Not Exist" }), expect: 403, expectError: TICKET_WRITE },
+  { name: "Delete a ticket status", actor: "ticketBasic", kind: "refused", method: "DELETE", path: (c) => `/api/ticket-statuses/${c.fx.ticketWaitingStatusId}`, expect: 403, expectError: TICKET_WRITE },
+  { name: "Change ticket settings", actor: "ticketBasic", kind: "refused", method: "PATCH", path: () => "/api/ticket-settings", body: () => ({ autoCloseResolvedDays: 3 }), expect: 403, expectError: TICKET_WRITE },
+  { name: "Reorder ticket priorities", actor: "ticketDispatcher", kind: "refused", method: "POST", path: () => "/api/ticket-priorities/reorder", body: (c) => ({ priorityIds: [...c.fx.ticketPriorityIds].reverse() }), expect: 403, expectError: TICKET_WRITE },
+  { name: "List ticket types", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/ticket-types", expect: 403, expectError: "view ticket types" },
+  { name: "Read ticket settings", actor: "oppSettings", kind: "refused", method: "GET", path: () => "/api/ticket-settings", expect: 403, expectError: "view ticket settings" },
+  { name: "Delete a ticket status in use", actor: "ticketSettings", kind: "refused", method: "DELETE", path: (c) => `/api/ticket-statuses/${c.fx.ticketOpenStatusId}`, expect: 409, expectError: "is used by" },
+  { name: "Delete the only Closed status", actor: "ticketSettings", kind: "refused", method: "DELETE", path: (c) => `/api/ticket-statuses/${c.fx.ticketClosedStatusId}`, expect: 409, expectError: "only Closed status" },
+  { name: "Change a status's category", actor: "ticketSettings", kind: "refused", method: "PATCH", path: (c) => `/api/ticket-statuses/${c.fx.ticketWaitingStatusId}`, body: () => ({ category: "OPEN" }), expect: 400, expectError: "category can't be changed" },
+  { name: "Delete a ticket type in use", actor: "ticketSettings", kind: "refused", method: "DELETE", path: (c) => `/api/ticket-types/${c.b.ticketTypeId}`, expect: 409, expectError: "is used by" },
+  { name: "Delete a ticket priority in use", actor: "ticketSettings", kind: "refused", method: "DELETE", path: (c) => `/api/ticket-priorities/${c.b.ticketPriorityId}`, expect: 409, expectError: "is used by" },
+  { name: "Set a broken number prefix", actor: "ticketSettings", kind: "refused", method: "PATCH", path: () => "/api/ticket-settings", body: () => ({ prefix: "bad prefix!" }), expect: 400, expectError: "prefix" },
+  { name: "Set negative auto close days", actor: "ticketSettings", kind: "refused", method: "PATCH", path: () => "/api/ticket-settings", body: () => ({ autoCloseResolvedDays: -1 }), expect: 400, expectError: "Auto close" },
+  { name: "Set fractional auto close days", actor: "ticketSettings", kind: "refused", method: "PATCH", path: () => "/api/ticket-settings", body: () => ({ autoCloseResolvedDays: 2.5 }), expect: 400, expectError: "Auto close" },
+  { name: "Clear the default team", actor: "ticketSettings", kind: "refused", method: "PATCH", path: () => "/api/ticket-settings", body: () => ({ defaultTeamId: null }), expect: 400, expectError: "A default team is required" },
+  { name: "Add a status in a made up category", actor: "ticketSettings", kind: "refused", method: "POST", path: () => "/api/ticket-statuses", body: () => ({ name: "Should Not Exist", category: "NOPE" }), expect: 400, expectError: "Invalid status category" },
+  { name: "Reorder ticket types with a missing type", actor: "ticketSettings", kind: "refused", method: "POST", path: () => "/api/ticket-types/reorder", body: (c) => ({ typeIds: [c.fx.ticketTypeIds[0]] }), expect: 409, expectError: "The type list changed" },
+  { name: "Add a ticket type with another type's name", actor: "ticketSettings", kind: "refused", method: "POST", path: () => "/api/ticket-types", body: () => ({ name: "incident" }), expect: 400, expectError: "already exists" },
+
+  // Action buttons on tickets: Note and Email only, never the opportunity ones
+  { name: "Ticket action buttons", actor: "ticketBasic", kind: "allowed", method: "GET", path: () => "/api/action-buttons?for=ticket", expect: 200, contains: (c) => [c.fx.noteButtonId, c.fx.emailButtonId, c.fx.ticketButtonId], notContains: (c) => [c.fx.wonButtonId, c.fx.lostButtonId, c.b.actionButtonId] },
+  { name: "Ticket action buttons", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/action-buttons?for=ticket", expect: 403, expectError: "view tickets" },
+  { name: "Action button fixing a ticket status without being fixed", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/action-buttons/${c.fx.noteButtonId}`, body: (c) => ({ fixedTicketStatusId: c.fx.ticketResolvedStatusId }), expect: 400, expectError: "only be set when the button always moves" },
+  { name: "Delete a ticket status a button moves to", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/ticket-statuses/${c.fx.ticketResolvedStatusId}`, expect: 409, expectError: "action button moves to this status" },
+
+  // Notes
+  { name: "Note on a teammate's ticket", actor: "ticketBasic", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.fx.viewerTicketId}/timeline`, body: () => ({ body: TICKET_NOTE }), expect: 404, expectError: "Not found" },
+  { name: "Note on a ticket", actor: "ticketSettings", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/timeline`, body: () => ({ body: TICKET_NOTE }), expect: 403, expectError: "edit tickets" },
+  { name: "Note through the Won button", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/timeline`, body: (c) => ({ body: TICKET_NOTE, actionButtonId: c.fx.wonButtonId }), expect: 400, expectError: "Invalid action button" },
+  { name: "Note through the Email button", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/timeline`, body: (c) => ({ body: TICKET_NOTE, actionButtonId: c.fx.emailButtonId }), expect: 400, expectError: "Invalid action button" },
+  { name: "Note with a made up status", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/timeline`, body: (c) => ({ body: TICKET_NOTE, statusId: c.fakeId }), expect: 400, expectError: "Invalid status" },
+  { name: "Empty note", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/timeline`, body: () => ({ body: "<p></p>" }), expect: 400, expectError: "can't be empty" },
+  { name: "Edit someone else's note", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/tickets/${c.b.ticketId}/timeline/${c.fx.ticketBasicNoteId}`, body: () => ({ body: "<p>Changed</p>" }), expect: 403, expectError: "your own notes" },
+  { name: "Delete someone else's note", actor: "ticketBasic", kind: "refused", method: "DELETE", path: (c) => `/api/tickets/${c.b.ticketId}/timeline/${c.b.ticketNoteId}`, expect: 403, expectError: "your own notes" },
+  { name: "Timeline paged with another ticket's entry", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.fx.basicTicketId}/timeline?cursor=${c.b.ticketNoteId}`, expect: 400, expectError: "Invalid cursor" },
+
+  // The Email action, only ever with input refused before anything is sent
+  { name: "Email from a teammate's ticket", actor: "ticketBasic", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.fx.viewerTicketId}/email`, body: () => emailBody(), expect: 404, expectError: "Not found" },
+  { name: "Send a ticket email (no edit)", actor: "everyone", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/email`, body: () => emailBody(), expect: 403, expectError: "edit tickets" },
+  { name: "Ticket email to an invalid address", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/email`, body: () => emailBody({ to: ["not-an-address"] }), expect: 400, expectError: "is not a valid email address" },
+  { name: "Ticket email with an opportunity's attachment", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/email`, body: (c) => emailBody({ attachmentIds: [c.b.opportunityAttachmentId] }), expect: 400, expectError: "Invalid attachment" },
+  { name: "Ticket email through the Won button", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/email`, body: (c) => emailBody({ actionButtonId: c.fx.wonButtonId }), expect: 400, expectError: "Invalid action button" },
+  { name: "Ticket email through the Email button with a status", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/email`, body: (c) => emailBody({ actionButtonId: c.fx.emailButtonId, statusId: c.fx.ticketResolvedStatusId }), expect: 400, expectError: "doesn't change the status" },
+
+  // Delete, restore, audit
+  { name: "Delete a ticket", actor: "ticketBasic", kind: "refused", method: "DELETE", path: (c) => `/api/tickets/${c.b.ticketId}`, expect: 403, expectError: "delete tickets" },
+  { name: "Delete a ticket it can't open", actor: "ticketDispatcher", kind: "refused", method: "DELETE", path: (c) => `/api/tickets/${c.fx.alertsTicketId}`, expect: 404, expectError: "Not found" },
+  { name: "Restore a ticket", actor: "ticketBasic", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/restore`, expect: 403, expectError: AUDIT_RESTORE },
+  { name: "Restore a ticket that isn't deleted", actor: "admin", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.b.ticketId}/restore`, expect: 409, expectError: "isn't deleted" },
+  { name: "Read a ticket's audit log", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/tickets/${c.b.ticketId}/audit`, expect: 200, contains: (c) => [c.b.ticketAuditEntryId] },
+  { name: "Read a ticket's audit log", actor: "auditViewer", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.b.ticketId}/audit`, expect: 404, expectError: "Not found" },
+  { name: "Read a ticket's audit log", actor: "ticketBasic", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.b.ticketId}/audit`, expect: 403, expectError: AUDIT_VIEW },
+  { name: "Ticket audit log paged with another ticket's entry", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/tickets/${c.fx.basicTicketId}/audit?cursor=${c.b.ticketAuditEntryId}`, expect: 400, expectError: "Invalid cursor" },
+  { name: "Audit log filtered to tickets", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/audit-log?recordType=TICKET", expect: 200, contains: (c) => [c.b.ticketAuditEntryId], notContains: (c) => [c.b.auditEntryId] },
+
+  // Round robin on teams, and a queue holding tickets
+  { name: "Turn round robin off", actor: "rep", kind: "refused", method: "PATCH", path: (c) => `/api/teams/${c.fx.roundRobinTeamId}`, body: () => ({ roundRobinEnabled: false }), expect: 403, expectError: TEAM_WRITE },
+  { name: "Set round robin to text", actor: "teamManager", kind: "refused", method: "PATCH", path: (c) => `/api/teams/${c.fx.roundRobinTeamId}`, body: () => ({ roundRobinEnabled: "yes" }), expect: 400, expectError: "Round robin must be true or false" },
+  { name: "Keep round robin on", actor: "teamManager", kind: "allowed", method: "PATCH", path: (c) => `/api/teams/${c.fx.roundRobinTeamId}`, body: () => ({ roundRobinEnabled: true }), expect: 200, contains: () => ['"roundRobinEnabled":true'] },
+  { name: "Delete a queue holding tickets", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/teams/${c.b.helpdeskTeamId}`, expect: 409, expectError: "This team has" },
 ]
 
 const ATTEMPTS: Attempt[] = [
@@ -1566,6 +1751,8 @@ const ATTEMPTS: Attempt[] = [
 
   ...AUDIT_ATTEMPTS,
 
+  ...TICKET_ATTEMPTS,
+
   { name: "Disconnect someone else's shared mailbox", actor: "sender", kind: "refused", sharedMode: "admin", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.fx.adminMailboxId}`, expect: 404, expectError: "Not found" },
   // Even one's own mailbox needs Integrations access while it is the shared sender
   { name: "Disconnect own mailbox while it is the shared sender", actor: "sender", kind: "refused", sharedMode: "sender", method: "DELETE", path: (c) => `/api/microsoft-connections/${c.senderMailboxId}`, expect: 403, expectError: "shared quote sender" },
@@ -1651,6 +1838,11 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
     opportunitySettings: prisma.opportunitySettings.findUnique({ where: { companyId: b } }),
     actionButtons: prisma.actionButton.findMany({ where: { companyId: b }, ...byId }),
     auditLogEntries: prisma.auditLogEntry.findMany({ where: { companyId: b }, ...byId }),
+    tickets: prisma.ticket.findMany({ where: { companyId: b }, ...byId, include: { attachments: byId, timeline: byId } }),
+    ticketTypes: prisma.ticketType.findMany({ where: { companyId: b }, ...byId }),
+    ticketPriorities: prisma.ticketPriority.findMany({ where: { companyId: b }, ...byId }),
+    ticketStatuses: prisma.ticketStatus.findMany({ where: { companyId: b }, ...byId }),
+    ticketSettings: prisma.ticketSettings.findUnique({ where: { companyId: b } }),
   }
   const keys = Object.keys(sections) as (keyof typeof sections)[]
   const values = await Promise.all(keys.map((k) => sections[k]))
@@ -3429,6 +3621,321 @@ async function checkQuoteCopy(prisma: PrismaClient, admin: Session, rep: Session
   }
 }
 
+// ─── Ticket steps ────────────────────────────────────────────────────────────
+// Each works on tickets Test Admin B creates through the API (in Helpdesk
+// unless noted) and removes them at the end. Their audit entries stay until
+// the run's teardown.
+
+interface TicketJson {
+  id?: string
+  number?: string
+  title?: string
+  assignee?: { id?: string } | null
+  status?: { id?: string; category?: string } | null
+  resolvedAt?: string | null
+  closedAt?: string | null
+  statusChangedAt?: string
+}
+
+const ticketJson = (text: string): TicketJson => {
+  try {
+    return JSON.parse(text) as TicketJson
+  } catch {
+    return {}
+  }
+}
+
+async function newTicket(admin: Session, ctx: AttemptContext, extra: Record<string, unknown> = {}): Promise<TicketJson & { id: string }> {
+  const res = await admin.request("POST", "/api/tickets", { json: ticketBody(ctx, { teamId: ctx.b.helpdeskTeamId, ...extra }) })
+  const json = ticketJson(res.text)
+  if (res.status !== 200 || !json.id) throw new HarnessBroken(`couldn't create a ticket: ${res.status} ${errorText(res.text)}`)
+  return json as TicketJson & { id: string }
+}
+
+// Round robin: three unassigned tickets in the Round Robin team go to Test
+// Ticket Basic B, Test Ticket Viewer B, and Test Ticket Basic B again
+// (Test Ticket Inactive B, deactivated and sorting between them, is
+// skipped), each recorded as assigned by System; a named assignee is kept;
+// and with round robin off a new ticket stays unassigned
+async function checkTicketRoundRobin(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[Admin B] Round robin: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const teamId = ctx.fx.roundRobinTeamId
+  const basic = ctx.fx.ticketBasicUserId
+  const viewer = ctx.fx.ticketViewerUserId
+  const created: string[] = []
+  await prisma.team.update({ where: { id: teamId }, data: { roundRobinEnabled: true, roundRobinLastUserId: null } })
+  try {
+    const assignees: (string | null)[] = []
+    for (let i = 1; i <= 3; i++) {
+      const t = await newTicket(admin, ctx, { teamId, title: `Dev check round robin ${i}` })
+      created.push(t.id)
+      assignees.push(t.assignee?.id ?? null)
+    }
+    const expected = [basic, viewer, basic]
+    const name = (id: string | null) => (id === basic ? "Basic" : id === viewer ? "Viewer" : id === ctx.fx.ticketInactiveUserId ? "Inactive" : id ? "someone else" : "nobody")
+    push("unassigned tickets go round the active members", "Basic, Viewer, Basic", assignees.map(name).join(", "),
+      assignees.every((a, i) => a === expected[i]) ? null : "the rotation is wrong or did not skip the inactive member")
+
+    const assigned = await prisma.timelineEntry.findMany({ where: { ticketId: created[0], action: "assignee_changed" }, select: { authorId: true, data: true } })
+    const reason = (assigned[0]?.data as { reason?: unknown } | null)?.reason
+    push("the assignment is on the timeline by System", "one assignee_changed, no author, Round robin", `${assigned.length} entries`,
+      assigned.length !== 1 ? "expected exactly one assignee_changed entry" : assigned[0].authorId ? "the entry has an author" : reason !== "Round robin" ? "the reason isn't Round robin" : null)
+    const audit = await prisma.auditLogEntry.findFirst({ where: { recordType: "TICKET", recordId: created[0], action: "field_changed", field: "assigneeId" }, select: { actorId: true, actorName: true } })
+    push("the assignment is in the audit log by System", "field_changed assigneeId by System", audit ? `by ${audit.actorName}` : "none",
+      !audit ? "no audit entry" : audit.actorId !== null || audit.actorName !== "System" ? "the entry isn't by System" : null)
+
+    const named = await newTicket(admin, ctx, { teamId, assigneeId: viewer, title: "Dev check round robin named" })
+    created.push(named.id)
+    const last = await prisma.team.findUniqueOrThrow({ where: { id: teamId }, select: { roundRobinLastUserId: true } })
+    push("a named assignee is kept and doesn't move the rotation", "Viewer, last still Basic", `${name(named.assignee?.id ?? null)}, last ${name(last.roundRobinLastUserId)}`,
+      named.assignee?.id !== viewer ? "the named assignee was replaced" : last.roundRobinLastUserId !== basic ? "the rotation moved" : null)
+
+    await prisma.team.update({ where: { id: teamId }, data: { roundRobinEnabled: false } })
+    const off = await newTicket(admin, ctx, { teamId, title: "Dev check round robin off" })
+    created.push(off.id)
+    push("with round robin off a new ticket stays unassigned", "nobody", name(off.assignee?.id ?? null), off.assignee ? "it was assigned" : null)
+  } finally {
+    await prisma.ticket.deleteMany({ where: { id: { in: created } } })
+    await prisma.team.update({ where: { id: teamId }, data: { roundRobinEnabled: true, roundRobinLastUserId: null } })
+  }
+}
+
+// Status timestamps: resolvedAt and closedAt follow the status category
+// through PATCH and notes, a status move records one entry, and a PATCH that
+// moves nothing records none
+async function checkTicketStatusTimestamps(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[Admin B] Ticket status: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const fx = ctx.fx
+  const t = await newTicket(admin, ctx, { title: "Dev check ticket status" })
+  const statusEntries = () => prisma.timelineEntry.count({ where: { ticketId: t.id, action: "status_changed" } })
+  const patch = async (statusId: string) => {
+    const res = await admin.request("PATCH", `/api/tickets/${t.id}`, { json: { statusId } })
+    if (res.status !== 200) throw new HarnessBroken(`couldn't change the ticket status: ${res.status} ${errorText(res.text)}`)
+    return ticketJson(res.text)
+  }
+  const stamps = (j: TicketJson) => `resolved ${j.resolvedAt ? "set" : "empty"}, closed ${j.closedAt ? "set" : "empty"}`
+  try {
+    const opened = t.statusChangedAt
+    const resolved = await patch(fx.ticketResolvedStatusId)
+    push("moving to Resolved sets resolvedAt", "resolved set, closed empty", stamps(resolved),
+      !resolved.resolvedAt || resolved.closedAt ? "the dates are wrong" : resolved.statusChangedAt === opened ? "statusChangedAt didn't move" : null)
+    const afterMove = await statusEntries()
+    await patch(fx.ticketResolvedStatusId)
+    const afterSame = await statusEntries()
+    push("a move records one entry, no move records none", "1 then 1", `${afterMove} then ${afterSame}`, afterMove !== 1 || afterSame !== 1 ? "the entry count is wrong" : null)
+    const closed = await patch(fx.ticketClosedStatusId)
+    push("moving to Closed sets closedAt and keeps resolvedAt", "resolved kept, closed set", stamps(closed),
+      !closed.closedAt ? "closedAt isn't set" : closed.resolvedAt !== resolved.resolvedAt ? "resolvedAt changed" : null)
+    const reopened = await patch(fx.ticketOpenStatusId)
+    push("moving back to Open clears both", "resolved empty, closed empty", stamps(reopened), reopened.resolvedAt || reopened.closedAt ? "a date is still set" : null)
+
+    // A note that moves the status records the move on the note itself
+    const before = await statusEntries()
+    const note = await admin.request("POST", `/api/tickets/${t.id}/timeline`, { json: { body: TICKET_NOTE, statusId: fx.ticketWaitingStatusId } })
+    const noteData = (ticketJson(note.text) as { data?: { statusChange?: { to?: { id?: string } } } }).data
+    const waiting = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id }, select: { statusId: true, resolvedAt: true } })
+    push("a note with a status moves it, recorded on the note", "200, on the note, no separate entry", String(note.status),
+      note.status !== 200 ? errorText(note.text)
+        : noteData?.statusChange?.to?.id !== fx.ticketWaitingStatusId ? "the note doesn't hold the move"
+          : waiting.statusId !== fx.ticketWaitingStatusId ? "the status didn't move"
+            : (await statusEntries()) !== before ? "a separate status_changed entry was written"
+              : null)
+
+    // The custom ticket button always moves to Resolved, with an optional note
+    const button = await admin.request("POST", `/api/tickets/${t.id}/timeline`, { json: { body: "<p></p>", actionButtonId: fx.ticketButtonId } })
+    const afterButton = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id }, select: { statusId: true, resolvedAt: true } })
+    const buttonData = (ticketJson(button.text) as { data?: { actionButton?: { id?: string } } }).data
+    push("an empty note through the fixed status button resolves it", "200, Resolved, resolvedAt set, button stored", String(button.status),
+      button.status !== 200 ? errorText(button.text)
+        : afterButton.statusId !== fx.ticketResolvedStatusId || !afterButton.resolvedAt ? "the ticket isn't resolved"
+          : buttonData?.actionButton?.id !== fx.ticketButtonId ? "the entry doesn't name the button"
+            : null)
+    const wrong = await admin.request("POST", `/api/tickets/${t.id}/timeline`, { json: { body: TICKET_NOTE, actionButtonId: fx.ticketButtonId, statusId: fx.ticketOpenStatusId } })
+    push("the fixed status button refuses another status", "400", String(wrong.status),
+      wrong.status !== 400 || !errorText(wrong.text).includes("always moves to its own status") ? `got ${wrong.status}: ${errorText(wrong.text)}` : null)
+  } finally {
+    await prisma.ticket.deleteMany({ where: { id: t.id } })
+  }
+}
+
+// The audit flow: a field change is recorded and undone once, a deleted
+// ticket leaves every list and route (and its undo waits for a restore),
+// and a restore brings it back once
+async function checkTicketAuditFlow(prisma: PrismaClient, admin: Session, basic: Session, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[Admin B] Ticket audit: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const t = await newTicket(admin, ctx, { title: "Dev check ticket audit" })
+  const fieldEntry = (field: string) =>
+    prisma.auditLogEntry.findFirst({ where: { recordType: "TICKET", recordId: t.id, action: "field_changed", field }, orderBy: { createdAt: "desc" }, select: { id: true } })
+  try {
+    const created = await prisma.auditLogEntry.count({ where: { recordType: "TICKET", recordId: t.id, action: "created" } })
+    const firstEntries = await prisma.timelineEntry.findMany({ where: { ticketId: t.id }, select: { kind: true, action: true } })
+    push("creating records created entries and the initial note", "created audit, created action, one note", `${created} audit, ${firstEntries.length} entries`,
+      created !== 1 ? "no created audit entry"
+        : !firstEntries.some((e) => e.action === "created") || firstEntries.filter((e) => e.kind === "NOTE").length !== 1 ? "the timeline is missing the created action or the note"
+          : null)
+
+    const rename = await admin.request("PATCH", `/api/tickets/${t.id}`, { json: { title: "Dev check ticket audit renamed" } })
+    const entry = await fieldEntry("title")
+    if (rename.status !== 200 || !entry) throw new HarnessBroken(`couldn't rename the ticket: ${rename.status} ${errorText(rename.text)}`)
+    const undo = await admin.request("POST", `/api/audit-log/${entry.id}/undo`)
+    const back = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id }, select: { title: true } })
+    push("undo puts the title back", "200, the old title", String(undo.status), undo.status !== 200 ? errorText(undo.text) : back.title !== "Dev check ticket audit" ? "the title wasn't put back" : null)
+    const again = await admin.request("POST", `/api/audit-log/${entry.id}/undo`)
+    push("undo twice is refused", "409", String(again.status), again.status !== 409 ? errorText(again.text) : null)
+
+    // A change, then a delete: gone everywhere, and its undo waits
+    await admin.request("PATCH", `/api/tickets/${t.id}`, { json: { priorityId: ctx.fx.ticketPriorityIds[1] } })
+    const priorityEntry = await fieldEntry("priorityId")
+    const del = await admin.request("DELETE", `/api/tickets/${t.id}`)
+    const gone = await Promise.all([
+      admin.request("GET", `/api/tickets/${t.id}`),
+      admin.request("GET", `/api/tickets/${t.id}/timeline`),
+      admin.request("GET", `/api/tickets/${t.id}/attachments`),
+      admin.request("PATCH", `/api/tickets/${t.id}`, { json: { title: "Should not change" } }),
+      admin.request("POST", `/api/tickets/${t.id}/timeline`, { json: { body: TICKET_NOTE } }),
+    ])
+    const list = await basic.request("GET", "/api/tickets")
+    push("a deleted ticket is gone from its routes and the list", "200, then 404 on every route, not listed", `${del.status}, ${gone.map((g) => g.status).join("/")}`,
+      del.status !== 200 ? errorText(del.text) : gone.some((g) => g.status !== 404) ? "a route still answers" : list.text.includes(t.id) ? "Test Ticket Basic B still lists it" : null)
+    const undoDeleted = priorityEntry ? await admin.request("POST", `/api/audit-log/${priorityEntry.id}/undo`) : null
+    push("undo waits for a restore", "409 restore first", String(undoDeleted?.status ?? "no entry"),
+      !undoDeleted ? "no priority change entry" : undoDeleted.status !== 409 || !errorText(undoDeleted.text).includes("Restore it first") ? errorText(undoDeleted.text) : null)
+
+    const restore = await admin.request("POST", `/api/tickets/${t.id}/restore`)
+    const restoredEntries = await prisma.timelineEntry.count({ where: { ticketId: t.id, action: "restored" } })
+    const restoredAudit = await prisma.auditLogEntry.count({ where: { recordType: "TICKET", recordId: t.id, action: "restored" } })
+    const open = await admin.request("GET", `/api/tickets/${t.id}`)
+    push("restore brings it back once", "200, restored entries, opens again", `${restore.status}, ${open.status}`,
+      restore.status !== 200 ? errorText(restore.text) : restoredEntries !== 1 || restoredAudit !== 1 ? "the restored entries are missing" : open.status !== 200 ? "it doesn't open" : null)
+    const twice = await admin.request("POST", `/api/tickets/${t.id}/restore`)
+    push("a second restore is refused", "409", String(twice.status), twice.status !== 409 ? errorText(twice.text) : null)
+  } finally {
+    await prisma.ticket.deleteMany({ where: { id: t.id } })
+  }
+}
+
+// The daily auto close job on Test Company B only (companyIds, so no other
+// dev data is touched): a ticket resolved 10 days ago closes by System, one
+// resolved yesterday and one with a customer reply since stay, a second run
+// closes nothing, and with auto close off nothing closes. The cron route
+// refuses without its secret (401, or 503 when the server has none).
+async function checkTicketAutoClose(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[], baseUrl: string) {
+  const companyId = ctx.b.companyId
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[System] Ticket auto close: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  // Imported here, after the guard, like the database client
+  const { closeResolvedTickets } = await import("@/lib/ticket-autoclose-job")
+  const DAY = 24 * 60 * 60 * 1000
+  const resolvedId = ctx.fx.ticketResolvedStatusId
+  const created: string[] = []
+  const settings = await prisma.ticketSettings.findUniqueOrThrow({ where: { companyId }, select: { autoCloseResolvedDays: true } })
+  try {
+    await prisma.ticketSettings.update({ where: { companyId }, data: { autoCloseResolvedDays: 7 } })
+    const resolve = async (title: string, daysAgo: number) => {
+      const t = await newTicket(admin, ctx, { title })
+      created.push(t.id)
+      await prisma.ticket.update({ where: { id: t.id }, data: { statusId: resolvedId, resolvedAt: new Date(Date.now() - daysAgo * DAY), closedAt: null } })
+      return t.id
+    }
+    const due = await resolve("Dev check auto close due", 10)
+    const notDue = await resolve("Dev check auto close not due", 1)
+    const replied = await resolve("Dev check auto close replied", 10)
+    await prisma.timelineEntry.create({ data: { companyId, ticketId: replied, kind: "EMAIL_IN", body: "<p>Dev check reply</p>", createdAt: new Date(Date.now() - 5 * DAY) } })
+
+    const startedAt = new Date()
+    const first = await closeResolvedTickets({ companyIds: [companyId], limit: 200 })
+    const states = await prisma.ticket.findMany({ where: { id: { in: created } }, select: { id: true, closedAt: true, status: { select: { category: true } } } })
+    const category = (id: string) => states.find((s) => s.id === id)?.status.category
+    push("only the overdue resolved ticket closes", "due CLOSED, not due and replied RESOLVED, no errors",
+      `${category(due)}, ${category(notDue)}, ${category(replied)}, ${first.errors.length} errors`,
+      first.errors.length > 0 ? `errors: ${first.errors.map((e) => e.error).join("; ")}`
+        : category(due) !== "CLOSED" || category(notDue) !== "RESOLVED" || category(replied) !== "RESOLVED" ? "a ticket has the wrong status"
+          : !states.find((s) => s.id === due)?.closedAt ? "closedAt isn't set"
+            : first.items.length !== 1 || first.items[0].ticketId !== due ? `closed ${first.items.map((i) => i.number).join(", ") || "nothing"} in Test Company B`
+              : null)
+
+    const moved = await prisma.timelineEntry.findMany({ where: { ticketId: due, action: "status_changed", createdAt: { gte: startedAt } }, select: { authorId: true, data: true } })
+    const reason = (moved[0]?.data as { reason?: unknown } | null)?.reason
+    push("the timeline shows the move by System with its reason", "one status_changed, no author", `${moved.length} entries`,
+      moved.length !== 1 ? "expected one status_changed entry" : moved[0].authorId ? "the entry has an author" : typeof reason !== "string" || !reason.startsWith("No customer reply") ? "the reason is missing" : null)
+    const audit = await prisma.auditLogEntry.findFirst({ where: { recordType: "TICKET", recordId: due, action: "field_changed", field: "statusId", createdAt: { gte: startedAt } }, select: { actorId: true, actorName: true } })
+    push("the audit log shows the move by System", "field_changed statusId by System", audit ? `by ${audit.actorName}` : "none",
+      !audit ? "no audit entry" : audit.actorId !== null || audit.actorName !== "System" ? "the entry isn't by System" : null)
+
+    const second = await closeResolvedTickets({ companyIds: [companyId], limit: 200 })
+    push("a second run closes nothing new", "0 closed", `${second.closed} closed`, second.closed !== 0 || second.errors.length > 0 ? `closed ${second.closed}, ${second.errors.length} errors` : null)
+
+    await prisma.ticketSettings.update({ where: { companyId }, data: { autoCloseResolvedDays: 0 } })
+    await prisma.ticket.update({ where: { id: notDue }, data: { resolvedAt: new Date(Date.now() - 30 * DAY) } })
+    const off = await closeResolvedTickets({ companyIds: [companyId], limit: 200 })
+    push("with auto close off nothing closes", "0 closed", `${off.closed} closed`, off.closed !== 0 ? "a ticket closed" : null)
+
+    const url = `${baseUrl}/api/cron/close-resolved-tickets`
+    const noSecret = await fetchOrExplain(url, { redirect: "manual" }, "GET /api/cron/close-resolved-tickets")
+    const wrongSecret = await fetchOrExplain(url, { redirect: "manual", headers: { Authorization: `Bearer dev-check-${Math.random().toString(16).slice(2)}` } }, "GET /api/cron/close-resolved-tickets")
+    const bodies = [await noSecret.text(), await wrongSecret.text()]
+    const configured = noSecret.status === 401
+    const wanted = configured ? '{"error":"Unauthorized"}' : '{"error":"Not configured"}'
+    push(`the cron route refuses without the secret (${configured ? "401, the server has CRON_SECRET" : "503, the server has no CRON_SECRET"})`,
+      "401 or 503 with no details, both the same", `${noSecret.status}, ${wrongSecret.status}`,
+      ![401, 503].includes(noSecret.status) || wrongSecret.status !== noSecret.status ? `got ${noSecret.status} without and ${wrongSecret.status} with a made up secret`
+        : bodies.some((b) => b !== wanted) ? "the answer says more than it should"
+          : null)
+  } finally {
+    await prisma.ticket.deleteMany({ where: { id: { in: created } } })
+    await prisma.ticketSettings.update({ where: { companyId }, data: { autoCloseResolvedDays: settings.autoCloseResolvedDays } })
+  }
+}
+
+// A client that has a ticket can't be deleted (Ticket.clientId is ON DELETE
+// RESTRICT). There is no client DELETE route, so this asks the database
+// itself: inside one transaction that is always rolled back, it creates a
+// client whose only dependent row is one ticket, tries to delete the
+// client, and expects the foreign key refusal (P2003). Nothing is kept,
+// whatever happens.
+async function checkClientWithTicketRestricted(prisma: PrismaClient, ctx: AttemptContext, rows: Row[]) {
+  class RollBack extends Error {}
+  let code: string | null = null
+  let deleted = false
+  try {
+    await prisma.$transaction(async (tx) => {
+      const client = await tx.client.create({ data: { companyId: ctx.b.companyId, name: `${ctx.names.client} (delete check)` }, select: { id: true } })
+      await tx.ticket.create({
+        data: {
+          companyId: ctx.b.companyId,
+          number: "DEV-CHECK-DELETE-0001",
+          title: "Dev check client delete",
+          clientId: client.id,
+          teamId: ctx.b.helpdeskTeamId,
+          typeId: ctx.b.ticketTypeId,
+          priorityId: ctx.b.ticketPriorityId,
+          statusId: ctx.b.ticketStatusId,
+        },
+        select: { id: true },
+      })
+      try {
+        await tx.client.delete({ where: { id: client.id } })
+        deleted = true
+      } catch (err) {
+        code = err && typeof err === "object" && typeof (err as { code?: unknown }).code === "string" ? (err as { code: string }).code : "unknown"
+      }
+      throw new RollBack()
+    })
+  } catch (err) {
+    if (!(err instanceof RollBack)) throw err
+  }
+  rows.push({
+    attempt: "[System] Deleting a client that has a ticket",
+    expected: "refused by the database (P2003)",
+    actual: deleted ? "deleted" : (code ?? "no answer"),
+    result: !deleted && code === "P2003" ? "PASS" : "FAIL",
+    note: deleted ? "the client was deleted (rolled back): Ticket.clientId isn't RESTRICT in this database, run the migration" : code === "P2003" ? undefined : `refused with ${code}`,
+  })
+}
+
 function expectedText(a: Attempt) {
   if (a.location) return `${a.expect} to ${a.location}`
   return `${a.expect}${a.expectError ? ` "${a.expectError}"` : ""}`
@@ -3553,6 +4060,10 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
       teamViewer: new Session("Test Team Viewer B", baseUrl),
       teamManager: new Session("Test Team Manager B", baseUrl),
       auditViewer: new Session("Test Audit Viewer B", baseUrl),
+      ticketBasic: new Session("Test Ticket Basic B", baseUrl),
+      ticketViewer: new Session("Test Ticket Viewer B", baseUrl),
+      ticketDispatcher: new Session("Test Ticket Dispatcher B", baseUrl),
+      ticketSettings: new Session("Test Ticket Settings B", baseUrl),
     }
     await run.credentials.signIn(sessions.admin, names.adminEmail)
     await run.credentials.signIn(sessions.rep, names.repEmail)
@@ -3569,8 +4080,12 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await run.credentials.signIn(sessions.teamViewer, names.teamViewerEmail)
     await run.credentials.signIn(sessions.teamManager, names.teamManagerEmail)
     await run.credentials.signIn(sessions.auditViewer, auditViewer.email)
+    await run.credentials.signIn(sessions.ticketBasic, names.ticketBasicEmail)
+    await run.credentials.signIn(sessions.ticketViewer, names.ticketViewerEmail)
+    await run.credentials.signIn(sessions.ticketDispatcher, names.ticketDispatcherEmail)
+    await run.credentials.signIn(sessions.ticketSettings, names.ticketSettingsEmail)
     console.log(
-      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, Test Manager B, Test Opp Viewer B, Test Opp Settings B, Test Team Basic B, Test Team Viewer B, Test Team Manager B, and Test Audit Viewer B.`
+      `Signed in to ${baseUrl} as Test Admin B, Test Rep B, Test Clerk B, Test Everyone B, Test Sender B, Test Orders B, Test Templater B, Test Viewer B, Test Manager B, Test Opp Viewer B, Test Opp Settings B, Test Team Basic B, Test Team Viewer B, Test Team Manager B, Test Audit Viewer B, Test Ticket Basic B, Test Ticket Viewer B, Test Ticket Dispatcher B, and Test Ticket Settings B.`
     )
 
     const ACTOR_LABEL: Record<Actor, string> = {
@@ -3589,6 +4104,10 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
       teamViewer: "Team Viewer B",
       teamManager: "Team Manager B",
       auditViewer: "Audit Viewer B",
+      ticketBasic: "Ticket Basic B",
+      ticketViewer: "Ticket Viewer B",
+      ticketDispatcher: "Ticket Dispatcher B",
+      ticketSettings: "Ticket Settings B",
     }
     const label = (a: Attempt) => `[${a.kind === "control" ? "control " : ""}${ACTOR_LABEL[a.actor]}] ${a.name}`
 
@@ -3705,6 +4224,14 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // never gives one back
     await checkRecordNumbering(prisma, sessions.admin, ctx, rows)
 
+    // Tickets: round robin in rotation, status timestamps, the audit flow
+    // (undo, delete, restore), and the daily auto close job on Test Company B only
+    await checkTicketRoundRobin(prisma, sessions.admin, ctx, rows)
+    await checkTicketStatusTimestamps(prisma, sessions.admin, ctx, rows)
+    await checkTicketAuditFlow(prisma, sessions.admin, sessions.ticketBasic, ctx, rows)
+    await checkTicketAutoClose(prisma, sessions.admin, ctx, rows, baseUrl)
+    await checkClientWithTicketRestricted(prisma, ctx, rows)
+
     // Attachment downloads: the parent's view check, the redirect, and no
     // bucket link in any attachment response
     await checkAttachmentDownloads(prisma, sessions, ACTOR_LABEL, ctx, rows)
@@ -3779,6 +4306,7 @@ async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<A
   await redirects("clerk", "inventory-asset")
   await redirects("viewer", "sales-order")
   await redirects("viewer", "purchase-order")
+  await redirects("ticketBasic", "ticket")
 
   // Refused: without the page (403), or a record the user can't open (404)
   const pageRefusal: Record<AttachmentKind, string> = {
@@ -3787,8 +4315,11 @@ async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<A
     "sales-order": "view sales orders",
     "purchase-order": "view purchase orders",
     opportunity: "view opportunities",
+    ticket: "view tickets",
   }
   for (const kind of ATTACHMENT_KINDS) await refused("everyone", kind, 403, pageRefusal[kind], "without the page")
+  await refused("oppViewer", "ticket", 403, pageRefusal.ticket, "without the page")
+  await refused("ticketSettings", "ticket", 403, pageRefusal.ticket, "without the page")
   await refused("rep", "vendor", 403, pageRefusal.vendor, "without the page")
   await refused("rep", "sales-order", 403, pageRefusal["sales-order"], "without the page")
   await refused("clerk", "opportunity", 403, pageRefusal.opportunity, "without the page")
@@ -3806,6 +4337,13 @@ async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<A
   } finally {
     await prisma.opportunity.update({ where: { id: opportunityId }, data: { deletedAt: null, deletedById: null } })
   }
+  // The same for a soft deleted ticket
+  try {
+    await prisma.ticket.update({ where: { id: ctx.b.ticketId }, data: { deletedAt: new Date(), deletedById: ctx.b.adminId } })
+    await refused("admin", "ticket", 404, "Not found", "on a deleted ticket")
+  } finally {
+    await prisma.ticket.update({ where: { id: ctx.b.ticketId }, data: { deletedAt: null, deletedById: null } })
+  }
 
   // The sample attachments' dummy example.test link: not available, never redirected
   const dummies: [AttachmentKind, string][] = [
@@ -3814,6 +4352,7 @@ async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<A
     ["purchase-order", ctx.b.poAttachmentId],
     ["inventory-asset", ctx.b.assetAttachmentId],
     ["opportunity", ctx.b.opportunityAttachmentId],
+    ["ticket", ctx.b.ticketAttachmentId],
   ]
   for (const [kind, id] of dummies) {
     const res = await sessions.admin.request("GET", path(kind, id))
@@ -3834,6 +4373,7 @@ async function checkAttachmentDownloads(prisma: PrismaClient, sessions: Record<A
     { name: "purchase order detail", path: `/api/purchase-orders/${ctx.b.purchaseOrderId}`, kind: "purchase-order" },
     { name: "asset attachments", path: `/api/inventory-assets/${ctx.b.assetId}/attachments`, kind: "inventory-asset" },
     { name: "opportunity attachments", path: `/api/opportunities/${ctx.b.opportunityId}/attachments`, kind: "opportunity" },
+    { name: "ticket attachments", path: `/api/tickets/${ctx.b.ticketId}/attachments`, kind: "ticket" },
   ]
   for (const r of responses) {
     const res = await sessions.admin.request("GET", r.path)

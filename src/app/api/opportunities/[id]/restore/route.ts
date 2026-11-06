@@ -7,8 +7,7 @@ import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { opportunityDetailSelect } from "@/lib/opportunity-selects"
 import { withQuoteValue } from "@/lib/opportunity-quotes"
 import { isPrismaError } from "@/lib/opportunity-rules"
-import { recordTimelineActions } from "@/lib/timeline"
-import { recordAudit } from "@/lib/audit-log"
+import { restoreDeletedRecord } from "@/lib/soft-delete"
 import { opportunityRestoredAudit } from "@/lib/opportunity-audit"
 import { userFacingError } from "@/lib/user-error"
 
@@ -46,24 +45,18 @@ export async function POST(
   if (!opportunity.deletedAt) return apiError(409, NOT_DELETED_MESSAGE, "NOT_DELETED")
 
   try {
-    const restored = await prisma.$transaction(async (tx) => {
-      // Only a still deleted row, so two restores never both record
-      const { count } = await tx.opportunity.updateMany({
-        where: deletedOpportunityWhere(ctx, opportunity.id),
-        data: { deletedAt: null, deletedById: null },
-      })
-      if (count === 0) return null
-      const at = new Date()
-      await recordTimelineActions(tx, {
+    const restored = await prisma.$transaction((tx) =>
+      restoreDeletedRecord(tx, {
         companyId: ctx.companyId,
-        authorId: ctx.userId,
+        actorId: ctx.userId,
+        // Only a still deleted row, so two restores never both record
+        clear: () => tx.opportunity.updateMany({ where: deletedOpportunityWhere(ctx, opportunity.id), data: { deletedAt: null, deletedById: null } }),
         subject: { opportunityId: opportunity.id },
-        actions: [{ action: "restored", data: { label: "Opportunity" } }],
-        at,
+        label: "Opportunity",
+        audit: opportunityRestoredAudit(opportunity),
+        read: () => tx.opportunity.findFirstOrThrow({ where: opportunityWhere(ctx, opportunity.id), select: opportunityDetailSelect }),
       })
-      await recordAudit(tx, { companyId: ctx.companyId, actorId: ctx.userId, entries: [opportunityRestoredAudit(opportunity)], at })
-      return tx.opportunity.findFirstOrThrow({ where: opportunityWhere(ctx, opportunity.id), select: opportunityDetailSelect })
-    })
+    )
     if (!restored) return apiError(409, NOT_DELETED_MESSAGE, "NOT_DELETED")
     return NextResponse.json(await withQuoteValue(ctx.companyId, restored))
   } catch (err) {

@@ -5,24 +5,17 @@ import { loadOpportunityTimelineEntry, opportunityTimelineEntryWhere } from "@/l
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
 import { ensureTeamDefaults } from "@/lib/team-defaults"
 import { readJsonObject, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
-import {
-  ONLY_NOTES_EDITABLE_MESSAGE,
-  OWN_NOTES_ONLY_MESSAGE,
-  readNoteBody,
-  timelineEntrySelect,
-  toTimelineEntryResponse,
-} from "@/lib/timeline"
+import { noteChangeRefusal, readNoteBody, timelineEntrySelect, toTimelineEntryResponse } from "@/lib/timeline"
 import { recordAudit } from "@/lib/audit-log"
 import { opportunityNoteAudit } from "@/lib/opportunity-audit"
 
 // Who may change an entry: only a NOTE, and only its own author (Global
-// Admin included). ACTION and EMAIL entries are never edited or deleted.
-// Checked after the entry is found, so another opportunity's or company's
-// entry is a 404 first.
+// Admin included; noteChangeRefusal, shared with tickets). ACTION and EMAIL
+// entries are never edited or deleted. Checked after the entry is found, so
+// another opportunity's or company's entry is a 404 first.
 function refusal(entry: { kind: string; authorId: string | null }, userId: string) {
-  if (entry.kind !== "NOTE") return apiError(403, ONLY_NOTES_EDITABLE_MESSAGE, "FORBIDDEN")
-  if (entry.authorId !== userId) return apiError(403, OWN_NOTES_ONLY_MESSAGE, "FORBIDDEN")
-  return null
+  const reason = noteChangeRefusal(entry, userId)
+  return reason ? apiError(403, reason, "FORBIDDEN") : null
 }
 
 // Edits the author's own note: a new sanitized body and editedAt. The audit

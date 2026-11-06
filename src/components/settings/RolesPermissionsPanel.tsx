@@ -39,6 +39,7 @@ interface RolePermissions {
     salesOrders: boolean
     purchaseOrders: boolean
     opportunities: boolean
+    tickets: boolean
   }
   quotes: {
     create: boolean
@@ -54,6 +55,7 @@ interface RolePermissions {
   salesOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; generatePO: boolean; viewAll: boolean }
   purchaseOrders: { create: boolean; edit: boolean; delete: boolean; changeStatus: boolean; send: boolean; viewAll: boolean }
   opportunities: { create: boolean; edit: boolean; delete: boolean; viewTeam: boolean; viewAll: boolean }
+  tickets: { create: boolean; edit: boolean; delete: boolean; assign: boolean; viewTeam: boolean; viewAll: boolean }
   catalog: { delete: boolean }
   inventory: { delete: boolean }
   settingsSections: {
@@ -67,6 +69,7 @@ interface RolePermissions {
     opportunities: boolean
     teams: boolean
     actionButtons: boolean
+    tickets: boolean
   }
   dashboards: { manage: boolean }
   auditLog: { view: boolean; restore: boolean }
@@ -94,6 +97,7 @@ const PAGE_LABELS: [keyof RolePermissions["pages"], string][] = [
   ["salesOrders", "Sales Orders"],
   ["purchaseOrders", "Purchase Orders"],
   ["opportunities", "Opportunities"],
+  ["tickets", "Tickets"],
   ["settings", "Settings (whole section)"],
 ]
 
@@ -140,6 +144,15 @@ const OPPORTUNITY_LABELS: [keyof RolePermissions["opportunities"], string][] = [
   ["viewAll", "See all users' opportunities (not just their own and unassigned ones)"],
 ]
 
+const TICKET_LABELS: [keyof RolePermissions["tickets"], string][] = [
+  ["create", "Create tickets"],
+  ["edit", "Edit tickets"],
+  ["delete", "Delete tickets"],
+  ["assign", "Assign tickets to anyone in the team"],
+  ["viewTeam", "View team tickets"],
+  ["viewAll", "See all users' tickets (not just their own and unassigned ones)"],
+]
+
 const CATALOG_LABELS: [keyof RolePermissions["catalog"], string][] = [
   ["delete", "Delete catalog items"],
 ]
@@ -159,6 +172,7 @@ const SETTINGS_LABELS: [keyof RolePermissions["settingsSections"], string][] = [
   ["opportunities", "Opportunity Settings"],
   ["teams", "Teams"],
   ["actionButtons", "Action Buttons"],
+  ["tickets", "Ticket Settings"],
 ]
 
 const DASHBOARD_LABELS: [keyof RolePermissions["dashboards"], string][] = [
@@ -469,6 +483,10 @@ export function RolesPermissionsPanel() {
     if (!draft) return
     setDraft({ ...draft, permissions: { ...draft.permissions, opportunities: { ...draft.permissions.opportunities, [key]: value } } })
   }
+  function updateTicketPerm(key: keyof RolePermissions["tickets"], value: boolean) {
+    if (!draft) return
+    setDraft({ ...draft, permissions: { ...draft.permissions, tickets: { ...draft.permissions.tickets, [key]: value } } })
+  }
   function updateCatalogPerm(key: keyof RolePermissions["catalog"], value: boolean) {
     if (!draft) return
     setDraft({ ...draft, permissions: { ...draft.permissions, catalog: { ...draft.permissions.catalog, [key]: value } } })
@@ -755,6 +773,23 @@ export function RolesPermissionsPanel() {
                       checked={draft.isGlobalAdmin ? true : draft.permissions.opportunities?.[key] ?? false}
                       disabled={isLocked}
                       onChange={(e) => updateOpportunityPerm(key, e.target.checked)}
+                    />
+                    {label}
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <h3 className="font-semibold text-sm mb-2">Ticket Actions</h3>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {TICKET_LABELS.map(([key, label]) => (
+                  <label key={key} className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={draft.isGlobalAdmin ? true : draft.permissions.tickets?.[key] ?? false}
+                      disabled={isLocked}
+                      onChange={(e) => updateTicketPerm(key, e.target.checked)}
                     />
                     {label}
                   </label>

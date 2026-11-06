@@ -4,7 +4,6 @@ import { apiError, type AccessContext } from "@/lib/api-access"
 import {
   assertRefs,
   loadClientMainLocationId,
-  loadTeamMemberIds,
   mayAssignOpportunityTo,
   mayUseOpportunityTeam,
   opportunityStageWhere,
@@ -12,6 +11,7 @@ import {
   OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE,
   type BodyRefs,
 } from "@/lib/scoped-loaders"
+import { planTeamPerson, type TeamPersonRules } from "@/lib/team-person-plan"
 import { OWNER_NOT_IN_TEAM_MESSAGE, TEAM_CHANGE_OWNER_MESSAGE, TEAM_NOT_MEMBER_MESSAGE } from "@/lib/team-rules"
 import { opportunityDetailSelect } from "@/lib/opportunity-selects"
 import { OPPORTUNITY_TITLE_MAX, readDate, readExpectedValue, readOptionalId, readText, stageChangeData } from "@/lib/opportunity-rules"
@@ -44,6 +44,22 @@ export const opportunityUpdateExistingSelect = {
 } satisfies Prisma.OpportunitySelect
 
 export type OpportunityUpdateExisting = Prisma.OpportunityGetPayload<{ select: typeof opportunityUpdateExistingSelect }>
+
+// The owner and team rules (planTeamPerson, shared with tickets)
+function opportunityTeamOwnerRules(ctx: AccessContext): TeamPersonRules {
+  return {
+    personKey: "ownerId",
+    mayUseTeam: (actorInTeam) => mayUseOpportunityTeam(ctx, actorInTeam),
+    mayAssign: (ownerId, actorInTeam) => mayAssignOpportunityTo(ctx, ownerId, actorInTeam),
+    messages: {
+      teamNotMember: TEAM_NOT_MEMBER_MESSAGE,
+      assignNotAllowed: OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE,
+      personNotInTeam: OWNER_NOT_IN_TEAM_MESSAGE,
+      teamChangePerson: TEAM_CHANGE_OWNER_MESSAGE,
+    },
+    personNotInTeamCode: "OWNER_NOT_IN_TEAM",
+  }
+}
 
 export type OpportunityUpdatePlan = { data: Prisma.OpportunityUncheckedUpdateInput; response?: undefined } | { response: NextResponse; data?: undefined }
 
@@ -79,44 +95,15 @@ export async function planOpportunityUpdate(
   }
 
   // A new team must be the company's, and one the caller belongs to (any
-  // team with opportunities.viewAll). It can't be cleared.
-  let teamChange: string | null = null
-  if ("teamId" in body) {
-    if (isBlank(body.teamId)) return refuse(apiError(400, "A team is required"))
-    if (typeof body.teamId !== "string") return refuse(apiError(400, "Invalid team", "INVALID_REFERENCE"))
-    const invalidTeam = await assertRefs(ctx, { teamId: body.teamId })
-    if (invalidTeam) return refuse(invalidTeam)
-    if (body.teamId !== existing.teamId) {
-      teamChange = body.teamId
-      data.teamId = body.teamId
-    }
-  }
-
-  // Null or blank unassigns. A named owner follows the owner rule
-  // (mayAssignOpportunityTo) for the opportunity's team, new or kept, and
-  // must be a member of it.
-  const ownerGiven = "ownerId" in body
-  let ownerId = existing.ownerId
-  if (ownerGiven) {
-    const owner = readOptionalId(body.ownerId)
-    if (owner.error !== undefined) return refuse(apiError(400, "Invalid user", "INVALID_REFERENCE"))
-    ownerId = owner.value
-    data.ownerId = owner.value
-    refs.userId = owner.value
-  }
-  // Only a team or owner change is checked against the team, so an older
-  // opportunity whose owner isn't in its team keeps saving its other fields
-  const teamId = teamChange ?? existing.teamId
-  let members = new Set<string>()
-  if ((teamChange || ownerGiven) && teamId) {
-    members = await loadTeamMemberIds(ctx, teamId, [ctx.userId, ownerId])
-    const actorInTeam = members.has(ctx.userId)
-    if (teamChange && !mayUseOpportunityTeam(ctx, actorInTeam)) {
-      return refuse(apiError(403, TEAM_NOT_MEMBER_MESSAGE, "FORBIDDEN"))
-    }
-    if (ownerGiven && !mayAssignOpportunityTo(ctx, ownerId, actorInTeam)) {
-      return refuse(apiError(403, OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE, "FORBIDDEN"))
-    }
+  // team with opportunities.viewAll). It can't be cleared. Null or blank
+  // unassigns; a named owner follows the owner rule (mayAssignOpportunityTo)
+  // for the opportunity's team, new or kept, and must be a member of it.
+  const teamOwner = await planTeamPerson(ctx, { teamId: existing.teamId, personId: existing.ownerId }, body, opportunityTeamOwnerRules(ctx))
+  if (teamOwner.response) return refuse(teamOwner.response)
+  if (teamOwner.teamChange) data.teamId = teamOwner.teamChange
+  if (teamOwner.personGiven) {
+    data.ownerId = teamOwner.personId
+    refs.userId = teamOwner.personId
   }
 
   // A new client or contact is checked as a pair, so the contact (new or
@@ -167,9 +154,8 @@ export async function planOpportunityUpdate(
   // The owner (new, or kept through a team change) must be in the team. A
   // team change whose owner isn't in the new team needs a new owner or
   // unassigned in the same request.
-  if ((teamChange || ownerGiven) && ownerId && !members.has(ownerId)) {
-    return refuse(apiError(400, teamChange && !ownerGiven ? TEAM_CHANGE_OWNER_MESSAGE : OWNER_NOT_IN_TEAM_MESSAGE, "OWNER_NOT_IN_TEAM"))
-  }
+  const notInTeam = teamOwner.checkMembership()
+  if (notInTeam) return refuse(notInTeam)
 
   // A new client without a location takes the new client's main location
   if ("clientId" in body && body.clientId !== existing.clientId && !("clientLocationId" in body)) {

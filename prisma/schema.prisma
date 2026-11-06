@@ -54,6 +54,11 @@ model Company {
   actionButtons           ActionButton[]
   auditLogEntries         AuditLogEntry[]
   numberSequences         NumberSequence[]
+  tickets                 Ticket[]
+  ticketTypes             TicketType[]
+  ticketPriorities        TicketPriority[]
+  ticketStatuses          TicketStatus[]
+  ticketSettings          TicketSettings?
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -168,6 +173,11 @@ model User {
   deletedOpportunities        Opportunity[]              @relation("OpportunityDeletedBy")
   auditLogEntries             AuditLogEntry[]            @relation("AuditLogActor")
   undoneAuditLogEntries       AuditLogEntry[]            @relation("AuditLogUndoneBy")
+  assignedTickets             Ticket[]                   @relation("TicketAssignee")
+  createdTickets              Ticket[]                   @relation("TicketCreatedBy")
+  deletedTickets              Ticket[]                   @relation("TicketDeletedBy")
+  ticketAttachments           TicketAttachment[]
+  roundRobinLastForTeams      Team[]                     @relation("TeamRoundRobinLastUser")
 }
 
 // ─── SESSION (Auth.js) ───────────────────────────────────────────────────────
@@ -221,6 +231,7 @@ model Client {
   loanedInventoryAssets InventoryAsset[]    @relation("InventoryAssetLoanedTo")
   purchaseOrders        PurchaseOrder[]
   opportunities         Opportunity[]
+  tickets               Ticket[]
 }
 
 model Industry {
@@ -260,6 +271,9 @@ model ClientLocation {
 
   // Opportunities at this location
   opportunities Opportunity[]
+
+  // Tickets at this location
+  tickets Ticket[]
 
   // Every Container built under this site — the reverse side of
   // InventoryLocation.clientLocationId below.
@@ -320,6 +334,7 @@ model Contact {
   inventoryAssetsLoanedTo   InventoryAsset[]       @relation("InventoryAssetLoanedToContact")
   inventoryAssetsDeployedTo InventoryAsset[]       @relation("InventoryAssetDeployedToContact")
   opportunities             Opportunity[]
+  tickets                   Ticket[]
 }
 
 // ─── CONTACT TAG ─────────────────────────────────────────────────────────────
@@ -1338,28 +1353,35 @@ model UserRole {
 }
 
 // ─── TEAMS ───────────────────────────────────────────────────────────────────
-// Admin managed groups of users, shared by opportunities now and tickets
-// later. A user can be in several teams. Every company has one default
+// Admin managed groups of users, shared by opportunities and tickets
+// (where teams are the ticket queues). A user can be in several teams. Every company has one default
 // catch all team (isDefault, named General when it is created), which can be
 // renamed but never deleted; src/lib/team-defaults.ts creates it on first
 // use. A team's default roles are granted to its members while they are in
 // it, worked out when permissions are resolved (getEffectiveAccess), never
 // copied into UserRole.
 model Team {
-  id          String   @id @default(cuid())
-  companyId   String
-  company     Company  @relation(fields: [companyId], references: [id])
-  name        String
-  description String?
+  id                   String   @id @default(cuid())
+  companyId            String
+  company              Company  @relation(fields: [companyId], references: [id])
+  name                 String
+  description          String?
   // Exactly one per company: the General team
-  isDefault   Boolean  @default(false)
-  sortOrder   Int      @default(0)
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  isDefault            Boolean  @default(false)
+  sortOrder            Int      @default(0)
+  // Round robin: a new ticket created unassigned in this team goes to the
+  // next active member after roundRobinLastUserId (src/lib/round-robin.ts)
+  roundRobinEnabled    Boolean  @default(false)
+  roundRobinLastUserId String?
+  roundRobinLastUser   User?    @relation("TeamRoundRobinLastUser", fields: [roundRobinLastUserId], references: [id], onDelete: SetNull)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
-  members       TeamMember[]
-  defaultRoles  TeamDefaultRole[]
-  opportunities Opportunity[]
+  members               TeamMember[]
+  defaultRoles          TeamDefaultRole[]
+  opportunities         Opportunity[]
+  tickets               Ticket[]
+  ticketSettingsDefault TicketSettings[]  @relation("TicketSettingsDefaultTeam")
 
   @@unique([companyId, name])
   @@index([companyId])
@@ -1746,10 +1768,11 @@ model TimelineEntry {
   id            String            @id @default(cuid())
   companyId     String
   company       Company           @relation(fields: [companyId], references: [id])
-  // The record the entry belongs to. Tickets add their own nullable link
-  // later; an entry belongs to exactly one record.
+  // The record the entry belongs to: exactly one of these is set
   opportunityId String?
   opportunity   Opportunity?      @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  ticketId      String?
+  ticket        Ticket?           @relation(fields: [ticketId], references: [id], onDelete: Cascade)
   kind          TimelineEntryKind
   // Null means the system (or a user since deleted)
   authorId      String?
@@ -1765,6 +1788,7 @@ model TimelineEntry {
 
   @@index([companyId])
   @@index([opportunityId, createdAt])
+  @@index([ticketId, createdAt])
 }
 
 // ─── NUMBER SEQUENCES ─────────────────────────────────────────────────────────
@@ -1833,30 +1857,35 @@ enum ActionNoteMode {
 
 // The admin defined buttons above a record's timeline (the HaloPSA style
 // "actions"), shared by opportunities and tickets. Defaults are created by
-// ensureActionButtonDefaults (src/lib/action-buttons.ts). Tickets add a
-// fixed ticket status field later, next to fixedStageId.
+// ensureActionButtonDefaults (src/lib/action-buttons.ts). fixedStageId is
+// the stage a FIXED button moves an opportunity to, fixedTicketStatusId
+// the status it moves a ticket to.
 model ActionButton {
-  id               String            @id @default(cuid())
-  companyId        String
-  company          Company           @relation(fields: [companyId], references: [id])
-  label            String
+  id                  String            @id @default(cuid())
+  companyId           String
+  company             Company           @relation(fields: [companyId], references: [id])
+  label               String
   // A name from ACTION_BUTTON_ICONS (src/lib/timeline-buttons.ts)
-  icon             String
+  icon                String
   // #RRGGBB
-  color            String
-  forOpportunities Boolean           @default(true)
-  forTickets       Boolean           @default(false)
-  kind             ActionButtonKind
-  stageMode        ActionStageMode   @default(NONE)
+  color               String
+  forOpportunities    Boolean           @default(true)
+  forTickets          Boolean           @default(false)
+  kind                ActionButtonKind
+  stageMode           ActionStageMode   @default(NONE)
   // The stage a FIXED button moves an opportunity to. A stage a button
   // points at can't be deleted.
-  fixedStageId     String?
-  fixedStage       OpportunityStage? @relation(fields: [fixedStageId], references: [id], onDelete: Restrict)
-  noteMode         ActionNoteMode    @default(REQUIRED)
-  isHidden         Boolean           @default(false)
-  sortOrder        Int               @default(0)
-  createdAt        DateTime          @default(now())
-  updatedAt        DateTime          @updatedAt
+  fixedStageId        String?
+  fixedStage          OpportunityStage? @relation(fields: [fixedStageId], references: [id], onDelete: Restrict)
+  // The status a FIXED button moves a ticket to. A status a button points
+  // at can't be deleted.
+  fixedTicketStatusId String?
+  fixedTicketStatus   TicketStatus?     @relation(fields: [fixedTicketStatusId], references: [id], onDelete: Restrict)
+  noteMode            ActionNoteMode    @default(REQUIRED)
+  isHidden            Boolean           @default(false)
+  sortOrder           Int               @default(0)
+  createdAt           DateTime          @default(now())
+  updatedAt           DateTime          @updatedAt
 
   @@index([companyId])
 }
@@ -1908,4 +1937,173 @@ model AuditLogEntry {
 
   @@index([companyId, createdAt])
   @@index([companyId, recordType, recordId, createdAt])
+}
+
+// ─── TICKETS ─────────────────────────────────────────────────────────────────
+// Tickets reuse what opportunities built: the shared timeline, audit log,
+// action buttons, teams (a ticket's team is its queue), record numbers, and
+// private attachment downloads. A company's types, priorities, statuses,
+// settings, and starting queues are created the first time any ticket or
+// ticket settings route runs for it (ensureTicketDefaults in
+// src/lib/ticket-defaults.ts), never at company creation and never by a
+// data migration.
+
+// Each status sits in one of these fixed categories. Every company keeps at
+// least one status in each.
+enum TicketStatusCategory {
+  OPEN
+  WAITING
+  RESOLVED
+  CLOSED
+}
+
+// Where a ticket came from. Only MANUAL is used so far; the mailbox and
+// NinjaOne phases add the others.
+enum TicketSource {
+  MANUAL
+  EMAIL
+  NINJAONE
+}
+
+model TicketType {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tickets Ticket[]
+
+  @@index([companyId])
+}
+
+model TicketPriority {
+  id        String   @id @default(cuid())
+  companyId String
+  company   Company  @relation(fields: [companyId], references: [id])
+  name      String
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tickets Ticket[]
+
+  @@index([companyId])
+}
+
+model TicketStatus {
+  id        String               @id @default(cuid())
+  companyId String
+  company   Company              @relation(fields: [companyId], references: [id])
+  name      String
+  // Set when the status is created and never changed afterwards
+  category  TicketStatusCategory
+  sortOrder Int                  @default(0)
+  createdAt DateTime             @default(now())
+  updatedAt DateTime             @updatedAt
+
+  tickets       Ticket[]
+  actionButtons ActionButton[]
+
+  @@index([companyId])
+}
+
+// One per company. Like OpportunitySettings, the row is the claim that
+// keeps the lazy defaults from being created twice.
+model TicketSettings {
+  id                    String   @id @default(cuid())
+  companyId             String   @unique
+  company               Company  @relation(fields: [companyId], references: [id])
+  // Number prefix, the same rule as the quote prefix (src/lib/number-prefix.ts)
+  prefix                String   @default("T")
+  // The queue a new ticket goes to when none is chosen (Helpdesk to start).
+  // Null falls back to the General team.
+  defaultTeamId         String?
+  defaultTeam           Team?    @relation("TicketSettingsDefaultTeam", fields: [defaultTeamId], references: [id], onDelete: Restrict)
+  // A ticket in a RESOLVED status closes itself after this many days with
+  // no customer reply (src/lib/ticket-autoclose-job.ts). 0 turns it off.
+  autoCloseResolvedDays Int      @default(7)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+}
+
+model Ticket {
+  id               String          @id @default(cuid())
+  companyId        String
+  company          Company         @relation(fields: [companyId], references: [id])
+  // T-2026-0001, from takeRecordNumber with the key "ticket"
+  number           String
+  title            String
+  // A ticket may have no client or contact (later, unknown email senders
+  // and unmatched NinjaOne alerts). A contact always belongs to the client,
+  // and a location to the client, checked by the API. A client with tickets
+  // can't be deleted (RESTRICT, like Opportunity.clientId), so a ticket
+  // never loses its client.
+  clientId         String?
+  client           Client?         @relation(fields: [clientId], references: [id], onDelete: Restrict)
+  contactId        String?
+  contact          Contact?        @relation(fields: [contactId], references: [id])
+  clientLocationId String?
+  clientLocation   ClientLocation? @relation(fields: [clientLocationId], references: [id], onDelete: SetNull)
+  // The queue
+  teamId           String
+  team             Team            @relation(fields: [teamId], references: [id], onDelete: Restrict)
+  // Null means unassigned. Always a member of the team when the API sets it.
+  assigneeId       String?
+  assignee         User?           @relation("TicketAssignee", fields: [assigneeId], references: [id])
+  typeId           String
+  type             TicketType      @relation(fields: [typeId], references: [id], onDelete: Restrict)
+  priorityId       String
+  priority         TicketPriority  @relation(fields: [priorityId], references: [id], onDelete: Restrict)
+  statusId         String
+  status           TicketStatus    @relation(fields: [statusId], references: [id], onDelete: Restrict)
+  source           TicketSource    @default(MANUAL)
+  statusChangedAt  DateTime        @default(now())
+  // Set when the ticket moves into a RESOLVED status, kept through CLOSED,
+  // cleared when it moves back to OPEN or WAITING
+  resolvedAt       DateTime?
+  // Set when the ticket moves into a CLOSED status, cleared when it leaves
+  closedAt         DateTime?
+  // Deleting only hides it (NOT_DELETED_TICKET in src/lib/scoped-loaders.ts)
+  deletedAt        DateTime?
+  deletedById      String?
+  deletedBy        User?           @relation("TicketDeletedBy", fields: [deletedById], references: [id], onDelete: SetNull)
+  // Null for a ticket the system created (email, NinjaOne)
+  createdById      String?
+  createdBy        User?           @relation("TicketCreatedBy", fields: [createdById], references: [id])
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  attachments TicketAttachment[]
+  timeline    TimelineEntry[]
+
+  @@unique([companyId, number])
+  @@index([companyId])
+  @@index([companyId, deletedAt])
+  @@index([teamId])
+  @@index([assigneeId])
+  @@index([statusId])
+  @@index([typeId])
+  @@index([priorityId])
+  @@index([clientId])
+  @@index([contactId])
+  @@index([clientLocationId])
+  @@index([statusId, resolvedAt])
+}
+
+// Same fields and scoping as OpportunityAttachment
+model TicketAttachment {
+  id               String   @id @default(cuid())
+  ticketId         String
+  ticket           Ticket   @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  fileName         String
+  fileUrl          String
+  fileSize         Int?
+  uploadedByUserId String
+  uploadedByUser   User     @relation(fields: [uploadedByUserId], references: [id])
+  createdAt        DateTime @default(now())
+
+  @@index([ticketId])
 }

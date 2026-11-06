@@ -116,6 +116,7 @@ export interface TeamSummary {
   description: string | null
   isDefault: boolean
   sortOrder: number
+  roundRobinEnabled: boolean
   memberCount: number
   defaultRoles: TeamRole[]
   // Whether the signed in user is in it

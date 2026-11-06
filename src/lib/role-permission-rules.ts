@@ -7,15 +7,16 @@ import { checkAccess } from "@/lib/access-check"
 // added later must be listed here too, or saving a role that has it is
 // rejected as unknown.
 const BOOLEAN_SECTIONS: Record<string, readonly string[]> = {
-  pages: ["clients", "catalog", "vendors", "inventory", "quotes", "settings", "salesOrders", "purchaseOrders", "opportunities"],
+  pages: ["clients", "catalog", "vendors", "inventory", "quotes", "settings", "salesOrders", "purchaseOrders", "opportunities", "tickets"],
   quotes: ["create", "edit", "delete", "changeStatus", "approve", "sendEmail", "viewAllUsersQuotes", "sendAsOthers"],
   clients: ["create", "edit", "delete"],
   salesOrders: ["create", "edit", "delete", "changeStatus", "generatePO", "viewAll"],
   purchaseOrders: ["create", "edit", "delete", "changeStatus", "send", "viewAll"],
   opportunities: ["create", "edit", "delete", "viewTeam", "viewAll"],
+  tickets: ["create", "edit", "delete", "assign", "viewTeam", "viewAll"],
   catalog: ["delete"],
   inventory: ["delete"],
-  settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders", "opportunities", "teams", "actionButtons"],
+  settingsSections: ["company", "users", "quotes", "approvalWorkflows", "notifications", "integrations", "salesOrders", "opportunities", "teams", "actionButtons", "tickets"],
   dashboards: ["manage"],
   auditLog: ["view", "restore"],
 }

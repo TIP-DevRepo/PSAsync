@@ -4,7 +4,7 @@ import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
 import { isPrismaError, readJsonObject, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
-import { checkActionButton, mergeButtonPatch, type ActionButtonFields } from "@/lib/action-button-rules"
+import { ACTION_BUTTON_MESSAGES, checkActionButton, mergeButtonPatch, type ActionButtonFields } from "@/lib/action-button-rules"
 import { actionButtonSelect, ensureActionButtonDefaults, LAST_BUTTON_MESSAGE, withActionButtonsLock } from "@/lib/action-buttons"
 import { isRefusal, refuse } from "@/lib/opportunity-defaults"
 import { isAvailableActionKind } from "@/lib/timeline-buttons"
@@ -40,6 +40,7 @@ export async function PATCH(
       kind: true,
       stageMode: true,
       fixedStageId: true,
+      fixedTicketStatusId: true,
       noteMode: true,
       isHidden: true,
     },
@@ -50,7 +51,13 @@ export async function PATCH(
   if (!body) return apiError(400, INVALID_BODY_MESSAGE)
   const checked = checkActionButton(mergeButtonPatch(stored as ActionButtonFields, body))
   if (checked.error !== undefined) return apiError(400, checked.error)
-  const invalid = await assertRefs(ctx, { opportunityStageId: checked.value.fixedStageId })
+  // A ticket status named for a button that doesn't always move to one
+  // status is refused (a stored one is dropped when the button stops being FIXED)
+  const givenStatus = body.fixedTicketStatusId
+  if (givenStatus !== undefined && givenStatus !== null && givenStatus !== "" && checked.value.stageMode !== "FIXED") {
+    return apiError(400, ACTION_BUTTON_MESSAGES.fixedTicketStatusOnlyWhenFixed)
+  }
+  const invalid = await assertRefs(ctx, { opportunityStageId: checked.value.fixedStageId, ticketStatusId: checked.value.fixedTicketStatusId })
   if (invalid) return invalid
 
   try {

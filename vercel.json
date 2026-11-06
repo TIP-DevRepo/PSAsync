@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/expire-quotes",
       "schedule": "0 6 * * *"
+    },
+    {
+      "path": "/api/cron/close-resolved-tickets",
+      "schedule": "15 6 * * *"
     }
   ]
 }

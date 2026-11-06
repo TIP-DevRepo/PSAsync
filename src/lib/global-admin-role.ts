@@ -25,6 +25,7 @@ export function buildGlobalAdminPermissions(): Prisma.InputJsonValue {
       salesOrders: true,
       purchaseOrders: true,
       opportunities: true,
+      tickets: true,
     },
     quotes: {
       create: true,
@@ -40,6 +41,7 @@ export function buildGlobalAdminPermissions(): Prisma.InputJsonValue {
     salesOrders: { create: true, edit: true, delete: true, changeStatus: true, generatePO: true, viewAll: true },
     purchaseOrders: { create: true, edit: true, delete: true, changeStatus: true, send: true, viewAll: true },
     opportunities: { create: true, edit: true, delete: true, viewTeam: true, viewAll: true },
+    tickets: { create: true, edit: true, delete: true, assign: true, viewTeam: true, viewAll: true },
     settingsSections: {
       company: true,
       users: true,
@@ -51,6 +53,7 @@ export function buildGlobalAdminPermissions(): Prisma.InputJsonValue {
       opportunities: true,
       teams: true,
       actionButtons: true,
+      tickets: true,
     },
     dashboards: { manage: true },
     auditLog: { view: true, restore: true },

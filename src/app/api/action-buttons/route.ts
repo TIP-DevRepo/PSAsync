@@ -4,7 +4,7 @@ import { apiError, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
 import { isPrismaError, readJsonObject, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
-import { checkActionButton } from "@/lib/action-button-rules"
+import { ACTION_BUTTON_MESSAGES, checkActionButton } from "@/lib/action-button-rules"
 import {
   ACTION_BUTTON_ORDER,
   actionButtonSelect,
@@ -25,15 +25,36 @@ const RECORD_RULE = {
   message: "You do not have permission to view opportunities",
 }
 
+const TICKET_RECORD_RULE = {
+  permission: ["pages.tickets", "settingsSections.actionButtons"],
+  message: "You do not have permission to view tickets",
+}
+
+// The admin list without ?for=, a record type's list with it
+function recordRuleFor(forParam: string | null) {
+  if (forParam === null) return ADMIN_RULE
+  return forParam === "ticket" ? TICKET_RECORD_RULE : RECORD_RULE
+}
+
+// A ticket status named for a button that doesn't always move to one
+// status is refused, rather than silently dropped
+function ticketStatusProblem(body: Record<string, unknown>, stageMode: string): string | null {
+  const given = body.fixedTicketStatusId
+  if (given === undefined || given === null || given === "") return null
+  return stageMode === "FIXED" ? null : ACTION_BUTTON_MESSAGES.fixedTicketStatusOnlyWhenFixed
+}
+
 // Two lists:
 //   ?for=opportunity: the buttons an opportunity shows (not hidden, set to
 //     show there, and of a kind whose feature exists), in order, as the
 //     action bar's definitions. Anyone who can open opportunities reads
 //     them, as can Action Buttons admins.
+//   ?for=ticket: the same for a ticket (forTickets, Note and Email only, a
+//     FIXED button with its ticket status), for anyone who can open tickets.
 //   no ?for: every button, hidden ones and kinds that aren't available yet
 //     included, for Settings > Action Buttons (settingsSections.actionButtons).
 export async function GET(req: NextRequest) {
-  const { ctx, response } = await requireAccess(req.nextUrl.searchParams.get("for") === null ? ADMIN_RULE : RECORD_RULE)
+  const { ctx, response } = await requireAccess(recordRuleFor(req.nextUrl.searchParams.get("for")))
   if (response) return response
 
   const forParam = req.nextUrl.searchParams.get("for")
@@ -73,7 +94,9 @@ export async function POST(req: NextRequest) {
     ...body,
   })
   if (checked.error !== undefined) return apiError(400, checked.error)
-  const invalid = await assertRefs(ctx, { opportunityStageId: checked.value.fixedStageId })
+  const statusProblem = ticketStatusProblem(body, checked.value.stageMode)
+  if (statusProblem) return apiError(400, statusProblem)
+  const invalid = await assertRefs(ctx, { opportunityStageId: checked.value.fixedStageId, ticketStatusId: checked.value.fixedTicketStatusId })
   if (invalid) return invalid
 
   const companyId = ctx.companyId
@@ -85,7 +108,7 @@ export async function POST(req: NextRequest) {
     })
     return NextResponse.json({ ...created, available: isAvailableActionKind(created.kind) }, { status: 201 })
   } catch (err) {
-    // The fixed stage was deleted since assertRefs checked it
+    // The fixed stage or status was deleted since assertRefs checked it
     if (isPrismaError(err, "P2003")) return apiError(400, "Invalid stage", "INVALID_REFERENCE")
     const { message, status } = userFacingError(err, "Creating an action button")
     return apiError(status, message)
