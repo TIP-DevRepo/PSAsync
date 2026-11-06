@@ -32,6 +32,8 @@ export function toTeamResponse(team: TeamRow, ctx: Pick<AccessContext, "userId" 
     description: team.description,
     isDefault: team.isDefault,
     sortOrder: team.sortOrder,
+    // New unassigned tickets in this team go round its active members
+    roundRobinEnabled: team.roundRobinEnabled,
     memberCount: team.members.length,
     defaultRoles: team.defaultRoles.map(({ role }) => ({ id: role.id, name: role.name, rank: role.rank, color: role.color, isGlobalAdmin: role.isGlobalAdmin })),
     isMember: team.members.some((m) => m.user.id === ctx.userId),
