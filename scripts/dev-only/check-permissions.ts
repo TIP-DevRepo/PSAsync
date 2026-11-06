@@ -3890,6 +3890,52 @@ async function checkTicketAutoClose(prisma: PrismaClient, admin: Session, ctx: A
   }
 }
 
+// A client that has a ticket can't be deleted (Ticket.clientId is ON DELETE
+// RESTRICT). There is no client DELETE route, so this asks the database
+// itself: inside one transaction that is always rolled back, it creates a
+// client whose only dependent row is one ticket, tries to delete the
+// client, and expects the foreign key refusal (P2003). Nothing is kept,
+// whatever happens.
+async function checkClientWithTicketRestricted(prisma: PrismaClient, ctx: AttemptContext, rows: Row[]) {
+  class RollBack extends Error {}
+  let code: string | null = null
+  let deleted = false
+  try {
+    await prisma.$transaction(async (tx) => {
+      const client = await tx.client.create({ data: { companyId: ctx.b.companyId, name: `${ctx.names.client} (delete check)` }, select: { id: true } })
+      await tx.ticket.create({
+        data: {
+          companyId: ctx.b.companyId,
+          number: "DEV-CHECK-DELETE-0001",
+          title: "Dev check client delete",
+          clientId: client.id,
+          teamId: ctx.b.helpdeskTeamId,
+          typeId: ctx.b.ticketTypeId,
+          priorityId: ctx.b.ticketPriorityId,
+          statusId: ctx.b.ticketStatusId,
+        },
+        select: { id: true },
+      })
+      try {
+        await tx.client.delete({ where: { id: client.id } })
+        deleted = true
+      } catch (err) {
+        code = err && typeof err === "object" && typeof (err as { code?: unknown }).code === "string" ? (err as { code: string }).code : "unknown"
+      }
+      throw new RollBack()
+    })
+  } catch (err) {
+    if (!(err instanceof RollBack)) throw err
+  }
+  rows.push({
+    attempt: "[System] Deleting a client that has a ticket",
+    expected: "refused by the database (P2003)",
+    actual: deleted ? "deleted" : (code ?? "no answer"),
+    result: !deleted && code === "P2003" ? "PASS" : "FAIL",
+    note: deleted ? "the client was deleted (rolled back): Ticket.clientId isn't RESTRICT in this database, run the migration" : code === "P2003" ? undefined : `refused with ${code}`,
+  })
+}
+
 function expectedText(a: Attempt) {
   if (a.location) return `${a.expect} to ${a.location}`
   return `${a.expect}${a.expectError ? ` "${a.expectError}"` : ""}`
@@ -4184,6 +4230,7 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await checkTicketStatusTimestamps(prisma, sessions.admin, ctx, rows)
     await checkTicketAuditFlow(prisma, sessions.admin, sessions.ticketBasic, ctx, rows)
     await checkTicketAutoClose(prisma, sessions.admin, ctx, rows, baseUrl)
+    await checkClientWithTicketRestricted(prisma, ctx, rows)
 
     // Attachment downloads: the parent's view check, the redirect, and no
     // bucket link in any attachment response
