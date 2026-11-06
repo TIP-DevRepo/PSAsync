@@ -109,7 +109,18 @@ export interface NoteStageChange {
 // The stage change a note's data holds, or null. Reads stored data without
 // trusting its shape.
 export function noteStageChange(data: unknown): NoteStageChange | null {
-  const change = data && typeof data === "object" ? (data as { stageChange?: unknown }).stageChange : null
+  return readMove(data, "stageChange")
+}
+
+// A ticket's NOTE or EMAIL_OUT posted with a status change stores it the
+// same way, as { statusChange: { from, to } } (the category is the
+// status's), never as a separate status_changed entry
+export function noteStatusChange(data: unknown): NoteStageChange | null {
+  return readMove(data, "statusChange")
+}
+
+function readMove(data: unknown, key: "stageChange" | "statusChange"): NoteStageChange | null {
+  const change = data && typeof data === "object" ? (data as Record<string, unknown>)[key] : null
   if (!change || typeof change !== "object") return null
   const { from, to } = change as { from?: unknown; to?: unknown }
   const isRef = (r: unknown): r is NoteStageChange["to"] =>

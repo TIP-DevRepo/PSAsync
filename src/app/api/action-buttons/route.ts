@@ -30,6 +30,12 @@ const TICKET_RECORD_RULE = {
   message: "You do not have permission to view tickets",
 }
 
+// The admin list without ?for=, a record type's list with it
+function recordRuleFor(forParam: string | null) {
+  if (forParam === null) return ADMIN_RULE
+  return forParam === "ticket" ? TICKET_RECORD_RULE : RECORD_RULE
+}
+
 // A ticket status named for a button that doesn't always move to one
 // status is refused, rather than silently dropped
 function ticketStatusProblem(body: Record<string, unknown>, stageMode: string): string | null {
@@ -48,8 +54,7 @@ function ticketStatusProblem(body: Record<string, unknown>, stageMode: string): 
 //   no ?for: every button, hidden ones and kinds that aren't available yet
 //     included, for Settings > Action Buttons (settingsSections.actionButtons).
 export async function GET(req: NextRequest) {
-  const requested = req.nextUrl.searchParams.get("for")
-  const { ctx, response } = await requireAccess(requested === null ? ADMIN_RULE : requested === "ticket" ? TICKET_RECORD_RULE : RECORD_RULE)
+  const { ctx, response } = await requireAccess(recordRuleFor(req.nextUrl.searchParams.get("for")))
   if (response) return response
 
   const forParam = req.nextUrl.searchParams.get("for")

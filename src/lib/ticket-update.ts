@@ -27,8 +27,8 @@ import { recordTimelineActions } from "@/lib/timeline"
 import { ticketChangeActions, ticketTimelineSnapshotSelect } from "@/lib/ticket-timeline"
 import { recordAudit, type AuditEntryInput } from "@/lib/audit-log"
 import { ticketFieldAudits } from "@/lib/ticket-audit"
-import type { TimelineAction } from "@/lib/timeline-actions"
-import type { Prisma } from "@/generated/prisma"
+import type { NoteStageChange, TimelineAction } from "@/lib/timeline-actions"
+import type { Prisma, TicketStatusCategory } from "@/generated/prisma"
 
 // Changing a ticket's fields, shared by PATCH /api/tickets/[id] and the
 // audit log's undo, like src/lib/opportunity-update.ts: planTicketUpdate
@@ -168,6 +168,28 @@ export async function planTicketUpdate(ctx: AccessContext, existing: TicketUpdat
   }
 
   return { data }
+}
+
+// Moves a ticket to another status inside the caller's transaction (a note,
+// an email, or the auto close job), with the same timestamps as the PATCH
+// (ticketStatusChangeData). Returns the move, names and categories
+// included, or null when the ticket is already in that status. The caller
+// records it (on the note or email entry, or as a status_changed action).
+export async function moveTicketStatus(
+  tx: Pick<Prisma.TransactionClient, "ticket">,
+  ctx: Pick<AccessContext, "companyId">,
+  ticketId: string,
+  to: { id: string; name: string; category: TicketStatusCategory },
+  now: Date
+): Promise<NoteStageChange | null> {
+  const before = await tx.ticket.findFirstOrThrow({
+    where: ticketWhere(ctx, ticketId),
+    select: { resolvedAt: true, closedAt: true, status: { select: { id: true, name: true, category: true } } },
+  })
+  const change = ticketStatusChangeData(before.status, to, before, now)
+  if (!("statusId" in change)) return null
+  await tx.ticket.update({ where: ticketWhere(ctx, ticketId), data: change, select: { id: true } })
+  return { from: before.status, to }
 }
 
 type UpdateDb = Pick<Prisma.TransactionClient, "ticket" | "timelineEntry" | "auditLogEntry" | "user">
