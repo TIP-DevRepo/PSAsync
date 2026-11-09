@@ -7,6 +7,7 @@ import { opportunityCreatedAction } from "@/lib/opportunity-timeline"
 import { loadDefaultTeamId } from "@/lib/team-defaults"
 import { recordAudit } from "@/lib/audit-log"
 import { opportunityCreatedAudit } from "@/lib/opportunity-audit"
+import { prefixedTitle } from "@/lib/record-title"
 
 // Creating an opportunity, shared by POST /api/opportunities (a person) and
 // a later branch that creates one automatically (from a sent quote). Every
@@ -62,11 +63,13 @@ async function createOpportunityIn(tx: Prisma.TransactionClient, input: NewOppor
   const teamId = input.teamId ?? (await loadDefaultTeamId(input.companyId, tx))
   if (!teamId) throw new Error("The company has no General team; run ensureTeamDefaults first")
   const number = await takeOpportunityNumber(tx, input.companyId, now)
+  // The client's prefix goes in front of the title (src/lib/record-title.ts)
+  const client = await tx.client.findFirst({ where: { id: input.clientId, companyId: input.companyId }, select: { prefix: true } })
   const created = await tx.opportunity.create({
     data: {
       companyId: input.companyId,
       number,
-      title: input.title,
+      title: prefixedTitle(input.title, client?.prefix),
       clientId: input.clientId,
       contactId: input.contactId,
       clientLocationId: input.clientLocationId,

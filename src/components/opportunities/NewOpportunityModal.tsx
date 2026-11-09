@@ -13,6 +13,7 @@ import { isBlankHtml } from "@/lib/timeline-actions"
 import { ClientContactPicker } from "@/components/ClientContactPicker"
 import { useClientLocations } from "./useClientLocations"
 import type { ClientContactValue } from "@/lib/client-contact-choice"
+import { TitlePrefixPreview } from "@/components/TitlePrefixPreview"
 
 // The design's form fields: 8px corners, the light surface fill, a 36px
 // minimum height, and the label small and muted above
@@ -31,7 +32,8 @@ export function NewOpportunityModal({
 }: {
   stages: StageOption[]
   types: TypeOption[]
-  clients: { id: string; name: string }[]
+  // With each client's prefix (GET /api/clients), for the title preview
+  clients: { id: string; name: string; prefix?: string | null }[]
   // GET /api/teams and GET /api/users, loaded by the page
   teams: TeamSummary[]
   users: { id: string; name: string; active: boolean }[]
@@ -189,6 +191,7 @@ export function NewOpportunityModal({
             autoFocus
           />
           {fieldError("title")}
+          <TitlePrefixPreview title={form.title} prefix={clients.find((c) => c.id === party.client?.id)?.prefix} />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

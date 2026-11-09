@@ -57,7 +57,7 @@ export function OpportunitiesPage() {
 
   const [stages, setStages] = useState<StageOption[]>([])
   const [types, setTypes] = useState<TypeOption[]>([])
-  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
+  const [clients, setClients] = useState<{ id: string; name: string; prefix?: string | null }[]>([])
   const [teams, setTeams] = useState<TeamSummary[]>([])
   const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityRow[]>([])

@@ -9,6 +9,7 @@ import { ticketAssigneeAudit, ticketCreatedAudit } from "@/lib/ticket-audit"
 import { nextRoundRobinAssignee } from "@/lib/round-robin"
 import type { TimelineAction } from "@/lib/timeline-actions"
 import { notifyTicketAssignee } from "@/lib/ticket-notifications"
+import { prefixedTitle } from "@/lib/record-title"
 
 // Creating a ticket, shared by POST /api/tickets (a person) and the later
 // mailbox and NinjaOne phases (the system). Every ticket starts with a
@@ -82,13 +83,15 @@ async function createTicketIn(tx: Prisma.TransactionClient, input: NewTicket, no
   const number = await takeRecordNumber(tx, input.companyId, "ticket", settings.prefix, now)
 
   const roundRobin = input.assigneeId === null ? await takeRoundRobinAssignee(tx, input.companyId, input.teamId) : null
+  // The client's prefix goes in front of the title (src/lib/record-title.ts)
+  const client = input.clientId ? await tx.client.findFirst({ where: { id: input.clientId, companyId: input.companyId }, select: { prefix: true } }) : null
   const timestamps = statusTimestamps(null, input.status.category, { resolvedAt: null, closedAt: null }, now)
 
   const created = await tx.ticket.create({
     data: {
       companyId: input.companyId,
       number,
-      title: input.title,
+      title: prefixedTitle(input.title, client?.prefix),
       clientId: input.clientId,
       contactId: input.contactId,
       clientLocationId: input.clientLocationId,

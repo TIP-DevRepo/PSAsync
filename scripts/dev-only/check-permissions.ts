@@ -3686,6 +3686,61 @@ async function newTicket(admin: Session, ctx: AttemptContext, extra: Record<stri
   return json as TicketJson & { id: string }
 }
 
+// Client prefixes on new titles (src/lib/record-title.ts). The sample
+// client gets a prefix for the step (its own value is put back after).
+// Test Admin B creates a ticket and an opportunity on it, each saved as
+// "<PREFIX> - <title>"; a title that already starts with the prefix (in
+// another case) is kept as typed; a ticket with no client keeps its title;
+// and renaming the ticket afterwards saves the new title as typed.
+// Everything it made is removed.
+async function checkClientTitlePrefix(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `Client prefix: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const PREFIX = "DEVCHK"
+  const client = await prisma.client.findUniqueOrThrow({ where: { id: ctx.b.clientId }, select: { prefix: true } })
+  const tickets: string[] = []
+  const opportunities: string[] = []
+  await prisma.client.update({ where: { id: ctx.b.clientId }, data: { prefix: PREFIX } })
+  try {
+    const title = (text: string) => (JSON.parse(text || "{}") as { id?: string; title?: string })
+    const ticket = await admin.request("POST", "/api/tickets", { json: ticketBody(ctx, { teamId: ctx.b.helpdeskTeamId, title: "Login Help" }) })
+    const t = title(ticket.text)
+    if (t.id) tickets.push(t.id)
+    push("a new ticket on a client with a prefix", `"${PREFIX} - Login Help"`, ticket.status === 200 ? `"${t.title}"` : String(ticket.status),
+      ticket.status !== 200 ? errorText(ticket.text) : t.title !== `${PREFIX} - Login Help` ? "the title isn't prefixed" : null)
+
+    const again = await admin.request("POST", "/api/tickets", { json: ticketBody(ctx, { teamId: ctx.b.helpdeskTeamId, title: "devchk - Already prefixed" }) })
+    const a = title(again.text)
+    if (a.id) tickets.push(a.id)
+    push("a title already starting with the prefix", '"devchk - Already prefixed"', again.status === 200 ? `"${a.title}"` : String(again.status),
+      again.status !== 200 ? errorText(again.text) : a.title !== "devchk - Already prefixed" ? "the prefix was added twice" : null)
+
+    const none = await admin.request("POST", "/api/tickets", { json: { initialNote: TICKET_NOTE, title: "No client here" } })
+    const n = title(none.text)
+    if (n.id) tickets.push(n.id)
+    push("a ticket with no client", '"No client here"', none.status === 200 ? `"${n.title}"` : String(none.status),
+      none.status !== 200 ? errorText(none.text) : n.title !== "No client here" ? "the title changed" : null)
+
+    if (t.id) {
+      const renamed = await admin.request("PATCH", `/api/tickets/${t.id}`, { json: { title: "Renamed later" } })
+      push("renaming keeps the title as typed", '"Renamed later"', renamed.status === 200 ? `"${title(renamed.text).title}"` : String(renamed.status),
+        renamed.status !== 200 ? errorText(renamed.text) : title(renamed.text).title !== "Renamed later" ? "the prefix was added on rename" : null)
+    }
+
+    const opp = await admin.request("POST", "/api/opportunities", {
+      json: { title: "Network refresh", clientId: ctx.b.clientId, contactId: ctx.b.contactId, initialNote: OPP_NOTE },
+    })
+    const o = title(opp.text)
+    if (o.id) opportunities.push(o.id)
+    push("a new opportunity on a client with a prefix", `"${PREFIX} - Network refresh"`, opp.status === 200 ? `"${o.title}"` : String(opp.status),
+      opp.status !== 200 ? errorText(opp.text) : o.title !== `${PREFIX} - Network refresh` ? "the title isn't prefixed" : null)
+  } finally {
+    await prisma.ticket.deleteMany({ where: { id: { in: tickets } } })
+    await prisma.opportunity.deleteMany({ where: { id: { in: opportunities } } })
+    await prisma.client.update({ where: { id: ctx.b.clientId }, data: { prefix: client.prefix } })
+  }
+}
+
 // Removing a company logo. Test Company B's logos are set to dummy links
 // outside the uploads bucket for the step (so the route's file delete
 // skips them and nothing reaches S3) and put back after. Test Manager B
@@ -4409,6 +4464,10 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // Company logos: removing one needs the upload permission, clears it,
     // and the portal and quote PDFs still render without it
     await checkLogoRemoval(prisma, sessions, ctx, rows)
+
+    // Client prefixes: new ticket and opportunity titles start with the
+    // client's prefix
+    await checkClientTitlePrefix(prisma, sessions.admin, ctx, rows)
 
     // Tickets: round robin in rotation, status timestamps, the audit flow
     // (undo, delete, restore), and the daily auto close job on Test Company B only

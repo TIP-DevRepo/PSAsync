@@ -10,7 +10,8 @@ export interface TicketOptions {
   types: TicketOption[]
   priorities: TicketOption[]
   statuses: TicketStatusOption[]
-  clients: { id: string; name: string }[]
+  // With each client's prefix, for the New ticket dialog's title preview
+  clients: { id: string; name: string; prefix: string | null }[]
   // Ticket Settings' default queue (GET /api/ticket-settings)
   defaultTeamId: string | null
   loaded: boolean
@@ -50,7 +51,7 @@ export function useTicketOptions(): TicketOptions {
         types,
         priorities,
         statuses,
-        clients: clients.map((c: { id: string; name: string }) => ({ id: c.id, name: c.name })),
+        clients: clients.map((c: { id: string; name: string; prefix?: string | null }) => ({ id: c.id, name: c.name, prefix: c.prefix ?? null })),
         defaultTeamId: settings && typeof settings.defaultTeamId === "string" ? settings.defaultTeamId : null,
         loaded: true,
       })

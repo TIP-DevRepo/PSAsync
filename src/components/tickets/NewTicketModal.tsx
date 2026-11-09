@@ -13,6 +13,7 @@ import { TICKET_TITLE_MAX } from "@/lib/ticket-rules"
 import { assigneeFieldChoices, defaultNewTicketTeamId, firstByOrder, ROUND_ROBIN_NOTE, ticketTeamChoices } from "@/lib/ticket-view"
 import type { ClientContactValue } from "@/lib/client-contact-choice"
 import type { TicketOptions } from "./useTicketOptions"
+import { TitlePrefixPreview } from "@/components/TitlePrefixPreview"
 
 // The design's form fields, as the New opportunity dialog draws them
 const FIELD =
@@ -145,6 +146,7 @@ export function NewTicketModal({
               {errors.title}
             </p>
           )}
+          <TitlePrefixPreview title={title} prefix={clients.find((c) => c.id === party.client?.id)?.prefix} />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
