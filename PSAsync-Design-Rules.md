@@ -111,7 +111,7 @@ The default Won and Lost action buttons show as the ok and bad tints; any other 
 - **StatTile** in a **StatRow**: a few numbers at the top of a list page. Work them out from data the page already has; never add a query just for a tile.
 - **ViewTabs** (`src/components/ui/view-tabs.tsx`, a client component): view switches (Board and List, My tickets and Unassigned), pressed buttons with optional counts and an icon element.
 - **PriorityMarker**: a priority as a small square in its tone followed by its name (the Tickets list and the ticket card). `TONE_SOLID` holds the solid form of each tone for small marks like it.
-- **FilterChip** (`src/components/ui/filter-chip.tsx`, client): an active scope filter next to a list's search (a queue or team, an assignee or owner), an accent tinted pill removed with its X.
+- **FilterChip** (`src/components/ui/filter-chip.tsx`, client): an active person filter next to a list's search (an assignee or owner), an accent tinted pill removed with its X. A queue or team has no chip: the breadcrumb, the page line, and the sidebar folder show it.
 - **TeamFolder** (`src/components/layout/TeamFolder.tsx`, client): a sidebar entry that opens to its teams, Unassigned, and members, each with a count; Tickets and Opportunities are both one, each a plain config.
 - **InitialsAvatar**: a person's initials; accent for the current user, neutral for others and the system.
 - **InfoPanelCard** with **InfoField**: a side panel group, uppercase heading, label above value. `InlineEditField` sits inside as is, its hover outline is the field's box.

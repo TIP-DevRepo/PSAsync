@@ -48,7 +48,7 @@ const FILTER_ROW_ID = "ticket-column-filters"
 // The Tickets list (/dashboard/tickets), as the design draws it: the page
 // header with its line of totals, the stat tiles, then one frame holding
 // the built in views (My tickets, Unassigned, All open, Waiting, All
-// tickets), the queue and assignee chips, the
+// tickets), the assignee chip, the
 // search, the table with its column filters, and the pages. Everything the
 // list shows is in the URL (view, q, team, assignee, sort, dir, page, and
 // f_<column>), and the API pages, sorts, and filters in the database, so a
@@ -161,7 +161,6 @@ export function TicketsPage() {
         <div className={TABLE.toolbar}>
           <ViewTabs ariaLabel="Views" views={views} active={query.view} onChange={(view) => change({ view })} />
           <span className="flex-1" />
-          {teamName && <FilterChip label={`Queue: ${teamName}`} onRemove={() => change({ team: "", assignee: "" })} />}
           {assigneeName && <FilterChip label={`Assignee: ${assigneeName}`} onRemove={() => change({ assignee: "" })} />}
           <OpportunityFilterBar q={query.q} onChange={(q) => change({ q })} label="Search tickets" id="ticket-search" />
         </div>

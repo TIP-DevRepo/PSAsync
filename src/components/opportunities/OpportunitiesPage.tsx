@@ -148,7 +148,8 @@ export function OpportunitiesPage() {
   }
 
   const filtered = hasActiveFilters(filters)
-  // Names for the team and owner chips (the id itself until the lists load)
+  // Names for the breadcrumb, the page line, and the owner chip (a stand in
+  // until the lists load)
   const teamChipName = filters.team ? (teams.find((t) => t.id === filters.team)?.name ?? "Team") : null
   const ownerChipName = !filters.owner
     ? null
@@ -187,7 +188,7 @@ export function OpportunitiesPage() {
       )}
 
       {/* The design's toolbar: the view switch, then the search and the
-          team and owner chips on the right */}
+          owner chip on the right */}
       <div className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-card px-3.5 py-3">
         <ViewTabs
           ariaLabel="View"
@@ -198,9 +199,6 @@ export function OpportunitiesPage() {
           onChange={(key) => setUrl(key, filters)}
         />
         <span className="flex-1" />
-        {teamChipName && (
-          <FilterChip label={`Team: ${teamChipName}`} onRemove={() => setFilters({ ...filters, team: "", owner: "" })} />
-        )}
         {ownerChipName && <FilterChip label={`Owner: ${ownerChipName}`} onRemove={() => setFilters({ ...filters, owner: "" })} />}
         <OpportunityFilterBar q={filters.q} onChange={setSearch} />
       </div>
