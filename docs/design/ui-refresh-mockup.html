@@ -1,0 +1,536 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>PSAsync app shell</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:var(--acc-ink)}a:hover{color:var(--acc)}
+button{font:inherit;cursor:pointer}
+.nav:hover{background:var(--sb-hover)}
+.row:hover{background:var(--surface2)}
+.fld{border:1px solid transparent;border-radius:8px}
+.fld:hover{border-color:var(--border);background:var(--surface2)}
+.btn:hover{filter:brightness(0.96)}
+.swatch:hover{transform:scale(1.06)}
+</style>
+</helmet>
+<div style="--bg: {{t.bg}}; --surface: {{t.surface}}; --surface2: {{t.surface2}}; --border: {{t.border}}; --text: {{t.text}}; --muted: {{t.muted}}; --acc: {{t.acc}}; --acc-on: {{t.accOn}}; --acc-tint: {{t.accTint}}; --acc-ink: {{t.accInk}}; --sb-bg: {{t.sbBg}}; --sb-text: {{t.sbText}}; --sb-muted: {{t.sbMuted}}; --sb-active: {{t.sbActive}}; --sb-active-text: {{t.sbActiveText}}; --sb-hover: {{t.sbHover}}; --sb-border: {{t.sbBorder}}; --sb-badge: {{t.sbBadge}}; --ok: {{t.ok}}; --ok-tint: {{t.okTint}}; --warn: {{t.warn}}; --warn-tint: {{t.warnTint}}; --bad: {{t.bad}}; --bad-tint: {{t.badTint}}; --neu-tint: {{t.neuTint}}; display: flex; flex-wrap: wrap; min-height: 1040px; background: var(--bg); color: var(--text); font-family: Geist, system-ui, sans-serif; font-size: 14px;">
+
+<nav aria-label="Main" style="flex: 1 1 248px; box-sizing: border-box; background: var(--sb-bg); color: var(--sb-text); border-right: 1px solid var(--sb-border); padding: 16px 12px; display: flex; flex-direction: column; gap: 4px;">
+<div style="display: flex; align-items: center; gap: 10px; padding: 4px 8px 16px;">
+<div style="width: 34px; height: 34px; border-radius: 9px; background: var(--acc); display: flex; align-items: center; justify-content: center; flex: none;">
+<svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="2" y="7" width="11" height="11" rx="2.5" fill="var(--acc-on)" opacity="0.45"></rect><rect x="7" y="2" width="11" height="11" rx="2.5" fill="var(--acc-on)"></rect></svg>
+</div>
+<div style="display: flex; flex-direction: column; min-width: 0;">
+<span style="font-weight: 700; font-size: 15px; letter-spacing: -0.01em;">TIPINC</span>
+<span style="font-size: 12px; color: var(--sb-muted);">Company logo goes here</span>
+</div>
+</div>
+
+<label style="display: flex; align-items: center; gap: 8px; margin: 0 4px 12px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--sb-border); color: var(--sb-muted);">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+<span style="position: absolute; width: 1px; height: 1px; overflow: hidden;">Search</span>
+<input placeholder="Search everything" style="all: unset; flex: 1; min-width: 0; color: var(--sb-text); font-size: 13px;">
+<span style="font-size: 11px; border: 1px solid var(--sb-border); border-radius: 4px; padding: 0 4px;">Ctrl K</span>
+</label>
+
+<sc-for list="{{sections}}" as="sec" hint-placeholder-count="3">
+<div style="padding: 14px 10px 6px; font-size: 11px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--sb-muted);">{{sec.label}}</div>
+<sc-for list="{{sec.items}}" as="it" hint-placeholder-count="3">
+<button class="nav" onClick="{{it.go}}" style="all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; min-height: 36px; background: {{it.bg}}; color: {{it.fg}}; font-weight: {{it.weight}};">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{it.icon}}"></path></svg>
+<span style="flex: 1;">{{it.label}}</span>
+<sc-if value="{{it.hasBadge}}" hint-placeholder-val="{{false}}">
+<span style="min-width: 20px; text-align: center; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 999px; background: {{it.badgeBg}}; color: {{it.badgeFg}};">{{it.badge}}</span>
+</sc-if>
+</button>
+<sc-if value="{{it.open}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; flex-direction: column; gap: 2px; margin: 2px 0 6px 20px; padding-left: 10px; border-left: 1px solid var(--sb-border);">
+<sc-for list="{{it.children}}" as="ch" hint-placeholder-count="3">
+<button class="nav" style="all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 7px; min-height: 32px; font-size: 13px; color: var(--sb-text);">
+<span style="flex: 1;">{{ch.label}}</span>
+<span style="font-size: 12px; color: var(--sb-muted);">{{ch.count}}</span>
+</button>
+</sc-for>
+</div>
+</sc-if>
+</sc-for>
+</sc-for>
+
+<div style="flex: 1;"></div>
+<button class="nav" onClick="{{goAppearance}}" style="all: unset; box-sizing: border-box; cursor: pointer; display: flex; align-items: center; gap: 10px; padding: 10px; border-radius: 10px; border-top: 1px solid var(--sb-border); margin-top: 12px;">
+<span style="width: 32px; height: 32px; border-radius: 999px; background: var(--acc); color: var(--acc-on); display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 13px; flex: none;">LB</span>
+<span style="display: flex; flex-direction: column; flex: 1; min-width: 0;">
+<span style="font-weight: 600; font-size: 13px;">Louis Badolato</span>
+<span style="font-size: 12px; color: var(--sb-muted);">My settings</span>
+</span>
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z"></path><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z"></path></svg>
+</button>
+</nav>
+
+<main style="flex: 999 1 560px; min-width: 0; box-sizing: border-box; display: flex; flex-direction: column;">
+<header style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 14px 28px; border-bottom: 1px solid var(--border); background: var(--surface);">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); flex: 1; min-width: 0;">
+<span>{{crumb1}}</span>
+<span aria-hidden="true">/</span>
+<span>{{crumb2}}</span>
+<span aria-hidden="true">/</span>
+<span style="color: var(--text); font-weight: 600;">{{crumb3}}</span>
+</div>
+<button class="btn" style="border: none; background: var(--acc); color: var(--acc-on); border-radius: 8px; padding: 8px 14px; min-height: 36px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" aria-hidden="true"><path d="M12 5v14M5 12h14"></path></svg>
+New ticket
+</button>
+<button aria-label="Notifications" style="position: relative; border: 1px solid var(--border); background: var(--surface); color: var(--muted); border-radius: 8px; width: 38px; height: 38px; display: flex; align-items: center; justify-content: center;">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"></path><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"></path></svg>
+<span style="position: absolute; top: 7px; right: 8px; width: 8px; height: 8px; border-radius: 999px; background: var(--bad); border: 2px solid var(--surface);"></span>
+</button>
+</header>
+
+<sc-if value="{{isOpp}}" hint-placeholder-val="{{true}}">
+<div style="padding: 24px 28px 40px; display: flex; flex-direction: column; gap: 20px; max-width: 1320px; width: 100%; box-sizing: border-box;">
+<section style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 22px 24px; display: flex; flex-direction: column; gap: 16px;">
+<div style="display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start;">
+<div style="width: 52px; height: 52px; border-radius: 12px; background: var(--acc-tint); color: var(--acc-ink); display: flex; align-items: center; justify-content: center; flex: none;">
+<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="7" width="18" height="13" rx="2"></rect><path d="M8 7V5a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><path d="M3 13h18"></path></svg>
+</div>
+<div style="flex: 1; min-width: 260px; display: flex; flex-direction: column; gap: 4px;">
+<div style="display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px;">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em;"><a href="#client" style="color: var(--text); text-decoration: none;">ACME Construction</a></h1>
+<span style="font-size: 18px; font-weight: 600; color: var(--muted); font-variant-numeric: tabular-nums;">OPP-2026-0007</span>
+</div>
+<p style="margin: 0; font-size: 16px; color: var(--text);">Replace 12 office workstations</p>
+</div>
+<div style="display: flex; gap: 8px; align-items: center;">
+<span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--acc-tint); color: var(--acc-ink);">Proposal</span>
+<button aria-label="More actions" style="border: 1px solid var(--border); background: var(--surface); color: var(--muted); border-radius: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8"></circle><circle cx="12" cy="12" r="1.8"></circle><circle cx="19" cy="12" r="1.8"></circle></svg>
+</button>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 8px;">
+<sc-for list="{{actions}}" as="a" hint-placeholder-count="5">
+<button class="btn" style="display: flex; align-items: center; gap: 7px; padding: 8px 14px; min-height: 36px; border-radius: 999px; font-weight: 600; font-size: 13px; border: 1px solid {{a.border}}; background: {{a.bg}}; color: {{a.fg}};">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{a.icon}}"></path></svg>
+{{a.label}}
+</button>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 20px; font-size: 13px; color: var(--muted); padding-top: 12px; border-top: 1px solid var(--border);">
+<span>Value <strong style="color: var(--text); font-weight: 600;">$18,450.00</strong></span>
+<span>Close <strong style="color: var(--text); font-weight: 600;">Dec 12, 2026</strong></span>
+<span>Team <strong style="color: var(--text); font-weight: 600;">Commercial Sales</strong></span>
+<span>Created by Louis Badolato on Oct 26, 2026</span>
+</div>
+</section>
+
+<div style="display: flex; flex-wrap: wrap; gap: 20px; align-items: flex-start;">
+<div style="flex: 999 1 520px; min-width: 0; display: flex; flex-direction: column; gap: 14px;">
+<div role="tablist" style="display: flex; gap: 4px; border-bottom: 1px solid var(--border);">
+<button role="tab" aria-selected="true" style="border: none; background: none; padding: 10px 12px; font-weight: 600; color: var(--text); border-bottom: 2px solid var(--acc); margin-bottom: -1px;">Details</button>
+<button role="tab" aria-selected="false" style="border: none; background: none; padding: 10px 12px; color: var(--muted);">Attachments <span style="font-size: 12px; background: var(--neu-tint); padding: 1px 7px; border-radius: 999px;">2</span></button>
+<button role="tab" aria-selected="false" style="border: none; background: none; padding: 10px 12px; color: var(--muted);">Related <span style="font-size: 12px; background: var(--neu-tint); padding: 1px 7px; border-radius: 999px;">3</span></button>
+<button role="tab" aria-selected="false" style="border: none; background: none; padding: 10px 12px; color: var(--muted);">Audit log</button>
+</div>
+<sc-for list="{{timeline}}" as="e" hint-placeholder-count="5">
+<sc-if value="{{e.isCard}}" hint-placeholder-val="{{true}}">
+<article style="background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px 18px; display: flex; gap: 12px;">
+<span style="width: 34px; height: 34px; border-radius: 999px; background: {{e.avBg}}; color: {{e.avFg}}; display: flex; align-items: center; justify-content: center; font-weight: 600; font-size: 12px; flex: none;">{{e.initials}}</span>
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px;">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px;">
+<strong style="font-weight: 600;">{{e.who}}</strong>
+<span style="font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 6px; background: {{e.kindBg}}; color: {{e.kindFg}};">{{e.kind}}</span>
+<sc-if value="{{e.hasStage}}" hint-placeholder-val="{{false}}">
+<span style="font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 999px; background: var(--acc-tint); color: var(--acc-ink);">{{e.stage}}</span>
+</sc-if>
+<span style="flex: 1;"></span>
+<span style="font-size: 12px; color: var(--muted);">{{e.when}}</span>
+</div>
+<sc-if value="{{e.hasSubject}}" hint-placeholder-val="{{false}}">
+<div style="font-size: 13px; color: var(--muted);">To {{e.to}} · <span style="color: var(--text); font-weight: 500;">{{e.subject}}</span></div>
+</sc-if>
+<p style="margin: 0; line-height: 1.55; white-space: pre-line;">{{e.body}}</p>
+</div>
+</article>
+</sc-if>
+<sc-if value="{{e.isLine}}" hint-placeholder-val="{{false}}">
+<div style="display: flex; align-items: center; gap: 10px; padding: 2px 6px 2px 16px; font-size: 13px; color: var(--muted);">
+<span style="width: 8px; height: 8px; border-radius: 999px; background: var(--border); flex: none; outline: 3px solid var(--bg);"></span>
+<span style="flex: 1;"><span style="color: var(--text);">{{e.body}}</span> · {{e.who}}</span>
+<span style="font-size: 12px;">{{e.when}}</span>
+</div>
+</sc-if>
+</sc-for>
+</div>
+
+<aside style="flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+<sc-for list="{{panels}}" as="p" hint-placeholder-count="2">
+<section style="background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 4px;">
+<h2 style="margin: 0 0 8px 6px; font-size: 12px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);">{{p.title}}</h2>
+<sc-for list="{{p.fields}}" as="f" hint-placeholder-count="5">
+<div class="{{f.cls}}" style="padding: 7px 8px; display: flex; flex-direction: column; gap: 2px;">
+<span style="font-size: 12px; color: var(--muted);">{{f.label}}</span>
+<span style="color: {{f.color}}; font-weight: {{f.weight}};">{{f.value}}</span>
+<sc-if value="{{f.hasNote}}" hint-placeholder-val="{{false}}">
+<span style="font-size: 12px; color: var(--muted);">{{f.note}}</span>
+</sc-if>
+</div>
+</sc-for>
+</section>
+</sc-for>
+</aside>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isTickets}}" hint-placeholder-val="{{false}}">
+<div style="padding: 24px 28px 40px; display: flex; flex-direction: column; gap: 18px; max-width: 1320px; width: 100%; box-sizing: border-box;">
+<div style="display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px;">
+<div style="flex: 1; min-width: 240px;">
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em;">Tickets</h1>
+<p style="margin: 4px 0 0; color: var(--muted);">Helpdesk queue · 24 open, 3 unassigned</p>
+</div>
+</div>
+<div style="display: flex; flex-wrap: wrap; gap: 12px;">
+<sc-for list="{{stats}}" as="s" hint-placeholder-count="4">
+<div style="flex: 1 1 180px; background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 14px 16px; display: flex; align-items: center; gap: 12px;">
+<span style="width: 38px; height: 38px; border-radius: 10px; background: {{s.bg}}; color: {{s.fg}}; display: flex; align-items: center; justify-content: center; flex: none;">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="{{s.icon}}"></path></svg>
+</span>
+<span style="display: flex; flex-direction: column;">
+<span style="font-size: 22px; font-weight: 700; font-variant-numeric: tabular-nums;">{{s.value}}</span>
+<span style="font-size: 12px; color: var(--muted);">{{s.label}}</span>
+</span>
+</div>
+</sc-for>
+</div>
+<section style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden;">
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--border);">
+<sc-for list="{{views}}" as="v" hint-placeholder-count="4">
+<button style="border: none; padding: 7px 12px; min-height: 34px; border-radius: 8px; font-weight: {{v.weight}}; background: {{v.bg}}; color: {{v.fg}}; display: flex; gap: 6px; align-items: center;">{{v.label}} <span style="font-size: 12px; opacity: 0.8;">{{v.count}}</span></button>
+</sc-for>
+<span style="flex: 1;"></span>
+<label style="display: flex; align-items: center; gap: 8px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted); min-width: 220px;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-3.5-3.5"></path></svg>
+<span style="position: absolute; width: 1px; height: 1px; overflow: hidden;">Search tickets</span>
+<input placeholder="Search tickets" style="all: unset; flex: 1; color: var(--text); font-size: 13px;">
+</label>
+<button aria-label="Show column filters" style="border: 1px solid var(--border); background: var(--acc-tint); color: var(--acc-ink); border-radius: 8px; width: 36px; height: 36px; display: flex; align-items: center; justify-content: center;">
+<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true"><path d="M3 5h18l-7 8v6l-4 2v-8L3 5Z"></path></svg>
+</button>
+</div>
+<div style="overflow-x: auto;">
+<table style="width: 100%; min-width: 980px; border-collapse: collapse; table-layout: fixed;">
+<colgroup><col style="width: 130px"><col><col style="width: 170px"><col style="width: 110px"><col style="width: 140px"><col style="width: 170px"><col style="width: 110px"></colgroup>
+<thead>
+<tr style="text-align: left; font-size: 12px; color: var(--muted); background: var(--surface2);">
+<th style="padding: 10px 14px; font-weight: 600;">Ticket</th>
+<th style="padding: 10px 14px; font-weight: 600;">Subject</th>
+<th style="padding: 10px 14px; font-weight: 600;">Status</th>
+<th style="padding: 10px 14px; font-weight: 600;">Priority</th>
+<th style="padding: 10px 14px; font-weight: 600;">Queue</th>
+<th style="padding: 10px 14px; font-weight: 600;">Assignee</th>
+<th style="padding: 10px 14px; font-weight: 600;">Updated</th>
+</tr>
+</thead>
+<tbody>
+<sc-for list="{{tickets}}" as="r" hint-placeholder-count="8">
+<tr class="row" style="border-top: 1px solid var(--border);">
+<td style="padding: 12px 14px; font-weight: 600; color: var(--acc-ink); font-variant-numeric: tabular-nums;">{{r.num}}</td>
+<td style="padding: 12px 14px; overflow: hidden;">
+<div style="font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.subject}}</div>
+<div style="font-size: 12px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{{r.client}}</div>
+</td>
+<td style="padding: 12px 14px;"><span style="font-size: 12px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: {{r.stBg}}; color: {{r.stFg}}; white-space: nowrap;">{{r.status}}</span></td>
+<td style="padding: 12px 14px;"><span style="display: inline-flex; align-items: center; gap: 6px; font-size: 13px;"><span style="width: 8px; height: 8px; border-radius: 2px; background: {{r.prColor}};"></span>{{r.priority}}</span></td>
+<td style="padding: 12px 14px; color: var(--muted); font-size: 13px;">{{r.queue}}</td>
+<td style="padding: 12px 14px;">
+<span style="display: inline-flex; align-items: center; gap: 8px; font-size: 13px;">
+<span style="width: 26px; height: 26px; border-radius: 999px; background: {{r.avBg}}; color: {{r.avFg}}; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 600;">{{r.initials}}</span>
+<span style="color: {{r.whoColor}};">{{r.who}}</span>
+</span>
+</td>
+<td style="padding: 12px 14px; color: var(--muted); font-size: 13px;">{{r.updated}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</div>
+</section>
+</div>
+</sc-if>
+
+<sc-if value="{{isAppearance}}" hint-placeholder-val="{{false}}">
+<div style="padding: 24px 28px 40px; display: flex; flex-direction: column; gap: 18px; max-width: 920px; width: 100%; box-sizing: border-box;">
+<div>
+<h1 style="margin: 0; font-size: 26px; font-weight: 700; letter-spacing: -0.02em;">Appearance</h1>
+<p style="margin: 4px 0 0; color: var(--muted);">These are your personal colors. Your company's defaults apply until you change them.</p>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 16px; border-radius: 12px; background: var(--acc-tint); color: var(--acc-ink);">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 21h18M5 21V7l7-4 7 4v14M9 21v-6h6v6"></path></svg>
+<span style="flex: 1; min-width: 220px;">Company default: PSAsync indigo, dark sidebar, match my computer. Your company allows personal colors.</span>
+<button onClick="{{reset}}" style="border: 1px solid currentColor; background: transparent; color: inherit; border-radius: 8px; padding: 7px 12px; min-height: 34px; font-weight: 600;">Reset to company default</button>
+</div>
+
+<section style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">
+<div>
+<h2 style="margin: 0; font-size: 16px; font-weight: 600;">Accent color</h2>
+<p style="margin: 4px 0 0; color: var(--muted); font-size: 13px;">Used for buttons, links, selected items and highlights. Status colors stay the same.</p>
+</div>
+<div role="radiogroup" aria-label="Accent color" style="display: flex; flex-wrap: wrap; gap: 10px;">
+<sc-for list="{{presets}}" as="c" hint-placeholder-count="10">
+<button class="swatch" role="radio" aria-checked="{{c.checked}}" aria-label="{{c.name}}" title="{{c.name}}" onClick="{{c.pick}}" style="width: 44px; height: 44px; border-radius: 12px; border: none; background: {{c.hex}}; box-shadow: {{c.ring}}; transition: transform .12s; display: flex; align-items: center; justify-content: center; color: {{c.on}};">
+<sc-if value="{{c.selected}}" hint-placeholder-val="{{false}}">
+<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 5 5 9-10"></path></svg>
+</sc-if>
+</button>
+</sc-for>
+</div>
+<div style="display: flex; flex-wrap: wrap; align-items: center; gap: 12px;">
+<label for="hex" style="font-size: 13px; color: var(--muted);">Custom color</label>
+<input id="hex" value="{{hexDraft}}" onChange="{{onHex}}" style="font: inherit; width: 120px; padding: 8px 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text);">
+<span style="font-size: 13px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: {{contrastBg}}; color: {{contrastFg}};">{{contrastText}}</span>
+</div>
+</section>
+
+<section style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600;">Sidebar style</h2>
+<div role="radiogroup" aria-label="Sidebar style" style="display: flex; flex-wrap: wrap; gap: 12px;">
+<sc-for list="{{sidebarOpts}}" as="o" hint-placeholder-count="3">
+<button role="radio" aria-checked="{{o.checked}}" onClick="{{o.pick}}" style="flex: 1 1 160px; border-radius: 12px; border: 2px solid {{o.border}}; background: var(--surface); padding: 10px; display: flex; flex-direction: column; gap: 8px; text-align: left; color: var(--text);">
+<span style="display: flex; height: 64px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border);">
+<span style="width: 34%; background: {{o.swatch}};"></span>
+<span style="flex: 1; background: var(--bg);"></span>
+</span>
+<span style="font-weight: 600;">{{o.label}}</span>
+</button>
+</sc-for>
+</div>
+</section>
+
+<section style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 14px;">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600;">Mode</h2>
+<div role="radiogroup" aria-label="Mode" style="display: inline-flex; flex-wrap: wrap; gap: 4px; padding: 4px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); align-self: flex-start;">
+<sc-for list="{{modeOpts}}" as="m" hint-placeholder-count="3">
+<button role="radio" aria-checked="{{m.checked}}" onClick="{{m.pick}}" style="border: none; border-radius: 7px; padding: 8px 16px; min-height: 36px; font-weight: 600; background: {{m.bg}}; color: {{m.fg}}; box-shadow: {{m.shadow}};">{{m.label}}</button>
+</sc-for>
+</div>
+<p style="margin: 0; font-size: 13px; color: var(--muted);">{{modeNote}}</p>
+</section>
+
+<section style="background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 20px 22px; display: flex; flex-direction: column; gap: 10px;">
+<h2 style="margin: 0; font-size: 16px; font-weight: 600;">Status colors</h2>
+<p style="margin: 0; color: var(--muted); font-size: 13px;">Fixed for everyone so they always mean the same thing.</p>
+<div style="display: flex; flex-wrap: wrap; gap: 8px;">
+<span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--ok-tint); color: var(--ok);">Won, Resolved</span>
+<span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--warn-tint); color: var(--warn);">Waiting on customer</span>
+<span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--bad-tint); color: var(--bad);">Lost, Overdue, Urgent</span>
+<span style="font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--neu-tint); color: var(--muted);">On hold, Draft</span>
+</div>
+</section>
+</div>
+</sc-if>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"accent":{"editor":"color","default":"#5E56E0","options":["#5E56E0","#2563EB","#0F8B8D","#EA580C"]},"sidebar":{"editor":"enum","options":["dark","light","tinted"],"default":"dark"},"mode":{"editor":"enum","options":["light","dark","system"],"default":"light"},"$preview":{"width":1440,"height":1040}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { view: 'opp', accent: null, sidebar: null, mode: null, hexDraft: null };
+  }
+  rgb(h) { const x = h.replace('#', ''); return [0, 2, 4].map((i) => parseInt(x.slice(i, i + 2), 16)); }
+  hex(c) { return '#' + c.map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, '0')).join(''); }
+  mix(a, b, t) { const x = this.rgb(a), y = this.rgb(b); return this.hex(x.map((v, i) => v * (1 - t) + y[i] * t)); }
+  lum(h) { return this.rgb(h).map((v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }).reduce((s, v, i) => s + v * [0.2126, 0.7152, 0.0722][i], 0); }
+  ratio(a, b) { const x = this.lum(a), y = this.lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  onColor(h) { return this.ratio(h, '#FFFFFF') >= 4.5 ? '#FFFFFF' : (this.ratio(h, '#FFFFFF') >= this.ratio(h, '#111827') ? '#FFFFFF' : '#111827'); }
+  valid(h) { return /^#[0-9a-fA-F]{6}$/.test(h || ''); }
+  theme(accent, sidebar, dark) {
+    const n = dark
+      ? { bg: '#0E1016', surface: '#161922', surface2: '#1C2029', border: '#2A2F3B', text: '#E9EBF1', muted: '#A2A9B7', neuTint: '#262B36' }
+      : { bg: '#F4F5F8', surface: '#FFFFFF', surface2: '#F8F9FB', border: '#E3E6EC', text: '#141821', muted: '#5A6372', neuTint: '#EEF0F4' };
+    let accInk = dark ? this.mix(accent, '#FFFFFF', 0.35) : accent;
+    if (!dark) { let k = 0; while (this.ratio(accInk, '#FFFFFF') < 4.6 && k < 8) { accInk = this.mix(accInk, '#000000', 0.12); k++; } }
+    const t = Object.assign({}, n, {
+      acc: accent, accOn: this.onColor(accent), accInk: accInk,
+      accTint: dark ? this.mix(accent, n.surface, 0.78) : this.mix(accent, '#FFFFFF', 0.88),
+      ok: dark ? '#5CC98A' : '#18794A', okTint: dark ? '#173325' : '#E2F4EA',
+      warn: dark ? '#F0B35A' : '#995107', warnTint: dark ? '#3A2A12' : '#FCF0DC',
+      bad: dark ? '#F07B76' : '#BC2B2A', badTint: dark ? '#3D1C1C' : '#FCE7E6'
+    });
+    if (sidebar === 'light') {
+      Object.assign(t, { sbBg: n.surface, sbText: n.text, sbMuted: n.muted, sbActive: t.accTint, sbActiveText: accInk, sbHover: n.surface2, sbBorder: n.border, sbBadge: accent });
+    } else if (sidebar === 'tinted') {
+      const base = this.mix(accent, '#06070B', 0.62);
+      Object.assign(t, { sbBg: base, sbText: '#EEF0F6', sbMuted: this.mix(accent, '#FFFFFF', 0.62), sbActive: 'rgba(255,255,255,0.14)', sbActiveText: '#FFFFFF', sbHover: 'rgba(255,255,255,0.08)', sbBorder: 'rgba(255,255,255,0.10)', sbBadge: '#FFFFFF' });
+    } else {
+      Object.assign(t, { sbBg: dark ? '#0A0B10' : '#14161F', sbText: '#D2D6E0', sbMuted: '#8D94A4', sbActive: this.mix(accent, '#14161F', 0.55), sbActiveText: '#FFFFFF', sbHover: 'rgba(255,255,255,0.06)', sbBorder: 'rgba(255,255,255,0.08)', sbBadge: accent });
+    }
+    return t;
+  }
+  renderVals() {
+    const accent = this.valid(this.state.accent) ? this.state.accent : (this.props.accent ?? '#5E56E0');
+    const sidebar = this.state.sidebar ?? this.props.sidebar ?? 'dark';
+    const mode = this.state.mode ?? this.props.mode ?? 'light';
+    const dark = mode === 'dark';
+    const t = this.theme(accent, sidebar, dark);
+    const view = this.state.view;
+    const go = (v) => () => this.setState({ view: v });
+    const I = {
+      home: 'M3 11 12 4l9 7M5 10v10h14V10',
+      ticket: 'M3 8a2 2 0 0 0 0 4v4h18v-4a2 2 0 0 1 0-4V4H3v4ZM14 4v16',
+      opp: 'M3 17l6-6 4 4 8-8M15 7h6v6',
+      quote: 'M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6',
+      so: 'M5 7h14l-1 13H6zM9 7a3 3 0 0 1 6 0',
+      po: 'M3 7h18v12H3zM3 11h18M7 15h4',
+      client: 'M4 21V5l8-2 8 2v16M9 21v-5h6v5M8 9h2M14 9h2',
+      vendor: 'M3 20h18M5 20V9l7-5 7 5v11M10 20v-6h4v6',
+      catalog: 'M4 5h7v14H4zM13 5h7v6h-7zM13 13h7v6h-7z',
+      inv: 'M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8',
+      settings: 'M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4'
+    };
+    const badgeOn = sidebar === 'tinted';
+    const item = (id, label, icon, opts) => {
+      const o = opts || {};
+      const active = o.match ? o.match.includes(view) : false;
+      return {
+        label, icon, go: o.target ? go(o.target) : () => {},
+        bg: active ? 'var(--sb-active)' : 'transparent',
+        fg: active ? 'var(--sb-active-text)' : 'var(--sb-text)',
+        weight: active ? 600 : 500,
+        hasBadge: !!o.badge, badge: o.badge || '',
+        badgeBg: o.alert ? t.bad : (badgeOn ? 'rgba(255,255,255,0.18)' : t.acc),
+        badgeFg: o.alert ? '#FFFFFF' : (badgeOn ? '#FFFFFF' : t.accOn),
+        open: !!o.children && active, children: o.children || []
+      };
+    };
+    const sections = [
+      { label: 'Work', items: [
+        item('dash', 'Dashboard', I.home),
+        item('tickets', 'Tickets', I.ticket, { target: 'tickets', match: ['tickets'], badge: '24', children: [
+          { label: 'Helpdesk', count: '18' }, { label: 'Alerts', count: '4' }, { label: 'Lv2 Escalation', count: '2' }] }),
+        item('opps', 'Opportunities', I.opp, { target: 'opp', match: ['opp'], badge: '11', children: [
+          { label: 'Commercial Sales', count: '7' }, { label: 'GOVT Sales', count: '3' }, { label: 'General', count: '1' }] })
+      ] },
+      { label: 'Sales', items: [
+        item('q', 'Quotes', I.quote, { badge: '3', alert: true }),
+        item('so', 'Sales Orders', I.so),
+        item('po', 'Purchase Orders', I.po)
+      ] },
+      { label: 'Records', items: [
+        item('c', 'Clients', I.client), item('v', 'Vendors', I.vendor),
+        item('cat', 'Catalog', I.catalog), item('inv', 'Inventory', I.inv)
+      ] },
+      { label: 'Admin', items: [ item('set', 'Settings', I.settings, { target: 'appearance', match: ['appearance'] }) ] }
+    ];
+    const crumbs = { opp: ['Opportunities', 'Commercial Sales', 'OPP-2026-0007'], tickets: ['Tickets', 'Helpdesk', 'All open'], appearance: ['Settings', 'My settings', 'Appearance'] }[view];
+    const actions = [
+      { label: 'Raise Quote', icon: 'M7 3h7l5 5v13H7zM14 3v5h5M12 11v6M9 14h6', bg: t.acc, fg: t.accOn, border: t.acc },
+      { label: 'Email', icon: 'M3 6h18v12H3zM3 7l9 6 9-6', bg: t.surface, fg: t.text, border: t.border },
+      { label: 'Note', icon: 'M5 3h10l4 4v14H5zM9 12h6M9 16h4', bg: t.surface, fg: t.text, border: t.border },
+      { label: 'Won', icon: 'M8 21h8M12 17v4M7 4h10v5a5 5 0 0 1-10 0zM7 6H4v2a3 3 0 0 0 3 3M17 6h3v2a3 3 0 0 1-3 3', bg: t.okTint, fg: t.ok, border: t.okTint },
+      { label: 'Lost', icon: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18ZM9 9l6 6M15 9l-6 6', bg: t.badTint, fg: t.bad, border: t.badTint }
+    ];
+    const card = (who, initials, kind, body, when, extra) => Object.assign({ isCard: true, isLine: false, who, initials, kind, body, when,
+      avBg: t.accTint, avFg: t.accInk, kindBg: t.neuTint, kindFg: t.muted, hasStage: false, stage: '', hasSubject: false, to: '', subject: '' }, extra || {});
+    const line = (body, who, when) => ({ isCard: false, isLine: true, body, who, when, hasStage: false, hasSubject: false });
+    const timeline = [
+      card('Louis Badolato', 'LB', 'Email sent', 'Hi Dana,\nAttached is the quote for the 12 workstations we discussed on site. Pricing holds through Dec 12. Happy to walk through the options on a call.', 'Today, 10:42 AM',
+        { kindBg: t.accTint, kindFg: t.accInk, hasSubject: true, to: 'Dana Whitfield', subject: '[OPP-2026-0007] Replace 12 office workstations' }),
+      line('Quote Q-2026-0042 sent, stage moved to Proposal', 'System', 'Today, 10:42 AM'),
+      line('Expected value changed from $16,200.00 to $18,450.00', 'Louis Badolato', 'Yesterday, 4:05 PM'),
+      card('Joseph Putiyon', 'JP', 'Note', 'Walked the office with Dana. Two of the current units have been offline for a month. They want matching specs across all 12 seats and would like delivery before the holidays.', 'Nov 3, 2:18 PM',
+        { avBg: t.neuTint, avFg: t.text, hasStage: true, stage: 'New to Qualified' }),
+      line('Owner changed from Unassigned to Louis Badolato', 'Joseph Putiyon', 'Nov 3, 2:10 PM'),
+      card('Louis Badolato', 'LB', 'Note', 'Client called in asking about replacing their older desktops. Scheduling a site visit.', 'Oct 26, 9:15 AM')
+    ];
+    const fld = (label, value, o) => Object.assign({ label, value, cls: 'fld', color: 'var(--text)', weight: 500, hasNote: false, note: '' }, o || {});
+    const panels = [
+      { title: 'Client', fields: [
+        fld('Client', 'ACME Construction', { color: 'var(--acc-ink)', weight: 600 }),
+        fld('Contact', 'Dana Whitfield', { color: 'var(--acc-ink)', hasNote: true, note: 'Office Manager' }),
+        fld('Location', 'Main Office', { color: 'var(--acc-ink)', hasNote: true, note: '2525 Pointe Center Ct, Suite 200, Dumfries, VA 22026' }),
+        fld('Email', 'dana.whitfield@acme.example', { cls: '', color: 'var(--acc-ink)' }),
+        fld('Phone', '(555) 010-0142 · Mobile (555) 010-0177', { cls: '' })
+      ] },
+      { title: 'Opportunity', fields: [
+        fld('Team and owner', 'Commercial Sales · Louis Badolato'),
+        fld('Stage', 'Proposal'),
+        fld('Type', 'New Business'),
+        fld('Expected value', '$18,450.00', { hasNote: true, note: 'From quote Q-2026-0042' }),
+        fld('Expected close', 'Dec 12, 2026')
+      ] }
+    ];
+    const stats = [
+      { label: 'Open', value: '24', icon: I.ticket, bg: t.accTint, fg: t.accInk },
+      { label: 'Unassigned', value: '3', icon: 'M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM4 21a8 8 0 0 1 16 0', bg: t.neuTint, fg: t.text },
+      { label: 'Waiting on customer', value: '5', icon: 'M12 7v5l3 2M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18Z', bg: t.warnTint, fg: t.warn },
+      { label: 'Urgent', value: '2', icon: 'M12 3 2 20h20zM12 10v4M12 17v.5', bg: t.badTint, fg: t.bad }
+    ];
+    const views = [['My tickets', '6', false], ['Unassigned', '3', false], ['All open', '24', true], ['Waiting', '5', false]].map(([label, count, on]) => ({
+      label, count, bg: on ? t.accTint : 'transparent', fg: on ? t.accInk : t.muted, weight: on ? 600 : 500 }));
+    const st = {
+      New: [t.accTint, t.accInk], Open: [t.accTint, t.accInk], 'Waiting on customer': [t.warnTint, t.warn],
+      'On hold': [t.neuTint, t.muted], Resolved: [t.okTint, t.ok]
+    };
+    const pr = { Urgent: t.bad, High: t.warn, Medium: t.acc, Low: dark ? '#6B7280' : '#9AA1AE' };
+    const rows = [
+      ['T-2026-0142', 'Outlook keeps asking for password', 'Alexandria Pest Services', 'New', 'High', 'Helpdesk', null, '4 min ago'],
+      ['T-2026-0141', 'Server CPU above 95% for 15 minutes', 'ACME Construction', 'Open', 'Urgent', 'Alerts', 'Joseph Putiyon', '12 min ago'],
+      ['T-2026-0139', 'New hire laptop setup for Monday', 'Stafford West Apartments', 'Open', 'Medium', 'Helpdesk', 'Louis Badolato', '38 min ago'],
+      ['T-2026-0137', 'Printer on 2nd floor offline', 'ACME Construction', 'Waiting on customer', 'Low', 'Helpdesk', 'Bob Pople', '1 hr ago'],
+      ['T-2026-0134', 'Firewall VPN tunnel dropping', 'Technology Innovation Partners', 'Open', 'Urgent', 'Lv2 Escalation', 'Mark Putiyon', '2 hr ago'],
+      ['T-2026-0131', 'Shared mailbox access for accounting', 'Alexandria Pest Services', 'New', 'Medium', 'Helpdesk', null, '3 hr ago'],
+      ['T-2026-0128', 'Replace failing UPS battery', 'Stafford West Apartments', 'On hold', 'Medium', 'Helpdesk', 'Louis Badolato', 'Yesterday'],
+      ['T-2026-0122', 'Disk space low on file server', 'ACME Construction', 'Resolved', 'High', 'Alerts', 'Joseph Putiyon', 'Yesterday']
+    ];
+    const ini = (n) => n.split(' ').map((p) => p[0]).join('');
+    const tickets = rows.map(([num, subject, client, status, priority, queue, who, updated]) => ({
+      num, subject, client, status, priority, queue, updated,
+      stBg: st[status][0], stFg: st[status][1], prColor: pr[priority],
+      who: who || 'Unassigned', initials: who ? ini(who) : '?',
+      avBg: who ? t.accTint : t.neuTint, avFg: who ? t.accInk : t.muted, whoColor: who ? t.text : t.muted
+    }));
+    const presetList = [['PSAsync indigo', '#5E56E0'], ['Blue', '#2563EB'], ['Teal', '#0F8B8D'], ['Green', '#2E8B57'], ['Amber', '#D97706'], ['Orange', '#EA580C'], ['Red', '#DC2626'], ['Pink', '#DB2777'], ['Purple', '#9333EA'], ['Slate', '#475569']];
+    const presets = presetList.map(([name, hex]) => {
+      const sel = hex.toLowerCase() === accent.toLowerCase();
+      return { name, hex, on: this.onColor(hex), selected: sel, checked: sel ? 'true' : 'false',
+        ring: sel ? '0 0 0 3px ' + t.surface + ', 0 0 0 5px ' + hex : 'none',
+        pick: () => this.setState({ accent: hex, hexDraft: hex }) };
+    });
+    const hexDraft = this.state.hexDraft ?? accent;
+    const cr = this.ratio(accent, t.accOn);
+    const good = cr >= 4.5;
+    const sidebarOpts = [['dark', 'Dark', dark ? '#0A0B10' : '#14161F'], ['light', 'Light', t.surface], ['tinted', 'Tinted', this.mix(accent, '#06070B', 0.62)]].map(([id, label, swatch]) => ({
+      label, swatch, checked: id === sidebar ? 'true' : 'false', border: id === sidebar ? t.acc : t.border,
+      pick: () => this.setState({ sidebar: id }) }));
+    const modeOpts = [['light', 'Light'], ['dark', 'Dark'], ['system', 'Match my computer']].map(([id, label]) => ({
+      label, checked: id === mode ? 'true' : 'false',
+      bg: id === mode ? t.surface : 'transparent', fg: id === mode ? t.text : t.muted,
+      shadow: id === mode ? '0 1px 2px rgba(0,0,0,0.12)' : 'none',
+      pick: () => this.setState({ mode: id }) }));
+    return {
+      t, sections, actions, timeline, panels, stats, views, tickets, presets, sidebarOpts, modeOpts, hexDraft,
+      isOpp: view === 'opp', isTickets: view === 'tickets', isAppearance: view === 'appearance',
+      crumb1: crumbs[0], crumb2: crumbs[1], crumb3: crumbs[2],
+      goAppearance: go('appearance'),
+      reset: () => this.setState({ accent: null, sidebar: null, mode: null, hexDraft: null }),
+      onHex: (e) => { const v = e.target.value.trim(); const h = v.startsWith('#') ? v : '#' + v; this.setState(this.valid(h) ? { hexDraft: v, accent: h } : { hexDraft: v }); },
+      contrastText: good ? 'Readable: ' + cr.toFixed(1) + ' to 1' : 'Hard to read: ' + cr.toFixed(1) + ' to 1',
+      contrastBg: good ? t.okTint : t.warnTint, contrastFg: good ? t.ok : t.warn,
+      modeNote: mode === 'system' ? 'Follows your computer setting. Showing light here.' : 'Applies on every device you sign in from.'
+    };
+  }
+}
+</script>
+</body>
+</html>
