@@ -6,7 +6,11 @@ import {
   chooseClient,
   chooseContact,
   contactFullName,
+  matchClients,
   matchesContactQuery,
+  PICKER_SEARCH_DEBOUNCE_MS,
+  PICKER_SEARCH_HINT,
+  PICKER_SEARCH_MIN,
   orderContactMatches,
   type ClientContactValue,
   type ContactMatch,
@@ -52,8 +56,9 @@ function useClientContacts(clientId: string | null) {
 // typing in Contact searches every client's contacts by name or email (GET
 // /api/contacts/search), the chosen client's own contacts first, and
 // picking one also sets its client. Client searches the client list by
-// name. Both open their list as soon as they are focused (the default list:
-// every client, or the chosen client's contacts), and autoFocus focuses one
+// name, and lists nothing until 2 letters are typed (the same hint and
+// debounce as Contact). Contact opens on the chosen client's contacts when
+// focused. autoFocus focuses one
 // when the picker appears (the opportunity page's in place editor). Choosing
 // a client that doesn't own the chosen contact clears the contact
 // (src/lib/client-contact-choice.ts). Renders the two fields only, so the
@@ -104,8 +109,9 @@ export function ClientContactPicker({
   )
 }
 
-// Searches the client list by name. Focused, it opens with every client
-// listed (the chosen one included even before the list loads), its text
+// Searches the client list by name, like the contact search: nothing is
+// listed until at least 2 letters are typed (a hint says so), and the list
+// follows the typing after the same short pause. Focused, the text is
 // selected so typing replaces it. Arrow keys move, Enter or a click picks,
 // Escape closes.
 function ClientSearchField({
@@ -129,6 +135,8 @@ function ClientSearchField({
 }) {
   const ids = useId()
   const [query, setQuery] = useState<string | null>(null)
+  // The text the list follows, a short pause after typing stops
+  const [searched, setSearched] = useState("")
   const [open, setOpen] = useState(false)
   const [active, setActive] = useState(0)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -144,9 +152,18 @@ function ClientSearchField({
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
+  const text = (query ?? "").trim()
+  useEffect(() => {
+    const timer = setTimeout(() => setSearched(text), PICKER_SEARCH_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+  }, [text])
+
   const all = value.client && !clients.some((c) => c.id === value.client!.id) ? [value.client, ...clients] : clients
-  const q = (query ?? "").trim().toLowerCase()
-  const options = q ? all.filter((c) => c.name.toLowerCase().includes(q)) : all
+  const searching = text.length >= PICKER_SEARCH_MIN
+  const waiting = searching && searched !== text
+  // null: fewer than 2 letters typed, so the hint shows instead of a list
+  const matched = matchClients(all, waiting ? "" : searched)
+  const options = searching && !waiting ? (matched ?? []) : []
   const activeIndex = Math.min(active, Math.max(options.length - 1, 0))
 
   function pick(client: { id: string; name: string }) {
@@ -177,7 +194,7 @@ function ClientSearchField({
         onFocus={(e) => {
           e.currentTarget.select()
           setOpen(true)
-          setActive(Math.max(0, options.findIndex((c) => c.id === value.client?.id)))
+          setActive(0)
         }}
         onChange={(e) => {
           setQuery(e.target.value)
@@ -205,7 +222,13 @@ function ClientSearchField({
       {error && <p className="mt-1 text-xs text-danger">{error}</p>}
       {open && (
         <ul id={listId} role="listbox" className="absolute z-20 mt-1 max-h-72 w-full overflow-y-auto rounded-md border border-border bg-popover text-sm shadow-popover">
-          {options.length === 0 && <li className="px-3 py-2 text-xs text-muted-foreground">No matching clients.</li>}
+          {!searching ? (
+            <li className="px-3 py-2 text-xs text-muted-foreground">{PICKER_SEARCH_HINT}</li>
+          ) : waiting ? (
+            <li className="px-3 py-2 text-xs text-muted-foreground">Searching...</li>
+          ) : (
+            options.length === 0 && <li className="px-3 py-2 text-xs text-muted-foreground">No matching clients.</li>
+          )}
           {options.map((c, i) => (
             <li
               key={c.id}
@@ -252,18 +275,18 @@ function ContactSearchField({
   const clientContacts = useClientContacts(value.client?.id ?? null)
 
   const text = query ?? ""
-  const searching = text.trim().length >= 2
+  const searching = text.trim().length >= PICKER_SEARCH_MIN
 
   // Every client's contacts, from the same search route as New Quote
   useEffect(() => {
     const q = text.trim()
-    if (q.length < 2) return
+    if (q.length < PICKER_SEARCH_MIN) return
     const timer = setTimeout(() => {
       fetch(`/api/contacts/search?q=${encodeURIComponent(q)}`)
         .then((res) => (res.ok ? res.json() : []))
         .then((data: ContactSearchResult[]) => setResults({ query: q, matches: Array.isArray(data) ? data : [] }))
         .catch(() => setResults({ query: q, matches: [] }))
-    }, 300)
+    }, PICKER_SEARCH_DEBOUNCE_MS)
     return () => clearTimeout(timer)
   }, [text])
 
@@ -345,7 +368,7 @@ function ContactSearchField({
           {loading && <li className="px-3 py-2 text-xs text-muted-foreground">Searching...</li>}
           {!loading && options.length === 0 && (
             <li className="px-3 py-2 text-xs text-muted-foreground">
-              {searching ? "No matching contacts." : value.client ? "This client has no contacts. Type to search every client." : "Type at least 2 letters to search."}
+              {searching ? "No matching contacts." : value.client ? "This client has no contacts. Type to search every client." : PICKER_SEARCH_HINT}
             </li>
           )}
           {options.map((c, i) => (
