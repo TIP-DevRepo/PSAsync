@@ -184,3 +184,20 @@ export function relativeTime(value: string, now: Date): string {
   if (then.getTime() >= startOfYesterday) return "Yesterday"
   return then.toLocaleDateString()
 }
+
+// ─── The client page's Tickets tab ──────────────────────────────────────────
+
+export const CLIENT_TICKET_FILTERS = ["open", "closed", "all"] as const
+export type ClientTicketFilter = (typeof CLIENT_TICKET_FILTERS)[number]
+
+export const CLIENT_TICKET_FILTER_LABELS: Record<ClientTicketFilter, string> = { open: "Open", closed: "Closed", all: "All" }
+
+export function isClientTicketFilter(value: unknown): value is ClientTicketFilter {
+  return typeof value === "string" && (CLIENT_TICKET_FILTERS as readonly string[]).includes(value)
+}
+
+// Open is OPEN and WAITING, closed is RESOLVED and CLOSED, all is no
+// condition (null)
+export function clientTicketCategories(filter: ClientTicketFilter): readonly TicketStatusCategory[] | null {
+  return filter === "open" ? ["OPEN", "WAITING"] : filter === "closed" ? ["RESOLVED", "CLOSED"] : null
+}

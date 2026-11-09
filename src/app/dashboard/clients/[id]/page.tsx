@@ -12,6 +12,7 @@ import { Modal } from "@/components/Modal"
 import { ContainersModal } from "@/components/inventory/ContainersModal"
 import { Ticket, Target, Package, FileText, KeyRound, FolderOpen, Radar, Settings2, Boxes, Phone, Wrench, CheckCircle2 } from "lucide-react"
 import { ClientAssetsPanel } from "@/components/clients/ClientAssetsPanel"
+import { ClientTicketsPanel } from "@/components/clients/ClientTicketsPanel"
 import { formatPhoneInput, formatPhoneDisplay } from "@/lib/phone"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
@@ -180,9 +181,11 @@ function ClientDetailPageContent() {
   const { can } = useAccess()
   const canEdit = can("clients.edit")
   const canUseInventory = can("pages.inventory")
+  const canUseTickets = can("pages.tickets")
   // Same any-of rule as POST /api/industries
   const canCreateIndustry = can("settingsSections.company") || can("clients.create") || canEdit
-  const tabs = canUseInventory ? CLIENT_TABS : CLIENT_TABS.filter((t) => t.key !== "assets")
+  // Assets need the Inventory page and Tickets the Tickets page
+  const tabs = CLIENT_TABS.filter((t) => (t.key !== "assets" || canUseInventory) && (t.key !== "tickets" || canUseTickets))
 
   const [client, setClient] = useState<ClientDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -206,7 +209,6 @@ function ClientDetailPageContent() {
     // A row to highlight only means something when a link lands
     router.replace(tabHref(pathname, searchParams.toString(), key, "details", [CLIENT_CONTACT_PARAM, CLIENT_LOCATION_PARAM]), { scroll: false })
   }
-  const [ticketFilter, setTicketFilter] = useState<StatusFilter>("OPEN")
   const [oppFilter, setOppFilter] = useState<StatusFilter>("OPEN")
 
   const [editingDetails, setEditingDetails] = useState(false)
@@ -1055,18 +1057,7 @@ function ClientDetailPageContent() {
           </div>
         )}
 
-        {activeTab === "tickets" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <FilterPills value={ticketFilter} onChange={setTicketFilter} />
-            </div>
-            <PlaceholderPanel
-              icon={Ticket}
-              title="Tickets coming soon"
-              description={`This will show ${ticketFilter === "ALL" ? "all" : ticketFilter.toLowerCase()} tickets for this client once the ticketing module (MegaTicket) is built.`}
-            />
-          </div>
-        )}
+        {activeTab === "tickets" && canUseTickets && <ClientTicketsPanel client={{ id, name: client.name }} />}
 
         {activeTab === "opportunities" && (
           <div className="space-y-4">
