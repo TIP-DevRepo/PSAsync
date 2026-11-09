@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Modal } from "@/components/Modal"
 import { RolePill } from "@/components/roles/RolePill"
 import { SearchableChecklist } from "@/components/teams/SearchableChecklist"
+import { Switch } from "@/components/appearance/AppearanceControls"
 import { useAccess } from "@/components/AccessProvider"
 import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
 import { announcementsFor, DragHandle, errorOf, SectionError, send, useReorderSensors } from "@/components/settings/OpportunitySettingsPanel"
@@ -109,6 +110,22 @@ export function TeamsSettingsPanel() {
     toast.success("Team order saved")
   }
 
+  // Round robin: new tickets created unassigned in the team go to its
+  // active members in turn. Saved at once; a refusal puts the switch back.
+  async function handleRoundRobin(team: TeamSummary, on: boolean) {
+    setTeams((prev) => prev && prev.map((t) => (t.id === team.id ? { ...t, roundRobinEnabled: on } : t)))
+    setBusy(true)
+    setError(null)
+    const { ok, data } = await send(`/api/teams/${team.id}`, "PATCH", { roundRobinEnabled: on })
+    setBusy(false)
+    if (!ok) {
+      setTeams((prev) => prev && prev.map((t) => (t.id === team.id ? { ...t, roundRobinEnabled: !on } : t)))
+      setError(errorOf(data, "Couldn't change round robin."))
+      return
+    }
+    toast.success(on ? `Round robin on for ${team.name}` : `Round robin off for ${team.name}`)
+  }
+
   async function handleDelete(team: TeamSummary) {
     const confirmed = await confirmDialog({
       title: `Delete the ${team.name} team?`,
@@ -133,7 +150,7 @@ export function TeamsSettingsPanel() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <p className="max-w-2xl text-sm text-muted-foreground">
-          Teams group users for opportunities (and tickets later). Members hold the team&apos;s default roles while they are in it. Drag to change the order the sidebar and pickers show.
+          Teams group users for opportunities and tickets (a ticket&apos;s team is its queue). Members hold the team&apos;s default roles while they are in it. Drag to change the order the sidebar and pickers show.
         </p>
         <Button onClick={() => setEditing("new")} disabled={busy} className="gap-1">
           <Plus size={14} aria-hidden="true" />
@@ -147,7 +164,7 @@ export function TeamsSettingsPanel() {
         <SortableContext items={teams.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           <ul className="space-y-2">
             {teams.map((team) => (
-              <TeamRow key={team.id} team={team} busy={busy} onEdit={() => setEditing(team)} onDelete={() => handleDelete(team)} />
+              <TeamRow key={team.id} team={team} busy={busy} onEdit={() => setEditing(team)} onDelete={() => handleDelete(team)} onRoundRobin={(on) => handleRoundRobin(team, on)} />
             ))}
           </ul>
         </SortableContext>
@@ -170,7 +187,19 @@ export function TeamsSettingsPanel() {
   )
 }
 
-function TeamRow({ team, busy, onEdit, onDelete }: { team: TeamSummary; busy: boolean; onEdit: () => void; onDelete: () => void }) {
+function TeamRow({
+  team,
+  busy,
+  onEdit,
+  onDelete,
+  onRoundRobin,
+}: {
+  team: TeamSummary
+  busy: boolean
+  onEdit: () => void
+  onDelete: () => void
+  onRoundRobin: (on: boolean) => void
+}) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: team.id, disabled: busy })
   return (
     <li
@@ -198,6 +227,15 @@ function TeamRow({ team, busy, onEdit, onDelete }: { team: TeamSummary; busy: bo
           ) : (
             team.defaultRoles.map((role) => <RolePill key={role.id} role={role} />)
           )}
+        </div>
+        <div className="max-w-md pt-1">
+          <Switch
+            id={`team-round-robin-${team.id}`}
+            checked={team.roundRobinEnabled}
+            onChange={(on) => !busy && onRoundRobin(on)}
+            label="Round robin"
+            description="New tickets left unassigned in this queue go to its active members in turn."
+          />
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-3 pt-1">
