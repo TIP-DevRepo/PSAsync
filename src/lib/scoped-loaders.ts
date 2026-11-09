@@ -612,6 +612,12 @@ export function mayUseTicketTeam(ctx: Pick<AccessContext, "can">, actorInTeam: b
   return actorInTeam || ctx.can("tickets.assign") || ctx.can("tickets.viewAll")
 }
 
+// A saved view of the signed in user's own (src/lib/saved-views.ts).
+// Another user's view, in this company or any other, is a miss (404), the
+// same as one that doesn't exist.
+export const savedViewWhere = (ctx: Pick<AccessContext, "companyId" | "userId">, viewId: string) =>
+  ({ id: viewId, companyId: ctx.companyId, userId: ctx.userId }) satisfies Prisma.SavedViewWhereInput
+
 // The list filter for every ticket the user may open (never deleted ones)
 export const ticketListWhere = (ctx: TicketViewer) =>
   ({ companyId: ctx.companyId, ...NOT_DELETED_TICKET, AND: [ticketVisibilityWhere(ctx)] }) satisfies Prisma.TicketWhereInput

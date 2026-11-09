@@ -124,6 +124,9 @@ export interface TeamSummary {
   // The active members the signed in user may make an opportunity's owner
   // in this team (visibleTeamMemberIds)
   assignableOwnerIds: string[]
+  // The active members the signed in user may make a ticket's assignee in
+  // this team (queue): all of them with tickets.assign, else only the user
+  assignableAssigneeIds: string[]
   // Only for users who manage teams
   members?: { id: string; name: string; active: boolean }[]
   // Only for users who manage teams: why they can't add members (one of its

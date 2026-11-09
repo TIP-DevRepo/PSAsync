@@ -14,7 +14,9 @@ import type { TeamRow } from "@/lib/team-selects"
 // and assignableOwnerIds which active members the caller may make an
 // opportunity's owner in it (visibleTeamMemberIds; none without the
 // Opportunities page), which is all the New opportunity dialog and the
-// opportunity page need to know about membership. For users who manage
+// opportunity page need to know about membership, and
+// assignableAssigneeIds which active members the caller may make a
+// ticket's assignee in it (none without the Tickets page). For users who manage
 // teams, memberGrantRefusal says why they can't add members (one of its
 // default roles fails the grant rule, src/lib/role-grants.ts), or null.
 // Role permissions are read for that check and never returned.
@@ -26,6 +28,15 @@ export function toTeamResponse(team: TeamRow, ctx: Pick<AccessContext, "userId" 
         activeIds
       )
     : []
+  // A ticket's assignee must be a member of its queue: any active member
+  // with tickets.assign, otherwise only the caller (when a member), the
+  // same rule as mayAssignTicketTo
+  const isMember = team.members.some((m) => m.user.id === ctx.userId)
+  const assignableAssigneeIds = !ctx.can("pages.tickets")
+    ? []
+    : ctx.can("tickets.assign")
+      ? activeIds
+      : activeIds.filter((id) => id === ctx.userId && isMember)
   return {
     id: team.id,
     name: team.name,
@@ -36,8 +47,9 @@ export function toTeamResponse(team: TeamRow, ctx: Pick<AccessContext, "userId" 
     roundRobinEnabled: team.roundRobinEnabled,
     memberCount: team.members.length,
     defaultRoles: team.defaultRoles.map(({ role }) => ({ id: role.id, name: role.name, rank: role.rank, color: role.color, isGlobalAdmin: role.isGlobalAdmin })),
-    isMember: team.members.some((m) => m.user.id === ctx.userId),
+    isMember,
     assignableOwnerIds,
+    assignableAssigneeIds,
     ...(ctx.can("settingsSections.teams")
       ? {
           members: team.members.map((m) => m.user),
