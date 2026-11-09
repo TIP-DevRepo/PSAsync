@@ -55,7 +55,7 @@ export function PriorityMarker({ tone, children, className }: { tone: Tone; chil
 
 // ─── PsasyncMark ────────────────────────────────────────────────────────────
 // The real PSAsync logo (public/brand/psasync-mark.png, the favicon's mark
-// on a transparent background), used as a CSS mask and filled with the
+// on a transparent background), used as a CSS mask and filled from the
 // accent, so it follows the company or user accent in both modes. The
 // mask uses the PNG's alpha, so its partly transparent layers stay partly
 // transparent. No tile behind it. Shown in the sidebar header when a
@@ -63,7 +63,19 @@ export function PriorityMarker({ tone, children, className }: { tone: Tone; chil
 // customers (they see the company name instead).
 export const PSASYNC_MARK_SRC = "/brand/psasync-mark.png"
 
-export function PsasyncMark({ size = 34, className }: { size?: number; className?: string }) {
+// The mark's fill. "accent" (the default) is the plain accent, for light
+// surfaces like the Settings empty state. "sidebar" mixes the accent with
+// the sidebar's own text color, so it is lighter on dark and tinted
+// sidebars and darker on a light one: the solid square reaches at least
+// 4.5:1 and the middle square at least 3:1 on every sidebar style for
+// every accent preset. (The faintest square is only 25% opaque in the
+// artwork, so no fill can take it past about 1.8:1.)
+export const PSASYNC_MARK_FILL = {
+  accent: "var(--ps-acc)",
+  sidebar: "color-mix(in srgb, var(--ps-acc) 55%, var(--ps-sb-text))",
+} as const
+
+export function PsasyncMark({ size = 34, fill = "accent", className }: { size?: number; fill?: keyof typeof PSASYNC_MARK_FILL; className?: string }) {
   const mask = `url(${PSASYNC_MARK_SRC})`
   return (
     <span
@@ -73,7 +85,7 @@ export function PsasyncMark({ size = 34, className }: { size?: number; className
       style={{
         width: size,
         height: size,
-        backgroundColor: "var(--ps-acc)",
+        backgroundColor: PSASYNC_MARK_FILL[fill],
         maskImage: mask,
         WebkitMaskImage: mask,
         maskSize: "contain",

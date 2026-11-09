@@ -175,8 +175,9 @@ export function Sidebar({ pagePermissions = {}, companyName, logoUrl, userName }
   )
 }
 
-// The company's uploaded logo on a white tile, or the PSAsync logo in the
-// accent (no tile) when it has none or removed it
+// The company's uploaded logo on a white tile, or the PSAsync logo (no
+// tile, in the sidebar's readable shade of the accent) when it has none or
+// removed it
 function LogoTile({ logoUrl, companyName }: { logoUrl: string | null; companyName: string }) {
   if (logoUrl) {
     return (
@@ -187,7 +188,7 @@ function LogoTile({ logoUrl, companyName }: { logoUrl: string | null; companyNam
       </span>
     )
   }
-  return <PsasyncMark />
+  return <PsasyncMark fill="sidebar" />
 }
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {
