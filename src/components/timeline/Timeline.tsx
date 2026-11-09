@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useImperativeHandle, useRef, useState, type Ref } from "react"
-import { Activity, Mail } from "lucide-react"
+import { Mail } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { toast } from "@/lib/toast"
@@ -13,6 +13,7 @@ import type { StageCategory } from "@/lib/opportunity-view"
 import { StagePill } from "@/components/opportunities/StagePill"
 import { ActionButtonBar } from "./ActionButtonBar"
 import { EmailAttachmentPicker, EmailFields, type EmailDraft, type EmailOptions } from "./EmailComposer"
+import { InitialsAvatar, StatusPill } from "@/components/ui/blocks"
 import { cn } from "@/lib/utils"
 
 // One entry as every timeline route returns it (timelineEntrySelect). A
@@ -34,7 +35,7 @@ interface TimelinePage {
 }
 
 const NOTE_HTML =
-  "text-sm text-foreground break-words [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0 [&_a]:text-primary [&_a]:underline"
+  "text-sm text-foreground break-words [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2 last:[&_p]:mb-0 [&_a]:text-acc-ink [&_a]:underline leading-[1.55]"
 
 const when = (value: string) => new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })
 
@@ -344,7 +345,7 @@ export function Timeline({
 
   return (
     <section aria-labelledby="timeline-heading" className="space-y-4">
-      <h2 id="timeline-heading" className="text-heading font-semibold text-foreground">
+      <h2 id="timeline-heading" className="sr-only">
         Timeline
       </h2>
 
@@ -353,7 +354,7 @@ export function Timeline({
       )}
 
       {canAddNotes && composer && (
-        <div ref={composerRef} className="scroll-mt-4 space-y-3 rounded-lg border border-border bg-card p-3 shadow-card">
+        <div ref={composerRef} className="scroll-mt-4 space-y-3 rounded-card border border-border bg-card p-4">
           <p className="text-sm font-medium text-foreground">
             {composer.button.label}
             {!composer.button.opens.noteRequired && (
@@ -441,48 +442,43 @@ export function Timeline({
       ) : entries.length === 0 ? (
         <p className="text-sm text-muted-foreground">Nothing here yet.{canAddNotes ? " Use Note above to add the first one." : ""}</p>
       ) : (
-        <ol className="space-y-3">
+        // Notes and emails as cards with their author, actions as compact
+        // one line entries between them, as the design draws a timeline
+        <ol className="space-y-3.5">
           {entries.map((entry) =>
             entry.kind === "ACTION" ? (
-              <li key={entry.id} className="flex items-start gap-2 px-1 text-sm">
-                <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
-                  <Activity size={12} aria-hidden="true" />
-                </span>
-                <p className="min-w-0 text-muted-foreground">
-                  <span className="text-foreground">{describeTimelineAction(entry.action, entry.data)}</span>
-                  <span className="whitespace-nowrap">
-                    {" "}
-                    · {entry.author?.name ?? "System"} · <time dateTime={entry.createdAt}>{when(entry.createdAt)}</time>
-                  </span>
+              <li key={entry.id} className="flex items-start gap-2.5 py-0.5 pl-4 pr-1.5 text-[13px] text-muted-foreground">
+                <span aria-hidden="true" className="mt-[5px] h-2 w-2 shrink-0 rounded-full bg-border outline outline-[3px] outline-background" />
+                <p className="min-w-0 flex-1">
+                  <span className="text-foreground">{describeTimelineAction(entry.action, entry.data)}</span> · {entry.author?.name ?? "System"}
                 </p>
+                <time dateTime={entry.createdAt} className="shrink-0 text-xs">
+                  {when(entry.createdAt)}
+                </time>
               </li>
             ) : (
-              <li key={entry.id} className="rounded-lg border border-border bg-card p-4 shadow-card">
-                <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                  <p className="flex min-w-0 flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
-                    {entry.kind !== "NOTE" && (
-                      <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 font-medium text-primary">
-                        <Mail size={12} aria-hidden="true" />
-                        {entry.kind === "EMAIL_IN" ? "Email received" : "Email sent"}
-                      </span>
-                    )}
-                    <span className="font-semibold text-foreground">{entry.author?.name ?? (entry.kind === "NOTE" ? "Former user" : "System")}</span>
+              <li key={entry.id} className="flex gap-3 rounded-card border border-border bg-card px-4 py-4 sm:px-[18px]">
+                <InitialsAvatar
+                  name={entry.author?.name ?? (entry.kind === "NOTE" ? "Former user" : "System")}
+                  tone={entry.author && entry.author.id === myUserId ? "accent" : "neutral"}
+                />
+                <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                <div className="flex flex-wrap items-center gap-2">
+                    <strong className="font-semibold text-foreground">{entry.author?.name ?? (entry.kind === "NOTE" ? "Former user" : "System")}</strong>
+                    <StatusPill shape="tag" tone={entry.kind === "NOTE" ? "neutral" : "accent"}>
+                      {entry.kind !== "NOTE" && <Mail size={12} aria-hidden="true" />}
+                      {entry.kind === "NOTE" ? "Note" : entry.kind === "EMAIL_IN" ? "Email received" : "Email sent"}
+                    </StatusPill>
                     <EntryButtonLabel data={entry.data} />
                     <NoteStagePill data={entry.data} />
-                    <time dateTime={entry.createdAt}>{when(entry.createdAt)}</time>
-                    {entry.editedAt && (
-                      <span title={`Edited ${when(entry.editedAt)}`} className="italic">
-                        edited
-                      </span>
-                    )}
-                  </p>
+                    <span className="flex-1" />
                   {entry.kind === "NOTE" && canAddNotes && !!myUserId && entry.author?.id === myUserId && editing?.id !== entry.id && (
                     <div className="flex gap-3">
                       <button
                         type="button"
                         onClick={() => setEditing({ id: entry.id, html: entry.body ?? "" })}
                         disabled={busyId === entry.id}
-                        className="text-xs font-medium text-primary hover:underline disabled:opacity-60"
+                        className="text-xs font-medium text-acc-ink hover:underline disabled:opacity-60"
                       >
                         Edit
                       </button>
@@ -496,6 +492,15 @@ export function Timeline({
                       </button>
                     </div>
                   )}
+                    <span className="text-xs text-muted-foreground">
+                      <time dateTime={entry.createdAt}>{when(entry.createdAt)}</time>
+                      {entry.editedAt && (
+                        <span title={`Edited ${when(entry.editedAt)}`} className="italic">
+                          {" "}
+                          edited
+                        </span>
+                      )}
+                    </span>
                 </div>
                 {editing?.id === entry.id ? (
                   <div className="space-y-2">
@@ -515,6 +520,7 @@ export function Timeline({
                   // Sanitized by the API on the way out (toTimelineEntryResponse)
                   <div className={cn(NOTE_HTML)} dangerouslySetInnerHTML={{ __html: entry.body ?? "" }} />
                 )}
+                </div>
               </li>
             )
           )}
@@ -560,7 +566,7 @@ function EmailBody({ entry }: { entry: TimelineEntryData }) {
       )}
       <div className={cn(NOTE_HTML, long && !expanded && "max-h-24 overflow-hidden")} dangerouslySetInnerHTML={{ __html: html }} />
       {long && (
-        <button type="button" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded} className="text-xs font-medium text-primary hover:underline">
+        <button type="button" onClick={() => setExpanded((v) => !v)} aria-expanded={expanded} className="text-xs font-medium text-acc-ink hover:underline">
           {expanded ? "Show less" : "Show more"}
         </button>
       )}
@@ -582,7 +588,11 @@ function FixedStage({ stage }: { stage: TimelineStageOption | null }) {
 function EntryButtonLabel({ data }: { data: unknown }) {
   const button = entryActionButton(data)
   if (!button) return null
-  return <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{button.name}</span>
+  return (
+    <StatusPill shape="tag" tone="neutral">
+      {button.name}
+    </StatusPill>
+  )
 }
 
 // A note posted with a stage change shows the move, for example "New to

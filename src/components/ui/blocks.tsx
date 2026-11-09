@@ -243,10 +243,10 @@ export function InitialsAvatar({ name, tone = "accent", size = "md", className }
 export function InfoPanelCard({ title, children, id, className }: { title: string; children: ReactNode; id?: string; className?: string }) {
   return (
     <section aria-labelledby={id} className={cn("flex flex-col gap-1 rounded-card border border-border bg-card p-4", className)}>
-      <h2 id={id} className="mb-2 ml-1.5 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+      <h2 id={id} className="mb-2 ml-1 text-xs font-semibold uppercase tracking-[0.08em] text-muted-foreground">
         {title}
       </h2>
-      <div className="flex flex-col gap-1 [&>*]:mx-2">{children}</div>
+      <div className="flex flex-col gap-1 px-1">{children}</div>
     </section>
   )
 }
