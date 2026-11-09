@@ -5,6 +5,8 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
 import { ColumnFilterRow, ColumnFilterToggle, useColumnFilters } from "@/components/table/ColumnFilters"
+import { useRowDensity } from "@/components/AppearanceProvider"
+import { TABLE } from "@/components/ui/blocks"
 import { filterRowsByColumns, type FilterableColumn } from "@/lib/column-filters"
 import {
   contactName,
@@ -101,7 +103,7 @@ function SortableHeader({
     <th
       scope="col"
       aria-sort={active && sortDirection ? (sortDirection === "asc" ? "ascending" : "descending") : undefined}
-      className={`select-none py-2 pr-3 ${align === "right" ? "text-right" : ""}`}
+      className={`select-none ${TABLE.th} ${align === "right" ? "text-right" : ""}`}
     >
       <button onClick={() => onSort(column)} className={`flex items-center gap-1 hover:text-foreground ${align === "right" ? "ml-auto" : ""}`}>
         {label}
@@ -144,10 +146,12 @@ export function OpportunityList({ opportunities, stages }: { opportunities: Oppo
         })
       : filtered
 
-  const cell = "py-3 pr-3 truncate"
+  // Row height follows the user's row density (My settings > Appearance)
+  const density = useRowDensity()
+  const cell = `${density === "compact" ? "py-1.5" : density === "comfortable" ? "py-5" : "py-3"} ${TABLE.cellX} truncate`
   const cells: Record<SortColumn, (o: OpportunityRow, href: string) => ReactNode> = {
     number: (o, href) => (
-      <Link href={href} className="text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+      <Link href={href} className="rounded-sm hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
         {o.number}
       </Link>
     ),
@@ -163,8 +167,8 @@ export function OpportunityList({ opportunities, stages }: { opportunities: Oppo
     updated: (o) => formatDate(o.updatedAt),
   }
   const cellClass: Partial<Record<SortColumn, string>> = {
-    number: "font-medium tabular-nums",
-    title: "text-foreground",
+    number: TABLE.number,
+    title: "font-medium text-foreground",
     client: "text-foreground",
     contact: "text-muted-foreground",
     team: "text-muted-foreground",
@@ -182,12 +186,13 @@ export function OpportunityList({ opportunities, stages }: { opportunities: Oppo
           <span className="text-muted-foreground">
             Showing {filtered.length} of {opportunities.length}
           </span>
-          <button type="button" onClick={columnFilters.clear} className="font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+          <button type="button" onClick={columnFilters.clear} className="font-medium text-acc-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
             Clear filters
           </button>
         </div>
       )}
-      <div className="max-h-[70vh] overflow-auto rounded-lg border border-border bg-card shadow-card">
+      {/* Fixed widths: below them the table scrolls sideways, never squeezed */}
+      <div className="max-h-[70vh] overflow-auto rounded-panel border border-border bg-card">
         <table className="w-full table-fixed border-collapse text-sm" style={{ minWidth: TABLE_MIN_WIDTH }}>
           <colgroup>
             <col style={{ width: TOGGLE_WIDTH }} />
@@ -195,8 +200,8 @@ export function OpportunityList({ opportunities, stages }: { opportunities: Oppo
               <col key={c.key} style={{ width: c.width }} />
             ))}
           </colgroup>
-          <thead className="sticky top-0 z-10 bg-card">
-            <tr className="border-b border-border text-left text-caption text-muted-foreground">
+          <thead className="sticky top-0 z-10 bg-surface-2">
+            <tr className={`border-b border-border ${TABLE.headRow}`}>
               <th scope="col" className="py-1 pl-2">
                 <ColumnFilterToggle
                   open={columnFilters.open}
@@ -238,7 +243,7 @@ export function OpportunityList({ opportunities, stages }: { opportunities: Oppo
                     if ((e.target as HTMLElement).closest("a")) return
                     router.push(href)
                   }}
-                  className="cursor-pointer border-b border-border transition-colors hover:bg-surface-hover"
+                  className={`cursor-pointer ${TABLE.row}`}
                 >
                   <td aria-hidden="true" />
                   {OPPORTUNITY_LIST_COLUMNS.map((c) => (
@@ -253,7 +258,7 @@ export function OpportunityList({ opportunities, stages }: { opportunities: Oppo
               <tr>
                 <td colSpan={OPPORTUNITY_LIST_COLUMNS.length + 1} className="py-8 text-center text-sm text-muted-foreground">
                   No opportunities match these column filters.{" "}
-                  <button type="button" onClick={columnFilters.clear} className="font-medium text-primary hover:underline">
+                  <button type="button" onClick={columnFilters.clear} className="font-medium text-acc-ink hover:underline">
                     Clear filters
                   </button>
                 </td>

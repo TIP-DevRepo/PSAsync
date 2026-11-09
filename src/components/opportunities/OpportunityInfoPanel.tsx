@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react"
 import Link from "next/link"
 import { useAccess } from "@/components/AccessProvider"
 import { Button } from "@/components/ui/button"
+import { InfoPanelCard } from "@/components/ui/blocks"
 import { ClientContactPicker } from "@/components/ClientContactPicker"
 import { InlineEditField, InlineFieldLink, InlineInput, InlineListbox } from "@/components/inline-edit/InlineEditField"
 import { toast } from "@/lib/toast"
@@ -46,7 +47,7 @@ export interface OpportunityDetailData extends OpportunityRow {
 type FieldKey = "party" | "location" | "team" | "owner" | "stage" | "type" | "value" | "date"
 
 const LABEL = "mb-1 block text-xs font-medium text-muted-foreground"
-const LINK = "text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+const LINK = "text-acc-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 const DASH = <span className="text-muted-foreground">-</span>
 const STAGE_GROUPS: StageCategory[] = ["OPEN", "WON", "LOST"]
 
@@ -76,17 +77,17 @@ function LocationText({ location, clientId, note }: { location: ClientLocationSu
 // A value that never edits in place: plain, no outline
 function ReadOnly({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <div className="min-w-0 space-y-0.5">
+    <div className="min-w-0 space-y-0.5 py-1.5">
       <p className="text-xs font-medium text-muted-foreground">{label}</p>
-      <div className="break-words text-sm text-foreground">{children}</div>
+      <div className="break-words text-sm font-medium text-foreground">{children}</div>
     </div>
   )
 }
 
 const phoneLink = (phone: string | null) => (phone ? <a href={`tel:${phone}`} className={LINK}>{phone}</a> : DASH)
 
-// The opportunity page's right column panel, in the HaloPSA style: a Client
-// group, then an Opportunity group, label above value. With
+// The opportunity page's right column, as the design draws it: a Client
+// card, then an Opportunity card (InfoPanelCard), label above value. With
 // opportunities.edit every opportunity field edits in place on one click
 // (InlineEditField); everything else is read only. One field edits at a
 // time. The client, contact, and location names open their page in a new
@@ -205,13 +206,8 @@ export function OpportunityInfoPanel({
   ]
 
   return (
-    <section aria-labelledby="opportunity-panel-heading" className="space-y-5 rounded-lg border border-border bg-card p-4 shadow-card">
-      <h2 id="opportunity-panel-heading" className="sr-only">
-        Opportunity details
-      </h2>
-
-      <div className="space-y-3">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Client</h3>
+    <div className="flex flex-col gap-4">
+      <InfoPanelCard title="Client" id="opportunity-panel-client">
         {canEdit && editing === "party" ? (
           <div
             className="-mx-2 space-y-3 rounded-md border border-ring px-2 py-2"
@@ -305,14 +301,13 @@ export function OpportunityInfoPanel({
             DASH
           )}
         </ReadOnly>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
+        <div className="grid grid-cols-1 gap-x-3 sm:grid-cols-2 lg:grid-cols-1 xl:grid-cols-2">
           <ReadOnly label="Work phone">{phoneLink(o.contact.phone)}</ReadOnly>
           <ReadOnly label="Mobile">{phoneLink(o.contact.mobile)}</ReadOnly>
         </div>
-      </div>
+      </InfoPanelCard>
 
-      <div className="space-y-3 border-t border-border pt-4">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Opportunity</h3>
+      <InfoPanelCard title="Opportunity" id="opportunity-panel-opportunity">
         <InlineEditField
           label="Team"
           value={o.team?.id ?? ""}
@@ -394,7 +389,7 @@ export function OpportunityInfoPanel({
         <ReadOnly label="Created by">{o.createdBy?.name ?? DASH}</ReadOnly>
         <ReadOnly label="Created">{formatDate(o.createdAt)}</ReadOnly>
         <ReadOnly label="Closed">{o.closedAt ? formatDate(o.closedAt) : DASH}</ReadOnly>
-      </div>
-    </section>
+      </InfoPanelCard>
+    </div>
   )
 }

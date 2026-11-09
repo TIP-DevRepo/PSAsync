@@ -2,12 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Columns3, List, Plus, Target, X } from "lucide-react"
+import { CalendarClock, Columns3, List, Plus, Target, Trophy, UserRound, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Breadcrumbs } from "@/components/Breadcrumbs"
+import { TopbarAction } from "@/components/layout/TopbarSlots"
+import { PageHeader, StatRow, StatTile, ViewTabs } from "@/components/ui/blocks"
 import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
-import { cn } from "@/lib/utils"
 import { newSalesOrderHref, offersSalesOrderAfterMove, WON_SALES_ORDER_PROMPT } from "@/lib/opportunity-quote-rules"
 import {
   EMPTY_FILTERS,
@@ -16,6 +18,7 @@ import {
   moveOpportunityStage,
   notifyOpportunitiesChanged,
   opportunityApiQuery,
+  opportunityStats,
   OWNER_UNASSIGNED,
   opportunityUrlQuery,
   readOpportunityUrl,
@@ -151,49 +154,57 @@ export function OpportunitiesPage() {
       ? "Unassigned"
       : (users.find((u) => u.id === filters.owner)?.name ?? "Owner")
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-display font-semibold tracking-tight text-foreground">Opportunities</h1>
-        <div className="flex items-center gap-2">
-          <div role="group" aria-label="View" className="inline-flex rounded-md border border-border bg-card p-0.5">
-            {VIEWS.map(({ key, label, icon: Icon }) => (
-              <button
-                key={key}
-                type="button"
-                aria-pressed={view === key}
-                // Changing view keeps the search; the list's column filters
-                // only belong to the list
-                onClick={() => setUrl(key, filters)}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-                  view === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-surface-hover hover:text-foreground"
-                )}
-              >
-                <Icon size={14} aria-hidden="true" />
-                {label}
-              </button>
-            ))}
-          </div>
-          {canCreate && (
-            <Button onClick={() => setShowNew(true)} className="gap-1">
-              <Plus size={14} aria-hidden="true" />
-              New opportunity
-            </Button>
-          )}
-        </div>
-      </div>
+  // The stat tiles, from the rows already on screen (no extra request)
+  const stats = opportunityStats(opportunities, new Date())
+  const showStats = !loadError && !(loading && opportunities.length === 0)
+  const scope = teamChipName ? `${teamChipName}${ownerChipName ? `, ${ownerChipName}` : ""}` : ownerChipName
 
-      <div className="flex flex-wrap items-end gap-3">
-        <OpportunityFilterBar q={filters.q} onChange={setSearch} />
+  return (
+    <div className="flex w-full max-w-[1320px] flex-col gap-[18px]">
+      <Breadcrumbs items={teamChipName ? [{ label: "Opportunities", href: pathname }] : []} current={teamChipName ?? "Opportunities"} />
+      {canCreate && (
+        <TopbarAction>
+          <Button size="lg" className="gap-1.5 px-3.5" onClick={() => setShowNew(true)}>
+            <Plus size={16} strokeWidth={2.2} aria-hidden="true" />
+            New opportunity
+          </Button>
+        </TopbarAction>
+      )}
+      <PageHeader
+        title="Opportunities"
+        subtitle={showStats ? `${scope ? `${scope} · ` : ""}${stats.open} open, ${stats.unassigned} unassigned` : scope ?? "Every deal you can open, from first conversation to won or lost."}
+      />
+
+      {showStats && (
+        <StatRow label="Opportunity totals">
+          <StatTile label="Open" value={stats.open} icon={Target} tone="accent" />
+          <StatTile label="Unassigned" value={stats.unassigned} icon={UserRound} tone="neutral" />
+          <StatTile label="Closing this month" value={stats.closingThisMonth} icon={CalendarClock} tone="warn" />
+          <StatTile label="Won this month" value={stats.wonThisMonth} icon={Trophy} tone="ok" />
+        </StatRow>
+      )}
+
+      {/* The design's toolbar: the view switch, then the search and the
+          team and owner chips on the right */}
+      <div className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-card px-3.5 py-3">
+        <ViewTabs
+          ariaLabel="View"
+          views={VIEWS}
+          active={view}
+          // Changing view keeps the search; the list's column filters only
+          // belong to the list
+          onChange={(key) => setUrl(key, filters)}
+        />
+        <span className="flex-1" />
         {teamChipName && (
           <FilterChip label={`Team: ${teamChipName}`} onRemove={() => setFilters({ ...filters, team: "", owner: "" })} />
         )}
         {ownerChipName && <FilterChip label={`Owner: ${ownerChipName}`} onRemove={() => setFilters({ ...filters, owner: "" })} />}
+        <OpportunityFilterBar q={filters.q} onChange={setSearch} />
       </div>
 
       {loadError ? (
-        <div role="alert" className="rounded-lg border border-border bg-card p-6 text-center shadow-card">
+        <div role="alert" className="rounded-panel border border-border bg-card p-6 text-center">
           <p className="text-sm font-medium text-foreground">{loadError}</p>
           {filtered && (
             <Button variant="outline" className="mt-3" onClick={() => setFilters(EMPTY_FILTERS)}>
@@ -239,7 +250,7 @@ export function OpportunitiesPage() {
 // An active team or owner filter next to Search, removed with its X
 function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
   return (
-    <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-brand-primary-500/10 py-1 pl-3 pr-1 text-sm font-medium text-brand-primary-500">
+    <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-acc-tint py-1 pl-3 pr-1 text-[13px] font-semibold text-acc-ink">
       <span className="truncate" title={label}>
         {label}
       </span>
@@ -247,7 +258,7 @@ function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }
         type="button"
         onClick={onRemove}
         aria-label={`Remove ${label}`}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full hover:bg-brand-primary-500/15 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full hover:bg-acc-ink/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
         <X size={14} aria-hidden="true" />
       </button>
@@ -267,8 +278,8 @@ function EmptyState({
   onClear: () => void
 }) {
   return (
-    <div className="flex flex-col items-center gap-3 rounded-lg border border-dashed border-border bg-card px-6 py-12 text-center">
-      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-primary">
+    <div className="flex flex-col items-center gap-3 rounded-panel border border-dashed border-border bg-card px-6 py-12 text-center">
+      <span className="flex h-10 w-10 items-center justify-center rounded-full bg-acc-tint text-acc-ink">
         <Target size={20} aria-hidden="true" />
       </span>
       {filtered ? (

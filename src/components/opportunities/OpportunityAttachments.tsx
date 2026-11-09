@@ -76,7 +76,7 @@ export function OpportunityAttachments({
   }
 
   return (
-    <section aria-labelledby="opportunity-attachments-heading" className="space-y-3 rounded-lg border border-border bg-card p-4 shadow-card">
+    <section aria-labelledby="opportunity-attachments-heading" className="space-y-3 rounded-card border border-border bg-card p-4">
       <h2 id="opportunity-attachments-heading" className="text-sm font-semibold text-foreground">
         Attachments
       </h2>
@@ -85,7 +85,7 @@ export function OpportunityAttachments({
         {loaded && attachments.length === 0 && <p className="text-sm text-muted-foreground">No files attached yet.</p>}
         {attachments.map((a) => (
           <div key={a.id} className="flex items-center justify-between gap-3 rounded-md border border-border p-3 text-sm">
-            <a href={a.downloadUrl} target="_blank" rel="noopener noreferrer" className="min-w-0 truncate text-primary hover:underline" title={a.fileName}>
+            <a href={a.downloadUrl} target="_blank" rel="noopener noreferrer" className="min-w-0 truncate text-acc-ink hover:underline" title={a.fileName}>
               {a.fileName}
             </a>
             <div className="flex shrink-0 items-center gap-3">

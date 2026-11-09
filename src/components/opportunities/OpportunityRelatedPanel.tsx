@@ -75,7 +75,7 @@ export function OpportunityRelatedPanel({
   const canNewPurchaseOrder = !deleted && can("pages.purchaseOrders") && can("purchaseOrders.create")
 
   return (
-    <section aria-labelledby="opportunity-related-heading" className="space-y-3 rounded-lg border border-border bg-card p-4 shadow-card">
+    <section aria-labelledby="opportunity-related-heading" className="space-y-3 rounded-card border border-border bg-card p-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 id="opportunity-related-heading" className="text-sm font-semibold text-foreground">
           Related
@@ -117,7 +117,7 @@ export function OpportunityRelatedPanel({
                   {related[section.key].map((record: RelatedRecord) => (
                     <li key={record.id} className="rounded-md border border-border p-2.5 text-sm">
                       <div className="flex items-center justify-between gap-2">
-                        <Link href={section.href(record.id)} className="truncate font-medium text-primary hover:underline">
+                        <Link href={section.href(record.id)} className="truncate font-medium text-acc-ink hover:underline">
                           {record.number}
                         </Link>
                         <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{section.status(record.status)}</span>

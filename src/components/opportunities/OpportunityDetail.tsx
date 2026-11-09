@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { Pencil } from "lucide-react"
+import { Briefcase, MoreHorizontal, Pencil } from "lucide-react"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { Button } from "@/components/ui/button"
 import { useAccess } from "@/components/AccessProvider"
@@ -11,15 +11,18 @@ import { Timeline, type TimelineHandle } from "@/components/timeline/Timeline"
 import { emailUnavailableReason, type EmailOptions } from "@/components/timeline/EmailComposer"
 import { ActionButtonBar } from "@/components/timeline/ActionButtonBar"
 import { TabsBar } from "@/components/ui/tabs-bar"
+import { RecordHeaderCard } from "@/components/ui/blocks"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { opportunityDisplayValue } from "@/lib/opportunity-value"
 import { AuditLogTable } from "@/components/audit/AuditLogTable"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { promptDialog } from "@/lib/prompt-dialog"
 import { OPPORTUNITY_TITLE_MAX } from "@/lib/opportunity-rules"
-import { formatDate, notifyOpportunitiesChanged, type StageOption, type TypeOption } from "@/lib/opportunity-view"
+import { formatCents, formatDate, formatDateOnly, notifyOpportunitiesChanged, opportunityFolderHref, valueCents, type StageOption, type TypeOption } from "@/lib/opportunity-view"
 import type { TeamSummary } from "@/lib/team-rules"
 import type { ActionButtonDefinition } from "@/lib/timeline-buttons"
-import { opportunityTabHref, readOpportunityTab, tabLabel, visibleOpportunityTabs, type OpportunityTabKey } from "@/lib/opportunity-tabs"
+import { opportunityTabHref, readOpportunityTab, visibleOpportunityTabs, type OpportunityTabKey } from "@/lib/opportunity-tabs"
 import { noteStageChange } from "@/lib/timeline-actions"
 import { defaultEmailSubject } from "@/lib/record-email"
 import { newSalesOrderHref, offersSalesOrderAfterMove, raiseQuoteHref, WON_SALES_ORDER_PROMPT, type StageCategoryName } from "@/lib/opportunity-quote-rules"
@@ -36,9 +39,11 @@ const DELETED_MESSAGE = "This opportunity is deleted"
 const NEEDS_QUOTE_CREATE_MESSAGE = "You need permission to create quotes to use this"
 const CLOSED_FOR_QUOTES_MESSAGE = "Quotes can only be raised on an open opportunity"
 
-// Laid out like HaloPSA: the client and number large on the first line
-// (Delete at the top right), the title under it, the action buttons on their
-// own row aligned left, then the stage pill with created and closed text. The main column is tabs (src/lib/opportunity-
+// Laid out as the design draws a record (RecordHeaderCard): the icon tile,
+// the client and number large on the first line, the title under it, the
+// stage pill and a More actions menu (Delete) on the right, the action
+// buttons on their own row, then a summary strip (value, close date, team,
+// created by). The main column is tabs (src/lib/opportunity-
 // tabs.ts, kept in ?tab=): Details (the timeline), Attachments, Related, and
 // the Audit log (auditLog.view). The details panel (edited in place) is on
 // the right. At phone width the panel comes first, then the tabs.
@@ -281,60 +286,78 @@ export function OpportunityDetail({ id }: { id: string }) {
   // Shown on a tab when there is at least one
   const counts: Partial<Record<OpportunityTabKey, number>> = { attachments: o._count.attachments, related: relatedCount(related) }
 
+  // The latest linked quote's total, else the expected value
+  const shownValue = opportunityDisplayValue(o)
+  const summary = [
+    { label: "Value", value: shownValue === null ? "-" : formatCents(valueCents(shownValue)) },
+    { label: "Close", value: formatDateOnly(o.expectedCloseDate) },
+    { label: "Team", value: o.team?.name ?? "-" },
+    { value: `Created${o.createdBy ? ` by ${o.createdBy.name}` : ""} on ${formatDate(o.createdAt)}${o.closedAt ? ` · Closed ${formatDate(o.closedAt)}` : ""}` },
+  ]
+  const showMenu = canDelete && !deleted
+
   return (
-    <div className="w-full space-y-6">
-      <header className="space-y-3">
-        <div>
-          <Breadcrumbs items={breadcrumbItems} current={o.number} />
-          <Link href="/dashboard/opportunities" className="mb-2 inline-block text-sm text-muted-foreground hover:text-foreground hover:underline">
-            ← Back to Opportunities
+    <div className="flex w-full max-w-[1320px] flex-col gap-5">
+      <Breadcrumbs
+        items={[...breadcrumbItems, ...(o.team ? [{ label: o.team.name, href: opportunityFolderHref(o.team.id) }] : [])]}
+        current={o.number}
+      />
+      <RecordHeaderCard
+        icon={Briefcase}
+        // Who the deal is with, and its number
+        title={
+          <Link href={`/dashboard/clients/${o.client.id}`} className="rounded-sm text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+            {o.client.name}
           </Link>
-        </div>
-
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="min-w-0 space-y-1">
-            {/* Line 1: who the deal is with, and its number */}
-            <h1 className="flex flex-wrap items-baseline gap-x-4 gap-y-1 text-display font-bold tracking-tight text-foreground">
-              <Link href={`/dashboard/clients/${o.client.id}`} className="break-words hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                {o.client.name}
-              </Link>
-              <span className="tabular-nums text-muted-foreground">{o.number}</span>
-            </h1>
-            {/* Line 2: the title, smaller but clear */}
-            <p className="flex items-start gap-2 text-lg font-medium text-foreground">
-              <span className="break-words">{o.title}</span>
-              {editable && (
-                <button
-                  type="button"
-                  onClick={() => editTitle(o.title)}
-                  disabled={saving}
-                  aria-label="Rename opportunity"
-                  className="mt-1 shrink-0 rounded p-1 text-muted-foreground hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
-                >
-                  <Pencil size={14} aria-hidden="true" />
-                </button>
-              )}
-            </p>
-          </div>
-          {canDelete && !deleted && (
-            <Button variant="outline" onClick={() => setShowDelete(true)} className="text-danger hover:text-danger">
-              Delete
-            </Button>
-          )}
-        </div>
-
-        {/* Line 3: the action buttons on their own row, aligned left; they
-            wrap onto more lines at narrow widths */}
-        <ActionButtonBar
-          buttons={buttons}
-          onSelect={openFromHeader}
-          activeId={openButtonId}
-          unavailableReason={unavailableReason}
-          label="Timeline actions"
-        />
-
+        }
+        number={o.number}
+        subtitle={
+          <p className="flex items-start gap-2">
+            <span className="break-words">{o.title}</span>
+            {editable && (
+              <button
+                type="button"
+                onClick={() => editTitle(o.title)}
+                disabled={saving}
+                aria-label="Rename opportunity"
+                className="mt-0.5 shrink-0 rounded p-1 text-muted-foreground hover:bg-surface-hover hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-60"
+              >
+                <Pencil size={14} aria-hidden="true" />
+              </button>
+            )}
+          </p>
+        }
+        side={
+          <>
+            <StagePill name={o.stage.name} category={o.stage.category} className="py-1" />
+            {showMenu && (
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    aria-label="More actions"
+                    className="flex h-9 w-9 items-center justify-center rounded-control border border-border bg-card text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  >
+                    <MoreHorizontal size={18} aria-hidden="true" />
+                  </button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={() => setShowDelete(true)} className="text-danger focus:text-danger">
+                    Delete opportunity
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            )}
+          </>
+        }
+        // The action buttons on their own row; they wrap at narrow widths
+        actions={
+          <ActionButtonBar buttons={buttons} onSelect={openFromHeader} activeId={openButtonId} unavailableReason={unavailableReason} label="Timeline actions" />
+        }
+        summary={summary}
+      >
         {o.deletedAt && (
-          <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-lg bg-danger/10 px-4 py-3 text-sm text-danger">
+          <div role="status" className="flex flex-wrap items-center justify-between gap-3 rounded-card bg-bad-tint px-4 py-3 text-sm text-bad">
             <p className="font-medium">
               This opportunity was deleted{o.deletedBy ? ` by ${o.deletedBy.name}` : ""} on {formatDate(o.deletedAt)}
             </p>
@@ -345,20 +368,11 @@ export function OpportunityDetail({ id }: { id: string }) {
             )}
           </div>
         )}
-
-        {/* Line 4: the stage pill, created and closed text */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-          <StagePill name={o.stage.name} category={o.stage.category} />
-          <p className="text-xs text-muted-foreground">
-            Created{o.createdBy ? ` by ${o.createdBy.name}` : ""} on {formatDate(o.createdAt)}
-            {o.closedAt ? ` · Closed ${formatDate(o.closedAt)}` : ""}
-          </p>
-        </div>
-      </header>
+      </RecordHeaderCard>
 
       {/* The panel comes first in the page, so at phone width it leads;
           from lg up the grid puts the tabs on the left */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]">
         <aside className="min-w-0 lg:col-start-2 lg:row-start-1">
           <OpportunityInfoPanel
             o={o}
@@ -373,9 +387,9 @@ export function OpportunityDetail({ id }: { id: string }) {
           />
         </aside>
 
-        <div className="min-w-0 space-y-4 lg:col-start-1 lg:row-start-1">
+        <div className="min-w-0 space-y-3.5 lg:col-start-1 lg:row-start-1">
           <TabsBar
-            tabs={tabs.map((t) => ({ key: t.key, label: tabLabel(t.label, counts[t.key]) }))}
+            tabs={tabs.map((t) => ({ key: t.key, label: t.label, count: counts[t.key] ? counts[t.key] : undefined }))}
             activeTab={activeTab}
             onChange={setTab}
             ariaLabel="Opportunity sections"
