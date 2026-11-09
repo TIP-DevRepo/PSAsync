@@ -384,6 +384,20 @@ const ATTEMPTS: Attempt[] = [
   { name: "Note on own ticket with other company's statusId", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.own.ticketId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", statusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
   { name: "Note on own ticket with other company's actionButtonId", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.own.ticketId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", actionButtonId: c.other.actionButtonId }), expect: 400, expectError: "Invalid action button" },
   { name: "Email from own ticket with other company's attachment", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.own.ticketId}/email`, body: (c) => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>", attachmentIds: [c.other.ticketAttachmentId] }), expect: 400, expectError: "Invalid attachment" },
+  // The paged ticket list's scope with the other company's ids
+  { name: "Ticket list view filtered by other company's team", directions: "both", method: "GET", path: (c) => `/api/tickets?view=all&teamId=${c.other.helpdeskTeamId}&sort=priority`, expect: 400, expectError: "Invalid team" },
+  { name: "Ticket list view filtered by other company's assignee", directions: "both", method: "GET", path: (c) => `/api/tickets?view=mine&assigneeId=${c.other.adminId}&page=1`, expect: 400, expectError: "Invalid user" },
+  // The client page's Tickets tab
+  { name: "Tickets of other company's client", directions: "both", method: "GET", path: (c) => `/api/clients/${c.other.clientId}/tickets`, expect: 404 },
+  // Saved views: another company's (another user's) view is a 404, its id
+  // in a reorder a 409, and the other company's ids in params a 400
+  { name: "Rename other company's saved view", directions: "both", method: "PATCH", path: (c) => `/api/saved-views/${c.other.savedViewId}`, body: () => ({ name: "Should Not Exist" }), expect: 404 },
+  { name: "Update other company's saved view", directions: "both", method: "PATCH", path: (c) => `/api/saved-views/${c.other.savedViewId}`, body: () => ({ params: { view: "mine" } }), expect: 404 },
+  { name: "Delete other company's saved view", directions: "both", method: "DELETE", path: (c) => `/api/saved-views/${c.other.savedViewId}`, expect: 404 },
+  { name: "Reorder with other company's saved view", directions: "both", method: "POST", path: () => "/api/saved-views/reorder", body: (c) => ({ page: "tickets", viewIds: [c.own.savedViewId, c.other.savedViewId] }), expect: 409 },
+  { name: "Save a view with other company's queue", directions: "both", method: "POST", path: () => "/api/saved-views", body: (c) => ({ page: "tickets", name: "Should Not Exist", params: { team: c.other.helpdeskTeamId } }), expect: 400, expectError: "Invalid team" },
+  { name: "Save a view with other company's assignee", directions: "both", method: "POST", path: () => "/api/saved-views", body: (c) => ({ page: "tickets", name: "Should Not Exist", params: { assignee: c.other.adminId } }), expect: 400, expectError: "Invalid user" },
+  { name: "Update own saved view with other company's queue", directions: "both", method: "PATCH", path: (c) => `/api/saved-views/${c.own.savedViewId}`, body: (c) => ({ params: { team: c.other.helpdeskTeamId } }), expect: 400, expectError: "Invalid team" },
   { name: "Action button POST fixedTicketStatusId", directions: "both", method: "POST", path: () => "/api/action-buttons", body: (c) => ({ label: "Should Not Exist", icon: "note", color: "#1B3A5C", kind: "NOTE", forOpportunities: false, forTickets: true, stageMode: "FIXED", fixedTicketStatusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
 
   // ── Permission escalation inside one company ──
@@ -571,6 +585,7 @@ async function snapshot(prisma: PrismaClient, companyId: string): Promise<Record
     ticketPriorities: prisma.ticketPriority.findMany({ where: { companyId }, ...byId }),
     ticketStatuses: prisma.ticketStatus.findMany({ where: { companyId }, ...byId }),
     ticketSettings: prisma.ticketSettings.findUnique({ where: { companyId } }),
+    savedViews: prisma.savedView.findMany({ where: { companyId }, ...byId }),
     roles: prisma.role.findMany({ where: { companyId }, ...byId }),
     settings: prisma.companySettings.findUnique({ where: { companyId } }),
     users: prisma.user.findMany({ where: { companyId }, ...byId, select: { id: true, active: true, roleId: true } }),
@@ -852,6 +867,9 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       { path: "/api/audit-log?recordType=TICKET", mustHold: own.ticketAuditEntryId, foreign: [other.ticketAuditEntryId, other.ticketId] },
       { path: `/api/tickets/${own.ticketId}/audit`, mustHold: own.ticketAuditEntryId, foreign: [other.ticketAuditEntryId, other.ticketId] },
       { path: "/api/ticket-statuses", mustHold: own.ticketStatusId, foreign: [other.ticketStatusId] },
+      { path: "/api/saved-views?page=tickets", mustHold: own.savedViewId, foreign: [other.savedViewId] },
+      { path: `/api/clients/${own.clientId}/tickets?status=all`, mustHold: own.ticketId, foreign: [other.ticketId] },
+      { path: "/api/tickets?view=all&sort=queue", mustHold: own.ticketId, foreign: [other.ticketId] },
     ]
     for (const list of lists) {
       const res = await admins[ownLetter].request("GET", list.path)

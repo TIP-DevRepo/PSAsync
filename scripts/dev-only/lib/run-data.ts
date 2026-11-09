@@ -962,6 +962,16 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
       })
     )
 
+    // A saved view of the admin's own on the Tickets list, for the saved
+    // view routes' cross company checks
+    const savedView = rec(
+      "savedView",
+      await prisma.savedView.create({
+        data: { companyId, userId: adminId, page: "tickets", name: `${n.company} view`, params: { view: "all" } },
+        select: { id: true },
+      })
+    )
+
     // The admin's mailbox row
     const adminMailboxId = await addRunMailbox(prisma, run, {
       companyId,
@@ -1025,6 +1035,7 @@ export async function createRunData(prisma: PrismaClient, run: RunState): Promis
         ticketPriorityId: ticketPriorities[0].id,
         ticketStatusId: openStatus.id,
         helpdeskTeamId: helpdeskTeam.id,
+        savedViewId: savedView.id,
       },
       fixtures: {
         everyoneUserId,
@@ -1160,6 +1171,8 @@ const DELETE_STEPS: {
   remove: (db: Db, ids: Ids) => Promise<{ count: number }>
 }[] = [
   { table: "Notification", count: (db, ids) => db.notification.count({ where: { companyId: ids } }), remove: (db, ids) => db.notification.deleteMany({ where: { companyId: ids } }) },
+  // Saved views point at the company (RESTRICT) and their user (cascade)
+  { table: "SavedView", count: (db, ids) => db.savedView.count({ where: { companyId: ids } }), remove: (db, ids) => db.savedView.deleteMany({ where: { companyId: ids } }) },
   // Nothing points at audit entries; their actor and undoer are SET NULL
   { table: "AuditLogEntry", count: (db, ids) => db.auditLogEntry.count({ where: { companyId: ids } }), remove: (db, ids) => db.auditLogEntry.deleteMany({ where: { companyId: ids } }) },
   { table: "Dashboard", count: (db, ids) => db.dashboard.count({ where: { companyId: ids } }), remove: (db, ids) => db.dashboard.deleteMany({ where: { companyId: ids } }) },
