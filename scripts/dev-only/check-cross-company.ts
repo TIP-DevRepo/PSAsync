@@ -910,6 +910,80 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
     }
   }
 
+  // Appearance: a user's preferences and the company defaults are always the
+  // caller's own. Each admin saves both with the other company's admin and
+  // company ids in the body, and the other side must be untouched, and each
+  // read must hold only its own values. Everything is put back.
+  {
+    const prefsOf = (userId: string) => prisma.userPreferences.findUnique({ where: { userId } })
+    const companySelect = { themeAccent: true, themeSidebar: true, themeMode: true, allowUserTheme: true } as const
+    const companyOf = (companyId: string) => prisma.companySettings.findUnique({ where: { companyId }, select: companySelect })
+    const saved = {
+      prefs: { B: await prefsOf(ids.B.adminId), C: await prefsOf(ids.C.adminId) },
+      company: { B: await companyOf(ids.B.companyId), C: await companyOf(ids.C.companyId) },
+    }
+    // A distinct color for each side, so a leak shows in a response
+    const accent = { B: "#0F8B8D", C: "#DB2777" } as const
+    const companyAccent = { B: "#2E8B57", C: "#EA580C" } as const
+    try {
+      for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+        const own = ids[ownLetter]
+        const other = ids[otherLetter]
+        const otherPrefsBefore = JSON.stringify(await prefsOf(other.adminId))
+        const otherCompanyBefore = JSON.stringify(await companyOf(other.companyId))
+
+        let res = await admins[ownLetter].request("PATCH", "/api/account/preferences", {
+          json: { themeAccent: accent[ownLetter], rowDensity: "COMPACT", userId: other.adminId, companyId: other.companyId },
+        })
+        let problem =
+          res.status !== 200
+            ? `got ${res.status}: ${errorText(res.text)}`
+            : (await prefsOf(own.adminId))?.themeAccent !== accent[ownLetter]
+              ? "its own preferences were not saved"
+              : JSON.stringify(await prefsOf(other.adminId)) !== otherPrefsBefore
+                ? "the other company's admin preferences changed"
+                : null
+        rows.push({ attempt: `${ownLetter} PATCH own preferences naming ${otherLetter}'s admin`, expected: "200, own row only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+
+        res = await admins[ownLetter].request("PATCH", "/api/company-settings/appearance", { json: { themeAccent: companyAccent[ownLetter], companyId: other.companyId } })
+        problem =
+          res.status !== 200
+            ? `got ${res.status}: ${errorText(res.text)}`
+            : (await companyOf(own.companyId))?.themeAccent !== companyAccent[ownLetter]
+              ? "its own company appearance was not saved"
+              : JSON.stringify(await companyOf(other.companyId)) !== otherCompanyBefore
+                ? "the other company's appearance changed"
+                : null
+        rows.push({ attempt: `${ownLetter} PATCH own company appearance naming ${otherLetter}`, expected: "200, own company only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+      }
+      // Reads, once both sides hold their own values
+      for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+        for (const path of ["/api/account/preferences", "/api/company-settings/appearance"]) {
+          const res = await admins[ownLetter].request("GET", path)
+          const mine = path.includes("account") ? accent[ownLetter] : companyAccent[ownLetter]
+          const leaked = [accent[otherLetter], companyAccent[otherLetter], ids[otherLetter].companyId, ids[otherLetter].adminId].filter((m) => res.text.includes(m))
+          const problem =
+            res.status !== 200 ? `got ${res.status}: ${errorText(res.text)}` : !res.text.includes(mine) ? "its own values are missing" : leaked.length > 0 ? `response holds the other company's values (${leaked.join(", ")})` : null
+          rows.push({ attempt: `${ownLetter} GET ${path} holds only its own values`, expected: "200, own values only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+        }
+      }
+    } finally {
+      for (const letter of ["B", "C"] as const) {
+        const p = saved.prefs[letter]
+        if (p) {
+          await prisma.userPreferences.update({ where: { userId: ids[letter].adminId }, data: { themeAccent: p.themeAccent, themeSidebar: p.themeSidebar, themeMode: p.themeMode, rowDensity: p.rowDensity } })
+        } else {
+          await prisma.userPreferences.deleteMany({ where: { userId: ids[letter].adminId } })
+        }
+        const co = saved.company[letter]
+        await prisma.companySettings.updateMany({
+          where: { companyId: ids[letter].companyId },
+          data: { themeAccent: co?.themeAccent ?? null, themeSidebar: co?.themeSidebar ?? null, themeMode: co?.themeMode ?? null, allowUserTheme: co?.allowUserTheme ?? true },
+        })
+      }
+    }
+  }
+
   // Deactivated user: an already signed in session must stop working
   // straight away, then the account is restored
   const c = ids.C
