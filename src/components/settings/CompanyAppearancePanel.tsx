@@ -108,7 +108,7 @@ export function CompanyAppearancePanel() {
           variant="outline"
           disabled={saving || isDefault}
           onClick={() => update({ themeAccent: null, themeSidebar: null, themeMode: null })}
-          title={`PSAsync indigo (${PSASYNC_ACCENT}), dark sidebar, match my computer`}
+          title={`PSAsync indigo (${PSASYNC_ACCENT}), dark sidebar, light mode`}
         >
           Use the PSAsync default
         </Button>

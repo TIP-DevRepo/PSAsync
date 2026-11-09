@@ -28,7 +28,10 @@ export const DENSITY_LABELS: Record<RowDensityChoice, string> = { COMPACT: "Comp
 // PSAsync indigo, the default for a company that has chosen nothing
 export const PSASYNC_ACCENT = "#5E56E0"
 export const DEFAULT_SIDEBAR: SidebarStyle = "DARK"
-export const DEFAULT_MODE: ThemeModeChoice = "SYSTEM"
+// Light until every page is restyled for dark mode (the unconverted pages
+// are listed in PSAsync-Design-Rules.md); then it goes back to SYSTEM.
+// Companies and users can still choose Dark or Match my computer.
+export const DEFAULT_MODE: ThemeModeChoice = "LIGHT"
 export const DEFAULT_DENSITY: RowDensityChoice = "DEFAULT"
 
 // The ten accent presets, exactly as in the mockup
@@ -371,7 +374,7 @@ export function resolveTheme(company: CompanyThemeInput | null | undefined, user
   }
 }
 
-// "PSAsync indigo, dark sidebar, match my computer"
+// "PSAsync indigo, dark sidebar, light"
 export function describeTheme(theme: ResolvedTheme): string {
   return `${accentName(theme.accent)}, ${SIDEBAR_LABELS[theme.sidebar].toLowerCase()} sidebar, ${MODE_LABELS[theme.mode].toLowerCase()}`
 }
@@ -451,4 +454,25 @@ export function accentReadability(accent: string): { ratio: number; readable: bo
     readable,
     label: readable ? `Readable: ${shown} to 1` : `Hard to read: ${shown} to 1. Buttons use a slightly adjusted shade so their text stays readable.`,
   }
+}
+
+// ─── Signed out pages ───────────────────────────────────────────────────────
+
+// The customer portal, the sign in page, and every other page outside the
+// staff app always show the PSAsync default theme in light mode, whatever
+// the company, the user, or the computer prefers. Only /dashboard (the
+// staff app, src/app/dashboard/layout.tsx) applies the signed in user's
+// theme.
+export const PUBLIC_THEME: ResolvedTheme = { accent: PSASYNC_ACCENT, sidebar: DEFAULT_SIDEBAR, mode: "LIGHT" }
+
+export function isStaffThemedPath(pathname: string): boolean {
+  return pathname === "/dashboard" || pathname.startsWith("/dashboard/")
+}
+
+// The root layout's stylesheet: the light default on :root and on
+// :root.dark too, so a dark class left over from the staff app (a client
+// side navigation out of it) can't darken a public page. The staff app
+// writes its own theme after this one, which wins there.
+export function publicThemeCss(): string {
+  return `:root,:root.dark{${themeDeclarations(buildTheme(PUBLIC_THEME.accent, PUBLIC_THEME.sidebar, false))}}`
 }
