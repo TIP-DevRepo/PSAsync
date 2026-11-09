@@ -53,6 +53,22 @@ export function PriorityMarker({ tone, children, className }: { tone: Tone; chil
   )
 }
 
+// ─── PsasyncMark ────────────────────────────────────────────────────────────
+// The PSAsync mark as the design draws it on the accent: the sidebar's logo
+// tile when a company has no logo, and the empty logo slot in Settings.
+// Never shown to customers (they see the company name instead).
+export function PsasyncMark({ size = 34, className }: { size?: number; className?: string }) {
+  const icon = Math.round((size * 20) / 34)
+  return (
+    <span aria-hidden="true" style={{ width: size, height: size }} className={cn("flex shrink-0 items-center justify-center rounded-[9px] bg-acc", className)}>
+      <svg width={icon} height={icon} viewBox="0 0 20 20">
+        <rect x="2" y="7" width="11" height="11" rx="2.5" fill="var(--ps-acc-on)" opacity="0.45" />
+        <rect x="7" y="2" width="11" height="11" rx="2.5" fill="var(--ps-acc-on)" />
+      </svg>
+    </span>
+  )
+}
+
 // ─── PageHeader ─────────────────────────────────────────────────────────────
 // A page's title, a line under it, and its own actions. The breadcrumb goes
 // to the top bar (Breadcrumbs does that by itself).

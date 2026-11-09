@@ -5,6 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { OPPORTUNITIES_FOLDER, TeamFolder, TICKETS_FOLDER, type TeamFolderConfig } from "./TeamFolder"
 import { cn } from "@/lib/utils"
+import { PsasyncMark } from "@/components/ui/blocks"
 import { UserMenu } from "./UserMenu"
 
 export interface PagePermissions {
@@ -174,8 +175,8 @@ export function Sidebar({ pagePermissions = {}, companyName, logoUrl, userName }
   )
 }
 
-// The company's uploaded logo on a white tile, or the PSAsync mark as the
-// design draws it on the accent
+// The company's uploaded logo on a white tile, or the PSAsync mark when it
+// has none (or removed it)
 function LogoTile({ logoUrl, companyName }: { logoUrl: string | null; companyName: string }) {
   if (logoUrl) {
     return (
@@ -186,14 +187,7 @@ function LogoTile({ logoUrl, companyName }: { logoUrl: string | null; companyNam
       </span>
     )
   }
-  return (
-    <span aria-hidden="true" className="flex h-[34px] w-[34px] shrink-0 items-center justify-center rounded-[9px] bg-acc">
-      <svg width="20" height="20" viewBox="0 0 20 20">
-        <rect x="2" y="7" width="11" height="11" rx="2.5" fill="var(--ps-acc-on)" opacity="0.45" />
-        <rect x="7" y="2" width="11" height="11" rx="2.5" fill="var(--ps-acc-on)" />
-      </svg>
-    </span>
-  )
+  return <PsasyncMark />
 }
 
 function NavLink({ item, active }: { item: NavItem; active: boolean }) {

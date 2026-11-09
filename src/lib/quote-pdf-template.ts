@@ -3,7 +3,8 @@
 // component, just a plain HTML string with inline <style>, since Puppeteer
 // renders it independently of the Next.js app.
 
-import { escapeHtml, safeHexColor, safeUrlAttr } from "@/lib/html"
+import { escapeHtml, safeHexColor } from "@/lib/html"
+import { customerBrandMark } from "@/lib/company-logo"
 import { formatValidUntil } from "@/lib/quote-expiry"
 import { termsToDisplayHtml } from "@/lib/sanitize-terms"
 
@@ -71,7 +72,8 @@ export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string 
   // defaults the PDF routes already use.
   const primaryColor = safeHexColor(company.primaryColor, "#1B3A5C")
   const accentColor = safeHexColor(company.accentColor, "#2E86AB")
-  const logoSrc = safeUrlAttr(company.logoUrl)
+  // The primary logo next to the name, or the name alone as a wordmark
+  const mark = customerBrandMark({ name: company.name, logoUrl: company.logoUrl })
 
   const countedItems = quote.lineItems.filter(
     (li) => !li.isTextBlock && (!li.isOptional || li.optionalSelected)
@@ -208,6 +210,7 @@ export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string 
   .header { background: ${primaryColor}; color: #fff; padding: 24px 32px; display: flex; justify-content: space-between; align-items: center; }
   .header img { height: 40px; }
   .header .company-name { font-size: 16px; font-weight: bold; }
+  .header .company-name.wordmark { font-size: 22px; letter-spacing: -0.01em; max-width: 460px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .body { padding: 24px 32px; }
   h1 { font-size: 20px; margin: 0 0 4px; }
   .muted { color: #888; }
@@ -240,8 +243,11 @@ export function buildQuotePdfHtml(quote: PdfQuote, company: PdfCompany): string 
 <body>
   <div class="header">
     <div style="display:flex; align-items:center; gap:10px;">
-      ${logoSrc ? `<img src="${logoSrc}" />` : ""}
-      <span class="company-name">${escapeHtml(company.name)}</span>
+      ${
+        mark.kind === "logo"
+          ? `<img src="${escapeHtml(mark.src)}" alt="" /><span class="company-name">${escapeHtml(company.name)}</span>`
+          : `<span class="company-name wordmark">${escapeHtml(company.name)}</span>`
+      }
     </div>
   </div>
 
