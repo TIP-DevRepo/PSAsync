@@ -568,6 +568,8 @@ const SETTINGS_GUARDED: Guarded[] = [
   { name: "Change distributor settings", method: "PATCH", path: () => "/api/distributor-settings/INGRAM_MICRO", body: () => ({ enabled: true }), expectError: "change distributor settings" },
   { name: "Edit company settings", method: "PATCH", path: () => "/api/company-settings", body: () => ({ name: "Changed" }), expectError: "edit company settings" },
   { name: "Upload a company logo", method: "POST", path: () => "/api/company-settings/logo", expectError: "change the company logo" },
+  { name: "Remove the company logo", method: "DELETE", path: () => "/api/company-settings/logo?slot=primary", expectError: "change the company logo" },
+  { name: "Remove the secondary company logo", method: "DELETE", path: () => "/api/company-settings/logo?slot=secondary", expectError: "change the company logo" },
   { name: "Company appearance", method: "GET", path: () => "/api/company-settings/appearance", expectError: "edit company settings" },
   { name: "Save company appearance", method: "PATCH", path: () => "/api/company-settings/appearance", body: () => ({ themeAccent: "#DC2626", allowUserTheme: false }), expectError: "edit company settings" },
   { name: "Change Microsoft settings", method: "PATCH", path: () => "/api/microsoft-settings", body: () => ({ microsoftTenantId: "00000000-0000-0000-0000-000000000000" }), expectError: "configure Microsoft integration" },
@@ -3684,6 +3686,63 @@ async function newTicket(admin: Session, ctx: AttemptContext, extra: Record<stri
   return json as TicketJson & { id: string }
 }
 
+// Removing a company logo. Test Company B's logos are set to dummy links
+// outside the uploads bucket for the step (so the route's file delete
+// skips them and nothing reaches S3) and put back after. Test Manager B
+// (Users settings only) is refused and changes nothing; Test Admin B
+// removes the secondary logo, then the primary; company settings then
+// answer no logo; and the internal portal preview, its PDF, and the staff
+// quote PDF all still render.
+const DUMMY_LOGO = "https://example.test/logos/dev-check-logo.png"
+const DUMMY_SECONDARY_LOGO = "https://example.test/logos/dev-check-secondary-logo.png"
+
+async function checkLogoRemoval(prisma: PrismaClient, sessions: Record<Actor, Session>, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `Company logo: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const companyId = ctx.b.companyId
+  const original = await prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { logoUrl: true, secondaryLogoUrl: true } })
+  const logos = () => prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { logoUrl: true, secondaryLogoUrl: true } })
+  await prisma.company.update({ where: { id: companyId }, data: { logoUrl: DUMMY_LOGO, secondaryLogoUrl: DUMMY_SECONDARY_LOGO } })
+  try {
+    const refused = await sessions.manager.request("DELETE", "/api/company-settings/logo?slot=primary")
+    const afterRefused = await logos()
+    push("Test Manager B removes it", "403, logo kept", String(refused.status),
+      refused.status !== 403 ? errorText(refused.text) : afterRefused.logoUrl !== DUMMY_LOGO ? "the logo was removed" : null)
+
+    const badSlot = await sessions.admin.request("DELETE", "/api/company-settings/logo?slot=banner")
+    push("a made up slot", "400", String(badSlot.status), badSlot.status !== 400 || !errorText(badSlot.text).includes("Invalid logo slot") ? errorText(badSlot.text) : null)
+
+    const secondary = await sessions.admin.request("DELETE", "/api/company-settings/logo?slot=secondary")
+    const afterSecondary = await logos()
+    push("Test Admin B removes the secondary logo", "200, only the secondary cleared", String(secondary.status),
+      secondary.status !== 200 ? errorText(secondary.text) : afterSecondary.secondaryLogoUrl !== null || afterSecondary.logoUrl !== DUMMY_LOGO ? "the wrong slot changed" : null)
+
+    const primary = await sessions.admin.request("DELETE", "/api/company-settings/logo?slot=primary")
+    const afterPrimary = await logos()
+    push("Test Admin B removes the primary logo", "200, cleared", String(primary.status),
+      primary.status !== 200 ? errorText(primary.text) : afterPrimary.logoUrl !== null ? "the logo is still set" : null)
+
+    const settings = await sessions.everyone.request("GET", "/api/company-settings")
+    push("company settings answer no logo", '200, "logoUrl":null', String(settings.status),
+      settings.status !== 200 ? errorText(settings.text) : !settings.text.includes('"logoUrl":null') || !settings.text.includes('"secondaryLogoUrl":null') ? "a logo is still returned" : null)
+
+    const quote = await prisma.quote.findUniqueOrThrow({ where: { id: ctx.b.quoteId }, select: { internalAccessToken: true } })
+    const token = quote.internalAccessToken
+    for (const [name, path, pdf] of [
+      ["the internal portal preview", `/api/portal/${token}`, false],
+      ["the portal page", `/portal/${token}`, false],
+      ["the portal PDF", `/api/portal/${token}/pdf`, true],
+      ["the staff quote PDF", `/api/quotes/${ctx.b.quoteId}/pdf`, true],
+    ] as const) {
+      const res = await sessions.admin.request("GET", path)
+      push(`${name} renders with no logo`, pdf ? "200, a PDF" : "200", String(res.status),
+        res.status !== 200 ? errorText(res.text) : pdf && !res.text.includes("%PDF") ? "not a PDF" : null)
+    }
+  } finally {
+    await prisma.company.update({ where: { id: companyId }, data: original })
+  }
+}
+
 // Page guards for the ticket screens, read as HTML like the Opportunities
 // pages (checkOpportunityPages): the list, a ticket, and Settings > Tickets
 const TICKET_SETTINGS_ENTRY = "Ticket Settings"
@@ -4346,6 +4405,10 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // values are refused, personal colors can be turned off, and the company
     // defaults need the company settings permission
     await checkAppearancePreferences(prisma, sessions, ctx, rows)
+
+    // Company logos: removing one needs the upload permission, clears it,
+    // and the portal and quote PDFs still render without it
+    await checkLogoRemoval(prisma, sessions, ctx, rows)
 
     // Tickets: round robin in rotation, status timestamps, the audit flow
     // (undo, delete, restore), and the daily auto close job on Test Company B only

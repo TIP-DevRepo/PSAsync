@@ -843,6 +843,51 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
     }
   }
 
+  // Company logos: each admin removing its own logos (both slots) clears
+  // only its own company's; the other company's logos stay exactly as they
+  // were. Both companies get dummy links outside the uploads bucket for the
+  // step (the route's file delete skips them, so nothing reaches S3) and
+  // their logos are put back after.
+  {
+    const dummy = (letter: TestLetter) => ({
+      logoUrl: `https://example.test/logos/dev-check-${letter}.png`,
+      secondaryLogoUrl: `https://example.test/logos/dev-check-${letter}-secondary.png`,
+    })
+    const original = {
+      B: await prisma.company.findUniqueOrThrow({ where: { id: ids.B.companyId }, select: { logoUrl: true, secondaryLogoUrl: true } }),
+      C: await prisma.company.findUniqueOrThrow({ where: { id: ids.C.companyId }, select: { logoUrl: true, secondaryLogoUrl: true } }),
+    }
+    try {
+      for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+        await prisma.company.update({ where: { id: ids.B.companyId }, data: dummy("B") })
+        await prisma.company.update({ where: { id: ids.C.companyId }, data: dummy("C") })
+        const statuses: number[] = []
+        for (const slot of ["primary", "secondary"]) {
+          statuses.push((await admins[ownLetter].request("DELETE", `/api/company-settings/logo?slot=${slot}`)).status)
+        }
+        const own = await prisma.company.findUniqueOrThrow({ where: { id: ids[ownLetter].companyId }, select: { logoUrl: true, secondaryLogoUrl: true } })
+        const other = await prisma.company.findUniqueOrThrow({ where: { id: ids[otherLetter].companyId }, select: { logoUrl: true, secondaryLogoUrl: true } })
+        const problem = statuses.some((s) => s !== 200)
+          ? `removing its own logos answered ${statuses.join(", ")}`
+          : own.logoUrl !== null || own.secondaryLogoUrl !== null
+            ? "its own logos were not removed"
+            : JSON.stringify(other) !== JSON.stringify(dummy(otherLetter))
+              ? "the other company's logos changed"
+              : null
+        rows.push({
+          attempt: `${ownLetter} removes its own logos, ${otherLetter}'s untouched`,
+          expected: "200, own cleared, other unchanged",
+          actual: statuses.join(", "),
+          result: problem ? "FAIL" : "PASS",
+          note: problem ?? undefined,
+        })
+      }
+    } finally {
+      await prisma.company.update({ where: { id: ids.B.companyId }, data: original.B })
+      await prisma.company.update({ where: { id: ids.C.companyId }, data: original.C })
+    }
+  }
+
   // The ticket lists: each admin's ticket list, ticket action buttons, and
   // ticket audit entries hold its own records and nothing of the other
   // company's

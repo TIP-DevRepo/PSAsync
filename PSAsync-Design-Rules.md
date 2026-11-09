@@ -116,6 +116,7 @@ The default Won and Lost action buttons show as the ok and bad tints; any other 
 - **InitialsAvatar**: a person's initials; accent for the current user, neutral for others and the system.
 - **InfoPanelCard** with **InfoField**: a side panel group, uppercase heading, label above value. `InlineEditField` sits inside as is, its hover outline is the field's box.
 - **TABLE** classes and **DENSITY_PADDING**: the table frame and toolbar, a tinted header row, a hover on each row, record numbers in the accent ink, and row padding from the user's row density (`useRowDensity`). Columns keep fixed widths and the table scrolls sideways below them; never squeeze a column.
+- **PsasyncMark**: the PSAsync mark on the accent, the sidebar's logo tile when a company has no logo and the empty logo slot in Settings. Never shown to customers: customer facing places show the company name as a wordmark instead (`customerBrandMark`, `src/lib/company-logo.ts`).
 - **Appearance controls** (`src/components/appearance/AppearanceControls.tsx`): the accent swatches with the custom color and readability check, the sidebar style cards, the mode switch, row density, status colors, and an accessible `Switch`.
 
 Every block has visible focus rings, real buttons with labels, and `aria-label`s on icon only buttons. Layouts wrap at phone width, and the sidebar folds into the top bar's menu button.
