@@ -48,7 +48,7 @@ Every value exists for light and dark. Use the Tailwind names in the second colu
 | `--ps-text` | `text-foreground` | Body text and values |
 | `--ps-muted` | `text-muted-foreground` | Labels, helper text, timestamps |
 | `--ps-neu-tint` | `bg-neu-tint` | Neutral pills and count chips |
-| `--ps-acc` / `--ps-acc-on` | `bg-acc text-acc-on` | Filled accent surfaces: the main button, the logo tile, the user avatar |
+| `--ps-acc` / `--ps-acc-on` | `bg-acc text-acc-on` | Filled accent surfaces: the main button, the user avatar, and the PSAsync logo's fill (`PsasyncMark`) |
 | `--ps-acc-tint` / `--ps-acc-ink` | `bg-acc-tint text-acc-ink` | Selected and current things, accent pills, banners |
 | `--ps-acc-ink` | `text-acc-ink` | Links and record numbers (readable on surface, page, and tint) |
 | `--ps-ok`, `--ps-warn`, `--ps-bad` and their `-tint` | `text-ok bg-ok-tint` and so on | Status only (below) |
@@ -116,7 +116,7 @@ The default Won and Lost action buttons show as the ok and bad tints; any other 
 - **InitialsAvatar**: a person's initials; accent for the current user, neutral for others and the system.
 - **InfoPanelCard** with **InfoField**: a side panel group, uppercase heading, label above value. `InlineEditField` sits inside as is, its hover outline is the field's box.
 - **TABLE** classes and **DENSITY_PADDING**: the table frame and toolbar, a tinted header row, a hover on each row, record numbers in the accent ink, and row padding from the user's row density (`useRowDensity`). Columns keep fixed widths and the table scrolls sideways below them; never squeeze a column.
-- **PsasyncMark**: the PSAsync mark on the accent, the sidebar's logo tile when a company has no logo and the empty logo slot in Settings. Never shown to customers: customer facing places show the company name as a wordmark instead (`customerBrandMark`, `src/lib/company-logo.ts`).
+- **PsasyncMark**: the real PSAsync logo (`public/brand/psasync-mark.png`) as a CSS mask filled with the accent (`--ps-acc`), keeping its partly transparent layers, with no tile behind it, `role="img"` and `aria-label="PSAsync"`. Shown in the sidebar header when a company has no logo and in the empty logo slot in Settings. Never shown to customers: customer facing places show the company name as a wordmark instead (`customerBrandMark`, `src/lib/company-logo.ts`).
 - **Appearance controls** (`src/components/appearance/AppearanceControls.tsx`): the accent swatches with the custom color and readability check, the sidebar style cards, the mode switch, row density, status colors, and an accessible `Switch`.
 
 Every block has visible focus rings, real buttons with labels, and `aria-label`s on icon only buttons. Layouts wrap at phone width, and the sidebar folds into the top bar's menu button.

@@ -5,7 +5,8 @@
 //
 // Where a company logo shows, and what shows without one:
 //   the staff app (sidebar, phone menu): the primary logo on a white tile,
-//     else the PSAsync mark (LogoTile in src/components/layout/sidebar.tsx)
+//     else the PSAsync logo in the accent (PsasyncMark, LogoTile in
+//     src/components/layout/sidebar.tsx)
 //   customer facing places: the portal page and its expired link page show
 //     the secondary logo, else the primary; every quote PDF (staff, portal,
 //     and the one attached to a quote email) shows the primary logo, as it

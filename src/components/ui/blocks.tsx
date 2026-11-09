@@ -54,18 +54,36 @@ export function PriorityMarker({ tone, children, className }: { tone: Tone; chil
 }
 
 // ─── PsasyncMark ────────────────────────────────────────────────────────────
-// The PSAsync mark as the design draws it on the accent: the sidebar's logo
-// tile when a company has no logo, and the empty logo slot in Settings.
-// Never shown to customers (they see the company name instead).
+// The real PSAsync logo (public/brand/psasync-mark.png, the favicon's mark
+// on a transparent background), used as a CSS mask and filled with the
+// accent, so it follows the company or user accent in both modes. The
+// mask uses the PNG's alpha, so its partly transparent layers stay partly
+// transparent. No tile behind it. Shown in the sidebar header when a
+// company has no logo and in the empty logo slot in Settings; never to
+// customers (they see the company name instead).
+export const PSASYNC_MARK_SRC = "/brand/psasync-mark.png"
+
 export function PsasyncMark({ size = 34, className }: { size?: number; className?: string }) {
-  const icon = Math.round((size * 20) / 34)
+  const mask = `url(${PSASYNC_MARK_SRC})`
   return (
-    <span aria-hidden="true" style={{ width: size, height: size }} className={cn("flex shrink-0 items-center justify-center rounded-[9px] bg-acc", className)}>
-      <svg width={icon} height={icon} viewBox="0 0 20 20">
-        <rect x="2" y="7" width="11" height="11" rx="2.5" fill="var(--ps-acc-on)" opacity="0.45" />
-        <rect x="7" y="2" width="11" height="11" rx="2.5" fill="var(--ps-acc-on)" />
-      </svg>
-    </span>
+    <span
+      role="img"
+      aria-label="PSAsync"
+      className={cn("inline-block shrink-0", className)}
+      style={{
+        width: size,
+        height: size,
+        backgroundColor: "var(--ps-acc)",
+        maskImage: mask,
+        WebkitMaskImage: mask,
+        maskSize: "contain",
+        WebkitMaskSize: "contain",
+        maskRepeat: "no-repeat",
+        WebkitMaskRepeat: "no-repeat",
+        maskPosition: "center",
+        WebkitMaskPosition: "center",
+      }}
+    />
   )
 }
 
