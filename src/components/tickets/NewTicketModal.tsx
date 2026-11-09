@@ -14,6 +14,7 @@ import { assigneeFieldChoices, defaultNewTicketTeamId, firstByOrder, ROUND_ROBIN
 import type { ClientContactValue } from "@/lib/client-contact-choice"
 import type { TicketOptions } from "./useTicketOptions"
 import { TitlePrefixPreview } from "@/components/TitlePrefixPreview"
+import { checkPrefixedTitle } from "@/lib/record-title"
 
 // The design's form fields, as the New opportunity dialog draws them
 const FIELD =
@@ -58,6 +59,7 @@ export function NewTicketModal({
   const [saving, setSaving] = useState(false)
 
   const { locations, mainId, loading: locationsLoading } = useClientLocations(party.client?.id ?? null)
+  const clientPrefix = clients.find((c) => c.id === party.client?.id)?.prefix ?? null
   const locationTouched = !!party.client && locationPick?.clientId === party.client.id
   const locationValue = locationTouched ? locationPick!.value : (mainId ?? "")
 
@@ -78,6 +80,11 @@ export function NewTicketModal({
   async function handleSave() {
     const next: typeof errors = {}
     if (!title.trim()) next.title = "Title is required"
+    // The limit counts the client's prefix, as the server checks it
+    else {
+      const saved = checkPrefixedTitle(title, clientPrefix, TICKET_TITLE_MAX)
+      if (saved.error !== undefined) next.title = saved.error
+    }
     // Required, judged on its text, not its markup
     if (isBlankHtml(initialNote)) next.initialNote = "Write an initial note"
     setErrors(next)
@@ -146,7 +153,7 @@ export function NewTicketModal({
               {errors.title}
             </p>
           )}
-          <TitlePrefixPreview title={title} prefix={clients.find((c) => c.id === party.client?.id)?.prefix} />
+          <TitlePrefixPreview title={title} prefix={clientPrefix} max={TICKET_TITLE_MAX} />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

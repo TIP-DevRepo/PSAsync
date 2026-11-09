@@ -9,7 +9,9 @@ import { ticketAssigneeAudit, ticketCreatedAudit } from "@/lib/ticket-audit"
 import { nextRoundRobinAssignee } from "@/lib/round-robin"
 import type { TimelineAction } from "@/lib/timeline-actions"
 import { notifyTicketAssignee } from "@/lib/ticket-notifications"
-import { prefixedTitle } from "@/lib/record-title"
+import { checkPrefixedTitle, fitPrefixedTitle } from "@/lib/record-title"
+import { TICKET_TITLE_MAX } from "@/lib/ticket-rules"
+import { UserError } from "@/lib/user-error"
 
 // Creating a ticket, shared by POST /api/tickets (a person) and the later
 // mailbox and NinjaOne phases (the system). Every ticket starts with a
@@ -33,6 +35,10 @@ export interface NewTicket {
   priorityId: string
   status: StatusRef
   source: TicketSource
+  // True for a title nobody typed (a later system path): one that is too
+  // long once the client's prefix goes in front is cut to fit instead of
+  // refused
+  fitTitle?: boolean
   initialNote: InitialNote
 }
 
@@ -85,13 +91,16 @@ async function createTicketIn(tx: Prisma.TransactionClient, input: NewTicket, no
   const roundRobin = input.assigneeId === null ? await takeRoundRobinAssignee(tx, input.companyId, input.teamId) : null
   // The client's prefix goes in front of the title (src/lib/record-title.ts)
   const client = input.clientId ? await tx.client.findFirst({ where: { id: input.clientId, companyId: input.companyId }, select: { prefix: true } }) : null
+  // The limit counts the saved title, prefix included
+  const title = input.fitTitle ? { value: fitPrefixedTitle(input.title, client?.prefix, TICKET_TITLE_MAX) } : checkPrefixedTitle(input.title, client?.prefix, TICKET_TITLE_MAX)
+  if (title.error !== undefined) throw new UserError(title.error)
   const timestamps = statusTimestamps(null, input.status.category, { resolvedAt: null, closedAt: null }, now)
 
   const created = await tx.ticket.create({
     data: {
       companyId: input.companyId,
       number,
-      title: prefixedTitle(input.title, client?.prefix),
+      title: title.value,
       clientId: input.clientId,
       contactId: input.contactId,
       clientLocationId: input.clientLocationId,

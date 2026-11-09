@@ -22,3 +22,31 @@ export function prefixedTitle(title: string, prefix: string | null | undefined):
   if (text.toLowerCase().startsWith(head.toLowerCase())) return text
   return `${head}${text}`
 }
+
+// ─── The length limit ───────────────────────────────────────────────────────
+// A title's limit (200 for tickets and opportunities) counts the saved
+// title, prefix included, so a typed title that fits on its own can still
+// be too long once the client's prefix goes in front.
+
+export function titleTooLongMessage(saved: string, max: number): string {
+  const over = saved.length - max
+  return `With the client prefix the title would be ${saved.length} characters, and titles can be up to ${max}. Shorten it by ${over} ${over === 1 ? "character" : "characters"}.`
+}
+
+// The saved title, or the refusal when it is longer than max
+export function checkPrefixedTitle(
+  title: string,
+  prefix: string | null | undefined,
+  max: number
+): { value: string; error?: undefined } | { error: string; value?: undefined } {
+  const saved = prefixedTitle(title, prefix)
+  return saved.length > max ? { error: titleTooLongMessage(saved, max) } : { value: saved }
+}
+
+// For a title nobody typed (an opportunity made from a quote's title): the
+// prefixed title, with the end of the original title cut so it fits
+export function fitPrefixedTitle(title: string, prefix: string | null | undefined, max: number): string {
+  const saved = prefixedTitle(title, prefix)
+  if (saved.length <= max) return saved
+  return saved.slice(0, max).trimEnd()
+}

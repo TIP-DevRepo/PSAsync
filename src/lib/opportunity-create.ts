@@ -1,13 +1,14 @@
 import type { OpportunitySource, OpportunityStageCategory, Prisma, PrismaClient } from "@/generated/prisma"
 import { takeOpportunityNumber } from "@/lib/opportunity-number"
 import { opportunityDetailSelect } from "@/lib/opportunity-selects"
-import { closedAtFor } from "@/lib/opportunity-rules"
+import { closedAtFor, OPPORTUNITY_TITLE_MAX } from "@/lib/opportunity-rules"
 import { initialNoteAuthorId, initialNoteHtml, recordTimelineActions, writeInitialNote, type InitialNote } from "@/lib/timeline"
 import { opportunityCreatedAction } from "@/lib/opportunity-timeline"
 import { loadDefaultTeamId } from "@/lib/team-defaults"
 import { recordAudit } from "@/lib/audit-log"
 import { opportunityCreatedAudit } from "@/lib/opportunity-audit"
-import { prefixedTitle } from "@/lib/record-title"
+import { checkPrefixedTitle, fitPrefixedTitle } from "@/lib/record-title"
+import { UserError } from "@/lib/user-error"
 
 // Creating an opportunity, shared by POST /api/opportunities (a person) and
 // a later branch that creates one automatically (from a sent quote). Every
@@ -39,6 +40,10 @@ export interface NewOpportunity {
   expectedValue: string | null
   expectedCloseDate: Date | null
   initialNote: InitialNote
+  // True for a title nobody typed (one made from a quote's title): one
+  // that is too long once the client's prefix goes in front is cut to fit
+  // instead of refused, so a quote send never fails over it
+  fitTitle?: boolean
 }
 
 // Creates the opportunity, its "created" timeline and audit entries, and
@@ -65,11 +70,16 @@ async function createOpportunityIn(tx: Prisma.TransactionClient, input: NewOppor
   const number = await takeOpportunityNumber(tx, input.companyId, now)
   // The client's prefix goes in front of the title (src/lib/record-title.ts)
   const client = await tx.client.findFirst({ where: { id: input.clientId, companyId: input.companyId }, select: { prefix: true } })
+  // The limit counts the saved title, prefix included
+  const title = input.fitTitle
+    ? { value: fitPrefixedTitle(input.title, client?.prefix, OPPORTUNITY_TITLE_MAX) }
+    : checkPrefixedTitle(input.title, client?.prefix, OPPORTUNITY_TITLE_MAX)
+  if (title.error !== undefined) throw new UserError(title.error)
   const created = await tx.opportunity.create({
     data: {
       companyId: input.companyId,
       number,
-      title: prefixedTitle(input.title, client?.prefix),
+      title: title.value,
       clientId: input.clientId,
       contactId: input.contactId,
       clientLocationId: input.clientLocationId,
