@@ -6,7 +6,7 @@ import { CalendarClock, Columns3, List, Plus, Target, Trophy, UserRound, X } fro
 import { Button } from "@/components/ui/button"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { TopbarAction } from "@/components/layout/TopbarSlots"
-import { PageHeader, StatRow, StatTile } from "@/components/ui/blocks"
+import { LIST_PAGE, PageHeader, StatRow, StatTile } from "@/components/ui/blocks"
 import { ViewTabs, type ViewTabItem } from "@/components/ui/view-tabs"
 import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
@@ -161,7 +161,7 @@ export function OpportunitiesPage() {
   const scope = teamChipName ? `${teamChipName}${ownerChipName ? `, ${ownerChipName}` : ""}` : ownerChipName
 
   return (
-    <div className="flex w-full max-w-[1320px] flex-col gap-[18px]">
+    <div className={LIST_PAGE}>
       <Breadcrumbs items={teamChipName ? [{ label: "Opportunities", href: pathname }] : []} current={teamChipName ?? "Opportunities"} />
       {canCreate && (
         <TopbarAction>

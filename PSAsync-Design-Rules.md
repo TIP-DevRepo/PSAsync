@@ -70,6 +70,14 @@ Fixed for everyone and never following the accent, so they always mean the same 
 
 The default Won and Lost action buttons show as the ok and bad tints; any other action button keeps the color its admin chose.
 
+### Page width
+
+- List and board pages fill the full width of the content area, with no max width container: the page header, stat tiles, toolbar, and the list or board all stretch with the screen. Use `ListPage` (or the `LIST_PAGE` classes) from `src/components/ui/blocks.tsx` as the page's outer column.
+- Boards use `BOARD_GRID`: equal flexible columns (`grid-auto-flow: column`, `grid-auto-columns: minmax(240px, 1fr)`), so the six default stages fit a 1920px screen with the sidebar open and stretch on bigger ones. A board scrolls sideways, inside its own box, only when its columns can't fit at the 240px minimum (a small screen or phone, or more stages). Columns never get narrower than that.
+- Record pages use `RECORD_LAYOUT` under their header card: the main column (tabs and timeline) takes the remaining width and the info cards keep a fixed 360px column on the right from `lg` up; below that they stack.
+- Tables keep their fixed column widths and scroll sideways inside their own box when the page is narrower than their minimum; a wider page just gives them more room.
+- Forms and settings pages (Appearance, My settings) keep their readable max width.
+
 ### Spacing and radius scale
 
 - Radius: controls (buttons, inputs, view tabs) 8px `rounded-control`; cards, side panels, timeline entries, stat tiles 12px `rounded-card`; page sections, record header cards, table frames 14px `rounded-panel`; pills `rounded-full`.

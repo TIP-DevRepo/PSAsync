@@ -22,6 +22,7 @@ import {
   type UniqueIdentifier,
 } from "@dnd-kit/core"
 import { cn } from "@/lib/utils"
+import { BOARD_GRID } from "@/components/ui/blocks"
 import {
   boardColumns,
   CLOSED_COLUMN_DAYS,
@@ -126,21 +127,20 @@ export function OpportunityBoard({
       }}
       accessibility={{ announcements }}
     >
-      {/* Columns keep their width; the board scrolls sideways instead of squeezing them */}
-      <div className="-mx-1 overflow-x-auto px-1 pb-3">
-        <div className="flex w-max gap-4">
-          {columns.map((column) => (
-            <StageColumn
-              key={column.stage.id}
-              column={column}
-              canEdit={canEdit}
-              dragging={activeId !== null}
-              activeId={activeId}
-              draggedRecently={draggedRecently}
-              listHref={listHref(column.stage.id)}
-            />
-          ))}
-        </div>
+      {/* Columns share the width equally, never below their minimum; the
+          board scrolls sideways only when they can't fit (BOARD_GRID) */}
+      <div className={cn(BOARD_GRID, "pb-3")}>
+        {columns.map((column) => (
+          <StageColumn
+            key={column.stage.id}
+            column={column}
+            canEdit={canEdit}
+            dragging={activeId !== null}
+            activeId={activeId}
+            draggedRecently={draggedRecently}
+            listHref={listHref(column.stage.id)}
+          />
+        ))}
       </div>
 
       <DragOverlay dropAnimation={{ duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" }}>
@@ -178,7 +178,7 @@ function StageColumn({
       ref={setNodeRef}
       aria-labelledby={headingId}
       className={cn(
-        "flex w-72 shrink-0 flex-col rounded-card border bg-surface-2 transition-colors duration-150",
+        "flex min-w-0 flex-col rounded-card border bg-surface-2 transition-colors duration-150",
         isOver ? "border-acc bg-acc-tint ring-2 ring-acc/40" : dragging ? "border-dashed border-acc-ink/40" : "border-border"
       )}
     >

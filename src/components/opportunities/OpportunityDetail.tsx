@@ -11,7 +11,7 @@ import { Timeline, type TimelineHandle } from "@/components/timeline/Timeline"
 import { emailUnavailableReason, type EmailOptions } from "@/components/timeline/EmailComposer"
 import { ActionButtonBar } from "@/components/timeline/ActionButtonBar"
 import { TabsBar } from "@/components/ui/tabs-bar"
-import { RecordHeaderCard } from "@/components/ui/blocks"
+import { RECORD_LAYOUT, RecordHeaderCard } from "@/components/ui/blocks"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { opportunityDisplayValue } from "@/lib/opportunity-value"
 import { AuditLogTable } from "@/components/audit/AuditLogTable"
@@ -297,7 +297,7 @@ export function OpportunityDetail({ id }: { id: string }) {
   const showMenu = canDelete && !deleted
 
   return (
-    <div className="flex w-full max-w-[1320px] flex-col gap-5">
+    <div className="flex w-full min-w-0 flex-col gap-5">
       <Breadcrumbs
         items={[...breadcrumbItems, ...(o.team ? [{ label: o.team.name, href: opportunityFolderHref(o.team.id) }] : [])]}
         current={o.number}
@@ -372,7 +372,7 @@ export function OpportunityDetail({ id }: { id: string }) {
 
       {/* The panel comes first in the page, so at phone width it leads;
           from lg up the grid puts the tabs on the left */}
-      <div className="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(300px,360px)]">
+      <div className={RECORD_LAYOUT}>
         <aside className="min-w-0 lg:col-start-2 lg:row-start-1">
           <OpportunityInfoPanel
             o={o}

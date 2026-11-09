@@ -309,3 +309,35 @@ export const DENSITY_PADDING: Record<RowDensityChoice, string> = {
   DEFAULT: "py-3",
   COMFORTABLE: "py-5",
 }
+
+// ─── Page layouts ───────────────────────────────────────────────────────────
+// List and board pages fill the content area's full width (no max width
+// container): the header, stat tiles, toolbar, and the list or board below
+// all stretch with the screen.
+export const LIST_PAGE = "flex w-full min-w-0 flex-col gap-[18px]"
+
+export function ListPage({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn(LIST_PAGE, className)}>{children}</div>
+}
+
+// A board: one column per stage (or status), all sharing the width equally
+// and never narrower than BOARD_COLUMN_MIN_PX, so the six default stages fit
+// a 1920px screen with the sidebar open and stretch on bigger ones. Only
+// when the columns can't fit at that width (a small screen, or more stages)
+// does the board scroll sideways, inside its own box.
+export const BOARD_COLUMN_MIN_PX = 240
+export const BOARD_GAP_PX = 16
+export const BOARD_GRID = "grid grid-flow-col auto-cols-[minmax(240px,1fr)] gap-4 overflow-x-auto"
+
+// The width a board needs before it scrolls: every column at its minimum
+// plus the gaps between them
+export function boardMinWidth(columns: number): number {
+  return columns <= 0 ? 0 : columns * BOARD_COLUMN_MIN_PX + (columns - 1) * BOARD_GAP_PX
+}
+
+// A record page under its header card: the main column (the timeline and
+// tabs) takes all the room, the info cards keep a fixed width on the right
+// from lg up, and below lg they stack (the info cards first, as each page
+// orders them)
+export const RECORD_INFO_WIDTH_PX = 360
+export const RECORD_LAYOUT = "grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px]"
