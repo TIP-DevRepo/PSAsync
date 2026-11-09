@@ -29,6 +29,7 @@ export const ACTION_BUTTON_MESSAGES = {
   hidden: "Hidden must be true or false",
   fixedTicketStatus: "Invalid ticket status",
   fixedTicketStatusOnlyWhenFixed: "A ticket status can only be set when the button always moves to one status",
+  fixedTicketStatusRequired: "Choose the ticket status this button moves to",
   showsOnFlag: "Where the button shows must be true or false",
 } as const
 
@@ -119,6 +120,17 @@ export function checkActionButton(input: Record<string, unknown>): ButtonCheck {
       isHidden: input.isHidden,
     },
   }
+}
+
+// A request that names fixedTicketStatusId (the Settings dialog always
+// does) for a FIXED button shown on tickets must name a status: blank is
+// refused. A request that leaves the field out keeps the older rule (the
+// button is left off tickets until it has one), so older callers and
+// stored buttons keep working.
+export function ticketStatusRequiredProblem(body: Record<string, unknown>, value: ActionButtonFields): string | null {
+  if (!("fixedTicketStatusId" in body)) return null
+  if (value.stageMode !== "FIXED" || !value.forTickets) return null
+  return value.fixedTicketStatusId ? null : ACTION_BUTTON_MESSAGES.fixedTicketStatusRequired
 }
 
 // The fields a request may set; anything else in the body is ignored

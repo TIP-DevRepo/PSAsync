@@ -4,7 +4,7 @@ import { apiError, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
 import { isPrismaError, readJsonObject, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
-import { ACTION_BUTTON_MESSAGES, checkActionButton } from "@/lib/action-button-rules"
+import { ACTION_BUTTON_MESSAGES, checkActionButton, ticketStatusRequiredProblem } from "@/lib/action-button-rules"
 import {
   ACTION_BUTTON_ORDER,
   actionButtonSelect,
@@ -94,7 +94,7 @@ export async function POST(req: NextRequest) {
     ...body,
   })
   if (checked.error !== undefined) return apiError(400, checked.error)
-  const statusProblem = ticketStatusProblem(body, checked.value.stageMode)
+  const statusProblem = ticketStatusProblem(body, checked.value.stageMode) ?? ticketStatusRequiredProblem(body, checked.value)
   if (statusProblem) return apiError(400, statusProblem)
   const invalid = await assertRefs(ctx, { opportunityStageId: checked.value.fixedStageId, ticketStatusId: checked.value.fixedTicketStatusId })
   if (invalid) return invalid

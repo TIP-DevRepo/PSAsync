@@ -16,7 +16,9 @@ import { confirmDialog } from "@/lib/confirm-dialog"
 import { cn } from "@/lib/utils"
 import { CATEGORY_LABELS } from "@/lib/opportunity-rules"
 import type { StageCategory } from "@/lib/opportunity-view"
-import { ACTION_BUTTON_LABEL_MAX, checkActionButton } from "@/lib/action-button-rules"
+import { ACTION_BUTTON_LABEL_MAX, checkActionButton, ticketStatusRequiredProblem } from "@/lib/action-button-rules"
+import { TICKET_CATEGORY_LABELS, TICKET_STATUS_CATEGORIES } from "@/lib/ticket-rules"
+import type { TicketStatusOption } from "@/lib/ticket-view"
 import {
   ACTION_BUTTON_ICONS,
   ACTION_BUTTON_KINDS,
@@ -50,6 +52,8 @@ interface StoredButton {
   stageMode: ActionStageModeName
   fixedStageId: string | null
   fixedStage: { id: string; name: string; category: StageCategory } | null
+  fixedTicketStatusId: string | null
+  fixedTicketStatus: { id: string; name: string; category: string } | null
   noteMode: ActionNoteModeName
   isHidden: boolean
   sortOrder: number
@@ -65,10 +69,19 @@ interface StageOption {
 
 const STAGE_GROUPS: StageCategory[] = ["OPEN", "WON", "LOST"]
 
-const STAGE_MODE_LABELS: Record<ActionStageModeName, string> = {
-  NONE: "Doesn't change the stage",
-  CHOOSE: "User chooses a stage",
-  FIXED: "Always moves to one stage",
+// One mode covers both: an opportunity's stage and a ticket's status (the
+// button has a single stageMode), so its words follow where it shows
+function stageModeLabels(noun: string): Record<ActionStageModeName, string> {
+  return {
+    NONE: `Doesn't change the ${noun}`,
+    CHOOSE: `User chooses a ${noun}`,
+    FIXED: `Always moves to one ${noun}`,
+  }
+}
+
+function moveNoun(b: { forOpportunities: boolean; forTickets: boolean }): string {
+  if (b.forOpportunities && b.forTickets) return "stage or status"
+  return b.forTickets ? "status" : "stage"
 }
 
 function showsOnText(b: { forOpportunities: boolean; forTickets: boolean }): string {
@@ -78,8 +91,13 @@ function showsOnText(b: { forOpportunities: boolean; forTickets: boolean }): str
 
 function stageText(b: StoredButton): string | null {
   if (!STAGE_CHANGING_KINDS.includes(b.kind)) return null
-  if (b.stageMode === "FIXED") return b.fixedStage ? `Moves to ${b.fixedStage.name}` : "Moves to a stage"
-  return b.stageMode === "CHOOSE" ? "User chooses a stage" : null
+  if (b.stageMode === "FIXED") {
+    const parts: string[] = []
+    if (b.forOpportunities) parts.push(b.fixedStage ? `Moves to ${b.fixedStage.name}` : "Moves to a stage")
+    if (b.forTickets) parts.push(b.fixedTicketStatus ? `Tickets to ${b.fixedTicketStatus.name}` : "No ticket status chosen (left off tickets)")
+    return parts.join(", ")
+  }
+  return b.stageMode === "CHOOSE" ? `User chooses a ${moveNoun(b)}` : null
 }
 
 // Settings > Action Buttons (settingsSections.actionButtons): the buttons
@@ -93,6 +111,7 @@ export function ActionButtonsSettingsPanel() {
   const allowed = can("settingsSections.actionButtons")
   const [buttons, setButtons] = useState<StoredButton[] | null>(null)
   const [stages, setStages] = useState<StageOption[]>([])
+  const [statuses, setStatuses] = useState<TicketStatusOption[]>([])
   const [brand, setBrand] = useState<{ primaryColor: string; accentColor: string } | null>(null)
   const [loadFailed, setLoadFailed] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -111,6 +130,11 @@ export function ActionButtonsSettingsPanel() {
     fetch("/api/opportunity-stages")
       .then(json)
       .then((data: StageOption[]) => setStages(data))
+      .catch(() => setLoadFailed(true))
+    // The ticket statuses a FIXED ticket button can move to
+    fetch("/api/ticket-statuses")
+      .then(json)
+      .then((data: TicketStatusOption[]) => setStatuses(data))
       .catch(() => setLoadFailed(true))
     // The brand colors for the palette; the defaults stand in if this fails
     fetch("/api/company-settings")
@@ -206,6 +230,7 @@ export function ActionButtonsSettingsPanel() {
         <ButtonDialog
           button={editing === "new" ? null : editing}
           stages={stages}
+          statuses={statuses}
           brand={brand}
           onClose={() => setEditing(null)}
           onSaved={() => {
@@ -261,12 +286,14 @@ function ButtonRow({ button, busy, onEdit, onDelete }: { button: StoredButton; b
 function ButtonDialog({
   button,
   stages,
+  statuses,
   brand,
   onClose,
   onSaved,
 }: {
   button: StoredButton | null
   stages: StageOption[]
+  statuses: TicketStatusOption[]
   brand: { primaryColor: string; accentColor: string } | null
   onClose: () => void
   onSaved: () => void
@@ -281,6 +308,7 @@ function ButtonDialog({
   const [kind, setKind] = useState<ActionButtonKindName>(button?.kind ?? "NOTE")
   const [stageMode, setStageMode] = useState<ActionStageModeName>(button?.stageMode ?? "NONE")
   const [fixedStageId, setFixedStageId] = useState(button?.fixedStageId ?? "")
+  const [fixedTicketStatusId, setFixedTicketStatusId] = useState(button?.fixedTicketStatusId ?? "")
   const [noteMode, setNoteMode] = useState<ActionNoteModeName>(button?.noteMode ?? "REQUIRED")
   const [isHidden, setIsHidden] = useState(button?.isHidden ?? false)
   const [saving, setSaving] = useState(false)
@@ -314,13 +342,21 @@ function ButtonDialog({
       forTickets,
       kind,
       stageMode: changesStage ? stageMode : "NONE",
-      fixedStageId: changesStage && stageMode === "FIXED" ? fixedStageId || null : null,
+      // Only a FIXED button shown on opportunities needs its stage
+      fixedStageId: changesStage && stageMode === "FIXED" && forOpportunities ? fixedStageId || null : null,
+      // Always sent, so a FIXED button shown on tickets must name its status
+      fixedTicketStatusId: changesStage && stageMode === "FIXED" && forTickets ? fixedTicketStatusId || null : null,
       noteMode,
       isHidden,
     }
     const checked = checkActionButton(fields)
     if (checked.error !== undefined) {
       setError(checked.error)
+      return
+    }
+    const statusRequired = ticketStatusRequiredProblem(fields, checked.value)
+    if (statusRequired) {
+      setError(statusRequired)
       return
     }
     setSaving(true)
@@ -484,17 +520,28 @@ function ButtonDialog({
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <div>
               <label htmlFor="action-button-stage-mode" className={LABEL}>
-                Stage
+                {forOpportunities && forTickets ? "Stage and ticket status" : forTickets ? "Ticket status" : "Stage"}
               </label>
-              <select id="action-button-stage-mode" value={stageMode} onChange={(e) => setStageMode(e.target.value as ActionStageModeName)} className={FIELD}>
-                {(Object.keys(STAGE_MODE_LABELS) as ActionStageModeName[]).map((mode) => (
+              <select
+                id="action-button-stage-mode"
+                value={stageMode}
+                onChange={(e) => setStageMode(e.target.value as ActionStageModeName)}
+                aria-describedby={forOpportunities && forTickets ? "action-button-stage-mode-help" : undefined}
+                className={FIELD}
+              >
+                {(Object.entries(stageModeLabels(moveNoun({ forOpportunities, forTickets }))) as [ActionStageModeName, string][]).map(([mode, text]) => (
                   <option key={mode} value={mode}>
-                    {STAGE_MODE_LABELS[mode]}
+                    {text}
                   </option>
                 ))}
               </select>
+              {forOpportunities && forTickets && (
+                <p id="action-button-stage-mode-help" className="mt-1 text-xs text-muted-foreground">
+                  One setting for both: the stage on opportunities and the status on tickets.
+                </p>
+              )}
             </div>
-            {stageMode === "FIXED" && (
+            {stageMode === "FIXED" && forOpportunities && (
               <div>
                 <label htmlFor="action-button-fixed-stage" className={LABEL}>
                   Moves to <span className="text-danger">*</span>
@@ -505,6 +552,28 @@ function ButtonDialog({
                     const inGroup = stages.filter((st) => st.category === category)
                     return inGroup.length === 0 ? null : (
                       <optgroup key={category} label={CATEGORY_LABELS[category]}>
+                        {inGroup.map((st) => (
+                          <option key={st.id} value={st.id}>
+                            {st.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )
+                  })}
+                </select>
+              </div>
+            )}
+            {stageMode === "FIXED" && forTickets && (
+              <div>
+                <label htmlFor="action-button-fixed-ticket-status" className={LABEL}>
+                  Moves tickets to <span className="text-danger">*</span>
+                </label>
+                <select id="action-button-fixed-ticket-status" value={fixedTicketStatusId} onChange={(e) => setFixedTicketStatusId(e.target.value)} className={FIELD}>
+                  <option value="">Choose a ticket status</option>
+                  {TICKET_STATUS_CATEGORIES.map((category) => {
+                    const inGroup = statuses.filter((st) => st.category === category)
+                    return inGroup.length === 0 ? null : (
+                      <optgroup key={category} label={TICKET_CATEGORY_LABELS[category]}>
                         {inGroup.map((st) => (
                           <option key={st.id} value={st.id}>
                             {st.name}
