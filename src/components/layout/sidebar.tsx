@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { OpportunitiesFolder } from "./OpportunitiesFolder"
 import { cn } from "@/lib/utils"
-import { initialsOf } from "@/components/ui/blocks"
+import { UserMenu } from "./UserMenu"
 
 export interface PagePermissions {
   clients?: boolean
@@ -114,7 +114,7 @@ export interface SidebarProps {
 // The app's sidebar (the design's dark, light, or tinted style, from the
 // theme's --ps-sb-* colors): the company's logo and name, the pages in
 // their sections, the Opportunities folder with its teams and counts, and
-// the signed in user's button opening My settings. The same sidebar shows
+// the signed in user's button opening a menu with My settings and Log out. The same sidebar shows
 // in the phone menu.
 export function Sidebar({ pagePermissions = {}, companyName, logoUrl, userName }: SidebarProps) {
   const pathname = usePathname()
@@ -158,25 +158,7 @@ export function Sidebar({ pagePermissions = {}, companyName, logoUrl, userName }
       ))}
 
       <div className="flex-1" />
-      <Link
-        href="/dashboard/account"
-        className={cn(
-          "mt-3 flex items-center gap-2.5 rounded-[10px] border-t border-sb-border p-2.5 transition-colors hover:bg-sb-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring",
-          pathname.startsWith("/dashboard/account") && "bg-sb-hover"
-        )}
-      >
-        <span aria-hidden="true" className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-acc text-[13px] font-semibold text-acc-on">
-          {initialsOf(userName)}
-        </span>
-        <span className="flex min-w-0 flex-1 flex-col">
-          <span className="truncate text-[13px] font-semibold">{userName}</span>
-          <span className="text-xs text-sb-muted">My settings</span>
-        </span>
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="shrink-0">
-          <path d="M12 15.5a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7Z" />
-          <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1Z" />
-        </svg>
-      </Link>
+      <UserMenu userName={userName} />
     </nav>
   )
 }

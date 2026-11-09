@@ -10,7 +10,7 @@ import { IconTile, PageHeader } from "@/components/ui/blocks"
 
 // My settings: every signed in user can reach their own, so this is
 // deliberately not gated by any Roles & Permissions page permission. The
-// sidebar's user button opens it, and Log out lives here. Laid out as a
+// sidebar's user menu opens it, and Log out is here too. Laid out as a
 // plain stack of cards so per-user preferences can be added as more cards.
 export default async function AccountPage() {
   const session = await auth()

@@ -11,8 +11,8 @@ import { TopbarSlotTarget } from "./TopbarSlots"
 // The top bar, as the design draws it: the page's breadcrumb (filled by the
 // shared Breadcrumbs), the page's primary action (TopbarAction), and the
 // notifications bell. At phone width the sidebar folds into a menu button
-// here. The signed in user's own settings and Log out are on My settings,
-// opened from the sidebar's user button.
+// here. My settings and Log out are in the sidebar's user menu (Log out is
+// also on My settings).
 export function Topbar(sidebar: SidebarProps) {
   const pathname = usePathname()
   // The phone menu closes on every navigation
