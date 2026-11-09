@@ -6,8 +6,19 @@ import { FILTER_SEARCH_MAX } from "@/lib/opportunity-view"
 
 // The search box both views share (title, number, or client, searched by
 // the API). The list's other filters are its column filters. The URL
-// follows once typing pauses.
-export function OpportunityFilterBar({ q, onChange }: { q: string; onChange: (q: string) => void }) {
+// follows once typing pauses. The Tickets list uses it too, with its own
+// label and id.
+export function OpportunityFilterBar({
+  q,
+  onChange,
+  label = "Search opportunities",
+  id = "opportunity-search",
+}: {
+  q: string
+  onChange: (q: string) => void
+  label?: string
+  id?: string
+}) {
   const [searchText, setSearchText] = useState(q)
 
   // Follows the URL when it changes some other way (Clear filters, back)
@@ -29,9 +40,9 @@ export function OpportunityFilterBar({ q, onChange }: { q: string; onChange: (q:
   return (
     <label className="flex w-full min-w-0 items-center gap-2 rounded-control border border-border bg-card px-2.5 py-[7px] text-muted-foreground focus-within:ring-2 focus-within:ring-ring sm:w-[260px]">
       <Search size={16} className="shrink-0" aria-hidden="true" />
-      <span className="sr-only">Search opportunities</span>
+      <span className="sr-only">{label}</span>
       <input
-        id="opportunity-search"
+        id={id}
         type="search"
         value={searchText}
         maxLength={FILTER_SEARCH_MAX}

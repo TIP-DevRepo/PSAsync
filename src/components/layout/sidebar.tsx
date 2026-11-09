@@ -3,7 +3,7 @@
 import { Suspense } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { OpportunitiesFolder } from "./OpportunitiesFolder"
+import { OPPORTUNITIES_FOLDER, TeamFolder, TICKETS_FOLDER, type TeamFolderConfig } from "./TeamFolder"
 import { cn } from "@/lib/utils"
 import { UserMenu } from "./UserMenu"
 
@@ -13,6 +13,7 @@ export interface PagePermissions {
   vendors?: boolean
   quotes?: boolean
   opportunities?: boolean
+  tickets?: boolean
   settings?: boolean
   salesOrders?: boolean
   purchaseOrders?: boolean
@@ -24,6 +25,7 @@ export interface PagePermissions {
 export const NAV_ICON_PATHS = {
   home: "M3 11 12 4l9 7M5 10v10h14V10",
   opp: "M3 17l6-6 4 4 8-8M15 7h6v6",
+  ticket: "M3 8a2 2 0 0 0 0 4v4h18v-4a2 2 0 0 1 0-4V4H3v4ZM14 4v16",
   quote: "M7 3h7l5 5v13H7zM14 3v5h5M10 13h6M10 17h6",
   so: "M5 7h14l-1 13H6zM9 7a3 3 0 0 1 6 0",
   po: "M3 7h18v12H3zM3 11h18M7 15h4",
@@ -60,6 +62,7 @@ export const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
     label: "Work",
     items: [
       { label: "Dashboard", href: "/dashboard", icon: "home", permissionKey: null },
+      { label: "Tickets", href: "/dashboard/tickets", icon: "ticket", permissionKey: "tickets" },
       { label: "Opportunities", href: "/dashboard/opportunities", icon: "opp", permissionKey: "opportunities" },
     ],
   },
@@ -89,7 +92,13 @@ export const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
   },
 ]
 
-// One sidebar row's look, shared with the Opportunities folder
+// The entries that are folders of teams with counts (TeamFolder)
+const FOLDERS: Record<string, TeamFolderConfig> = {
+  "/dashboard/tickets": TICKETS_FOLDER,
+  "/dashboard/opportunities": OPPORTUNITIES_FOLDER,
+}
+
+// One sidebar row's look, shared with the team folders
 export const NAV_ROW =
   "flex min-h-9 min-w-0 items-center gap-2.5 rounded-control px-2.5 py-2 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
 export const navRowState = (active: boolean) =>
@@ -142,13 +151,15 @@ export function Sidebar({ pagePermissions = {}, companyName, logoUrl, userName }
           </p>
           {section.items.map((item) => {
             const active = isNavActive(item.href, pathname)
-            // Opportunities is a folder of teams and members with counts. It
-            // reads the board's team and owner from the URL, so it sits in
-            // its own Suspense boundary, falling back to the plain entry.
-            if (item.href === "/dashboard/opportunities") {
+            // Tickets and Opportunities are folders of teams and members with
+            // counts. Each reads its list's team and person from the URL, so
+            // it sits in its own Suspense boundary, falling back to the
+            // plain entry.
+            const folder = FOLDERS[item.href]
+            if (folder) {
               return (
                 <Suspense key={item.href} fallback={<NavLink item={item} active={active} />}>
-                  <OpportunitiesFolder isActive={active} />
+                  <TeamFolder config={folder} isActive={active} />
                 </Suspense>
               )
             }

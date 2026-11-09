@@ -17,7 +17,8 @@ export interface ViewTabItem<K extends string> {
   icon?: ReactNode
 }
 
-export function ViewTabs<K extends string>({ views, active, onChange, ariaLabel }: { views: readonly ViewTabItem<K>[]; active: K; onChange: (key: K) => void; ariaLabel: string }) {
+// active is null when none of them is in use (a saved view is)
+export function ViewTabs<K extends string>({ views, active, onChange, ariaLabel }: { views: readonly ViewTabItem<K>[]; active: K | null; onChange: (key: K) => void; ariaLabel: string }) {
   return (
     <div role="group" aria-label={ariaLabel} className="flex flex-wrap items-center gap-2">
       {views.map(({ key, label, count, icon }) => {

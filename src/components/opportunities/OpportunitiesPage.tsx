@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { CalendarClock, Columns3, List, Plus, Target, Trophy, UserRound, X } from "lucide-react"
+import { CalendarClock, Columns3, List, Plus, Target, Trophy, UserRound } from "lucide-react"
+import { FilterChip } from "@/components/ui/filter-chip"
 import { Button } from "@/components/ui/button"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { TopbarAction } from "@/components/layout/TopbarSlots"
@@ -245,25 +246,6 @@ export function OpportunitiesPage() {
         />
       )}
     </div>
-  )
-}
-
-// An active team or owner filter next to Search, removed with its X
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return (
-    <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-acc-tint py-1 pl-3 pr-1 text-[13px] font-semibold text-acc-ink">
-      <span className="truncate" title={label}>
-        {label}
-      </span>
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={`Remove ${label}`}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full hover:bg-acc-ink/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <X size={14} aria-hidden="true" />
-      </button>
-    </span>
   )
 }
 

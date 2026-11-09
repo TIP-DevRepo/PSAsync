@@ -31,6 +31,28 @@ export const TONE_TINT: Record<Tone, string> = {
   neutral: "bg-neu-tint text-muted-foreground",
 }
 
+// The solid form of each tone, for small marks (a priority's square)
+export const TONE_SOLID: Record<Tone, string> = {
+  accent: "bg-acc",
+  ok: "bg-ok",
+  warn: "bg-warn",
+  bad: "bg-bad",
+  neutral: "bg-muted-foreground",
+}
+
+// ─── PriorityMarker ─────────────────────────────────────────────────────────
+// A priority: a small square in its tone, then its name. The tone comes
+// from the priority's place in the company's order (priorityTone in
+// src/lib/ticket-view.ts), never its name.
+export function PriorityMarker({ tone, children, className }: { tone: Tone; children: ReactNode; className?: string }) {
+  return (
+    <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-[13px] text-foreground", className)}>
+      <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-[2px]", TONE_SOLID[tone])} />
+      <span className="truncate">{children}</span>
+    </span>
+  )
+}
+
 // ─── PageHeader ─────────────────────────────────────────────────────────────
 // A page's title, a line under it, and its own actions. The breadcrumb goes
 // to the top bar (Breadcrumbs does that by itself).
