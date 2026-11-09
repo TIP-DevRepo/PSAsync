@@ -5,8 +5,8 @@ import { TICKET_SEARCH_MAX } from "@/lib/ticket-rules"
 // The ticket list's query: the built in view, the search, the queue and
 // assignee scope (the sidebar folder's chips), the column filters, the
 // sort, and the page. One set of rules for the page's URL, the API's query
-// string, and a saved view's params, so a refresh, a shared link, and a
-// saved view all open the same list. The list is paged on the server
+// string, so a refresh and a shared link open the same list. The list is
+// paged on the server
 // (NinjaOne alerts will add many tickets), so filters, sort, and paging all
 // run in the database: ticketListFilterWhere and ticketListOrderBy build the
 // query, always under ticketListWhere (the visibility rule). No React and

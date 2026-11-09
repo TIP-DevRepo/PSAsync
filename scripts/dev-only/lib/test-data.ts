@@ -392,8 +392,6 @@ export interface SampleIds {
   ticketPriorityId: string
   ticketStatusId: string
   helpdeskTeamId: string
-  // The admin's saved view on the Tickets list
-  savedViewId: string
 }
 
 export interface PermissionFixtureIds {

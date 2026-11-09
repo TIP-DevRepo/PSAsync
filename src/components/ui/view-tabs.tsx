@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
 // ─── ViewTabs ───────────────────────────────────────────────────────────────
-// Saved view style switches (Board and List, My tickets and Unassigned):
+// View switches (Board and List, My tickets and Unassigned):
 // the chosen one tinted in the accent, each with an optional count. They
 // change what the list below shows, so they are pressed buttons, not tabs.
 // A client component (it handles clicks); the icon is a rendered element,
@@ -17,8 +17,7 @@ export interface ViewTabItem<K extends string> {
   icon?: ReactNode
 }
 
-// active is null when none of them is in use (a saved view is)
-export function ViewTabs<K extends string>({ views, active, onChange, ariaLabel }: { views: readonly ViewTabItem<K>[]; active: K | null; onChange: (key: K) => void; ariaLabel: string }) {
+export function ViewTabs<K extends string>({ views, active, onChange, ariaLabel }: { views: readonly ViewTabItem<K>[]; active: K; onChange: (key: K) => void; ariaLabel: string }) {
   return (
     <div role="group" aria-label={ariaLabel} className="flex flex-wrap items-center gap-2">
       {views.map(({ key, label, count, icon }) => {

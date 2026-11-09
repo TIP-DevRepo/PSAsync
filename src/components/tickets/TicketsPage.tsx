@@ -12,7 +12,6 @@ import { FilterChip } from "@/components/ui/filter-chip"
 import { useAccess } from "@/components/AccessProvider"
 import { useColumnFilters } from "@/components/table/ColumnFilters"
 import { OpportunityFilterBar } from "@/components/opportunities/OpportunityFilterBar"
-import { SavedViewTabs, useSavedViews } from "@/components/saved-views/SavedViewTabs"
 import { hasColumnFilters } from "@/lib/column-filters"
 import {
   ASSIGNEE_UNASSIGNED,
@@ -29,7 +28,6 @@ import {
   type TicketStats,
   type TicketView,
 } from "@/lib/ticket-list"
-import { ticketParamsToQuery, ticketQueryMatchesParams, ticketQueryToParams } from "@/lib/saved-views"
 import { notifyTicketsChanged, ticketHref, type TicketRow } from "@/lib/ticket-view"
 import { cn } from "@/lib/utils"
 import { TicketList } from "./TicketList"
@@ -50,7 +48,7 @@ const FILTER_ROW_ID = "ticket-column-filters"
 // The Tickets list (/dashboard/tickets), as the design draws it: the page
 // header with its line of totals, the stat tiles, then one frame holding
 // the built in views (My tickets, Unassigned, All open, Waiting, All
-// tickets), the user's saved views, the queue and assignee chips, the
+// tickets), the queue and assignee chips, the
 // search, the table with its column filters, and the pages. Everything the
 // list shows is in the URL (view, q, team, assignee, sort, dir, page, and
 // f_<column>), and the API pages, sorts, and filters in the database, so a
@@ -68,7 +66,6 @@ export function TicketsPage() {
   const query = useMemo(() => readTicketPageUrl(searchParams), [searchParams])
   const apiQuery = ticketApiQuery(query)
   const options = useTicketOptions()
-  const saved = useSavedViews("tickets")
   const columnFilters = useColumnFilters(TICKET_FILTER_KEYS)
 
   const [data, setData] = useState<TicketPage | null>(null)
@@ -128,7 +125,6 @@ export function TicketsPage() {
 
   const stats = data?.stats ?? null
   const views: ViewTabItem<TicketView>[] = TICKET_VIEWS.map((key) => ({ key, label: TICKET_VIEW_LABELS[key], count: stats ? viewCount(key, stats) : undefined }))
-  const activeSaved = saved.views.find((v) => ticketQueryMatchesParams(query, v.params, query)) ?? null
   const priorityOrders = options.priorities.map((p) => p.sortOrder)
   const scope = [teamName, assigneeName].filter(Boolean).join(", ")
   const filtered = !!query.q.trim() || hasColumnFilters(query.filters)
@@ -137,7 +133,7 @@ export function TicketsPage() {
     <div className={LIST_PAGE}>
       <Breadcrumbs
         items={teamName ? [{ label: "Tickets", href: pathname }] : []}
-        current={teamName ? `${teamName} · ${activeSaved?.name ?? TICKET_VIEW_LABELS[query.view]}` : "Tickets"}
+        current={teamName ? `${teamName} · ${TICKET_VIEW_LABELS[query.view]}` : "Tickets"}
       />
       {canCreate && (
         <TopbarAction>
@@ -163,14 +159,7 @@ export function TicketsPage() {
 
       <section aria-label="Tickets" className={TABLE.frame}>
         <div className={TABLE.toolbar}>
-          <ViewTabs ariaLabel="Views" views={views} active={activeSaved ? null : query.view} onChange={(view) => change({ view })} />
-          <SavedViewTabs
-            page="tickets"
-            params={ticketQueryToParams(query) as Record<string, unknown>}
-            activeId={activeSaved?.id ?? null}
-            onApply={(view) => setQuery(ticketParamsToQuery(view.params, query))}
-            {...saved}
-          />
+          <ViewTabs ariaLabel="Views" views={views} active={query.view} onChange={(view) => change({ view })} />
           <span className="flex-1" />
           {teamName && <FilterChip label={`Queue: ${teamName}`} onRemove={() => change({ team: "", assignee: "" })} />}
           {assigneeName && <FilterChip label={`Assignee: ${assigneeName}`} onRemove={() => change({ assignee: "" })} />}

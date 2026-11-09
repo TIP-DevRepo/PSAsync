@@ -59,7 +59,6 @@ model Company {
   ticketPriorities        TicketPriority[]
   ticketStatuses          TicketStatus[]
   ticketSettings          TicketSettings?
-  savedViews              SavedView[]
 }
 
 // ─── COMPANY SETTINGS ────────────────────────────────────────────────────────
@@ -190,31 +189,6 @@ model User {
   ticketAttachments           TicketAttachment[]
   roundRobinLastForTeams      Team[]                     @relation("TeamRoundRobinLastUser")
   preferences                 UserPreferences?
-  savedViews                  SavedView[]
-}
-
-// ─── SAVED VIEWS ─────────────────────────────────────────────────────────────
-// A user's own named list views (filters and sort) for one list page (page
-// is a key such as "tickets"; src/lib/saved-views.ts lists the pages and the
-// params each accepts). Only their owner sees them. params is checked
-// against the page's allowed filters when it is saved, and every list
-// request checks its filters again, so stored params are never trusted.
-model SavedView {
-  id        String   @id @default(cuid())
-  companyId String
-  company   Company  @relation(fields: [companyId], references: [id])
-  userId    String
-  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  page      String
-  name      String
-  params    Json
-  sortOrder Int      @default(0)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@unique([userId, page, name])
-  @@index([companyId])
-  @@index([userId, page, sortOrder])
 }
 
 // ─── USER PREFERENCES ────────────────────────────────────────────────────────

@@ -86,7 +86,7 @@ The default Won and Lost action buttons show as the ok and bad tints; any other 
 
 ### Paged lists
 
-- A list that can grow without bound (Tickets, with NinjaOne alerts to come) pages, sorts, and filters on the server, 50 rows a page, with numbered pages under the table ("Showing 51 to 100 of 312", Previous, the first, last, current, and neighboring pages, Next). The page number, view, search, sort, and column filters are all in the URL, so a refresh, a shared link, and a saved view open the same rows. Numbered pages were chosen over Load more so a page in the URL means one fixed slice and people can jump. A short list inside another page (the client page's Tickets tab) uses Load more instead.
+- A list that can grow without bound (Tickets, with NinjaOne alerts to come) pages, sorts, and filters on the server, 50 rows a page, with numbered pages under the table ("Showing 51 to 100 of 312", Previous, the first, last, current, and neighboring pages, Next). The page number, view, search, sort, and column filters are all in the URL, so a refresh and a shared link open the same rows. Numbered pages were chosen over Load more so a page in the URL means one fixed slice and people can jump. A short list inside another page (the client page's Tickets tab) uses Load more instead.
 - Its stat tiles come from the same response as the rows, worked out on the server for what the viewer can see; never a request of their own.
 
 ### Spacing and radius scale
@@ -109,8 +109,7 @@ The default Won and Lost action buttons show as the ok and bad tints; any other 
 - **IconTile**: a tinted square holding an icon (52px in a record header, 38px in a stat tile).
 - **CountBadge**: a small count after a tab or menu entry; tabs take `count` directly.
 - **StatTile** in a **StatRow**: a few numbers at the top of a list page. Work them out from data the page already has; never add a query just for a tile.
-- **ViewTabs** (`src/components/ui/view-tabs.tsx`, a client component): view switches (Board and List, My tickets and Unassigned), pressed buttons with optional counts and an icon element. `active` may be null when none of them is in use (a saved view is).
-- **SavedViewTabs** (`src/components/saved-views/SavedViewTabs.tsx`, client): a user's own saved views after the built in ones, in the same pressed button look with a bookmark icon, each with a small options menu (Rename, Update to the current filters, Move left, Move right, Delete), and a Save view button. The one matching the list's current filters shows as in use, and Save view is disabled then. Any list page can adopt it (CLAUDE.md, Saved views).
+- **ViewTabs** (`src/components/ui/view-tabs.tsx`, a client component): view switches (Board and List, My tickets and Unassigned), pressed buttons with optional counts and an icon element.
 - **PriorityMarker**: a priority as a small square in its tone followed by its name (the Tickets list and the ticket card). `TONE_SOLID` holds the solid form of each tone for small marks like it.
 - **FilterChip** (`src/components/ui/filter-chip.tsx`, client): an active scope filter next to a list's search (a queue or team, an assignee or owner), an accent tinted pill removed with its X.
 - **TeamFolder** (`src/components/layout/TeamFolder.tsx`, client): a sidebar entry that opens to its teams, Unassigned, and members, each with a count; Tickets and Opportunities are both one, each a plain config.

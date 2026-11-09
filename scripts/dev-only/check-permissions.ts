@@ -946,18 +946,6 @@ const TICKET_ATTEMPTS: Attempt[] = [
   { name: "List tickets with page 0", actor: "admin", kind: "refused", method: "GET", path: () => "/api/tickets?page=0", expect: 400, expectError: "Invalid page" },
   { name: "List tickets with a made up sort direction", actor: "admin", kind: "refused", method: "GET", path: () => "/api/tickets?sort=number&dir=up", expect: 400, expectError: "Invalid sort direction" },
 
-  // Saved views: own only (checkSavedViews), params checked on save
-  { name: "List saved views", actor: "ticketBasic", kind: "allowed", method: "GET", path: () => "/api/saved-views?page=tickets", expect: 200, contains: () => ["["] },
-  { name: "Save a view with a made up filter", actor: "admin", kind: "refused", method: "POST", path: () => "/api/saved-views", body: () => ({ page: "tickets", name: "Should Not Exist", params: { bogus: "1" } }), expect: 400, expectError: "Invalid view filters" },
-  { name: "Save a view with a made up sort", actor: "admin", kind: "refused", method: "POST", path: () => "/api/saved-views", body: () => ({ page: "tickets", name: "Should Not Exist", params: { sort: "nope" } }), expect: 400, expectError: "Invalid view filters" },
-  { name: "Save a view with a made up column filter", actor: "admin", kind: "refused", method: "POST", path: () => "/api/saved-views", body: () => ({ page: "tickets", name: "Should Not Exist", params: { filters: { cost: "1" } } }), expect: 400, expectError: "Invalid view filters" },
-  { name: "Save a view with a made up queue", actor: "admin", kind: "refused", method: "POST", path: () => "/api/saved-views", body: (c) => ({ page: "tickets", name: "Should Not Exist", params: { team: c.fakeId } }), expect: 400, expectError: "Invalid team" },
-  { name: "Save a view with no name", actor: "admin", kind: "refused", method: "POST", path: () => "/api/saved-views", body: () => ({ page: "tickets", name: "  ", params: {} }), expect: 400, expectError: "A view name is required" },
-  { name: "Save a view for a made up page", actor: "admin", kind: "refused", method: "POST", path: () => "/api/saved-views", body: () => ({ page: "quotes", name: "Should Not Exist", params: {} }), expect: 400, expectError: "Invalid page" },
-  { name: "Rename a made up view", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/saved-views/${c.fakeId}`, body: () => ({ name: "Changed" }), expect: 404, expectError: "Not found" },
-  { name: "List saved views", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/saved-views?page=tickets", expect: 403, expectError: "saved views" },
-  { name: "Save a view", actor: "ticketSettings", kind: "refused", method: "POST", path: () => "/api/saved-views", body: () => ({ page: "tickets", name: "Should Not Exist", params: {} }), expect: 403, expectError: "saved views" },
-
   // The client page's Tickets tab: the client's tickets the user may open
   { name: "Client tickets tab", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets?status=all`, expect: 200, contains: (c) => [c.fx.basicTicketId, c.fx.viewerTicketId, c.b.ticketId, c.fx.alertsTicketId] },
   { name: "Client tickets tab: own and the team's unassigned", actor: "ticketBasic", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets`, expect: 200, contains: (c) => [c.fx.basicTicketId, c.b.ticketId], notContains: (c) => [c.fx.viewerTicketId, c.fx.alertsTicketId] },
@@ -3732,60 +3720,6 @@ async function checkTicketPages(sessions: Record<Actor, Session>, labels: Record
   }
 }
 
-// Saved views are each user's own: Test Admin B saves a view, Test Ticket
-// Basic B never lists it and gets 404 renaming, updating, or deleting it,
-// a reorder naming it is refused (409), and the admin renames, reorders,
-// and deletes it. Every view made here is removed.
-async function checkSavedViews(prisma: PrismaClient, sessions: Record<Actor, Session>, ctx: AttemptContext, rows: Row[]) {
-  const push = (name: string, expected: string, actual: string, problem: string | null) =>
-    rows.push({ attempt: `Saved views: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
-  const admin = sessions.admin
-  const basic = sessions.ticketBasic
-  const made: string[] = []
-  try {
-    const created = await admin.request("POST", "/api/saved-views", {
-      json: { page: "tickets", name: "Dev check view", params: { view: "all", team: ctx.b.helpdeskTeamId, assignee: "unassigned", sort: "priority", dir: "desc", filters: { queue: "Help" } } },
-    })
-    const view = JSON.parse(created.text || "{}") as { id?: string; params?: Record<string, unknown> }
-    if (view.id) made.push(view.id)
-    push("Test Admin B saves a view", "200 with its params", String(created.status),
-      created.status !== 200 || !view.id ? errorText(created.text) : view.params?.team !== ctx.b.helpdeskTeamId ? "the params weren't kept" : null)
-    if (!view.id) return
-
-    const twice = await admin.request("POST", "/api/saved-views", { json: { page: "tickets", name: "Dev check view", params: {} } })
-    push("a second view with the same name", "409", String(twice.status), twice.status !== 409 ? errorText(twice.text) : null)
-
-    const list = await basic.request("GET", "/api/saved-views?page=tickets")
-    push("Test Ticket Basic B's list leaves it out", "200 without it", String(list.status), list.status !== 200 ? errorText(list.text) : list.text.includes(view.id) ? "another user's view is listed" : null)
-    for (const [label, method, json] of [
-      ["renames", "PATCH", { name: "Taken" }],
-      ["updates", "PATCH", { params: { view: "mine" } }],
-      ["deletes", "DELETE", undefined],
-    ] as const) {
-      const res = await basic.request(method, `/api/saved-views/${view.id}`, json ? { json } : {})
-      push(`Test Ticket Basic B ${label} it`, "404", String(res.status), res.status !== 404 ? errorText(res.text) : null)
-    }
-    const stolen = await basic.request("POST", "/api/saved-views/reorder", { json: { page: "tickets", viewIds: [view.id] } })
-    push("Test Ticket Basic B reorders with it", "409", String(stolen.status), stolen.status !== 409 ? errorText(stolen.text) : null)
-    const kept = await prisma.savedView.findUnique({ where: { id: view.id }, select: { name: true, userId: true } })
-    push("it is unchanged", "still the admin's, same name", kept ? kept.name : "gone", !kept || kept.name !== "Dev check view" || kept.userId !== ctx.b.adminId ? "it was changed" : null)
-
-    const second = await admin.request("POST", "/api/saved-views", { json: { page: "tickets", name: "Dev check view 2", params: { view: "mine" } } })
-    const secondId = (JSON.parse(second.text || "{}") as { id?: string }).id
-    if (secondId) made.push(secondId)
-    const reorder = await admin.request("POST", "/api/saved-views/reorder", { json: { page: "tickets", viewIds: [secondId, view.id, ctx.b.savedViewId] } })
-    const order = await prisma.savedView.findMany({ where: { userId: ctx.b.adminId, page: "tickets" }, orderBy: { sortOrder: "asc" }, select: { id: true } })
-    push("Test Admin B reorders its views", "200, new order", String(reorder.status), reorder.status !== 200 ? errorText(reorder.text) : order[0]?.id !== secondId ? "the order didn't change" : null)
-    const renamed = await admin.request("PATCH", `/api/saved-views/${view.id}`, { json: { name: "Dev check view renamed" } })
-    push("Test Admin B renames it", "200", String(renamed.status), renamed.status !== 200 || !renamed.text.includes("Dev check view renamed") ? errorText(renamed.text) : null)
-    const del = await admin.request("DELETE", `/api/saved-views/${view.id}`)
-    const gone = await prisma.savedView.count({ where: { id: view.id } })
-    push("Test Admin B deletes it", "200, removed", String(del.status), del.status !== 200 ? errorText(del.text) : gone ? "still there" : null)
-  } finally {
-    await prisma.savedView.deleteMany({ where: { id: { in: made } } })
-  }
-}
-
 // Assignment notifications: Test Ticket Dispatcher B creating a ticket for
 // Test Ticket Viewer B, and Test Admin B reassigning it to Test Ticket
 // Basic B, each give the new assignee one TICKET_ASSIGNED notification
@@ -4421,10 +4355,9 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await checkTicketAutoClose(prisma, sessions.admin, ctx, rows, baseUrl)
     await checkClientWithTicketRestricted(prisma, ctx, rows)
 
-    // The ticket screens: page access, saved views being each user's own,
-    // and the in-app notification an assignment sends
+    // The ticket screens: page access and the in-app notification an
+    // assignment sends
     await checkTicketPages(sessions, ACTOR_LABEL, ctx, rows)
-    await checkSavedViews(prisma, sessions, ctx, rows)
     await checkTicketAssignmentNotifications(prisma, sessions, ctx, rows)
 
     // Attachment downloads: the parent's view check, the redirect, and no
