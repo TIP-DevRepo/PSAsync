@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
 
   const formData = await req.formData().catch(() => null)
   if (!formData) return apiError(400, "No file provided")
-  // "primary" (default) or "secondary" — which logo slot this upload fills
+  // "primary" (default) or "secondary": which logo slot this upload fills
   const slot = (formData.get("slot") as string | null) === "secondary" ? "secondary" : "primary"
 
   // PNG, JPG, or WebP up to 2 MB, checked by content. Stored in the same
