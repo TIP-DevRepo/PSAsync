@@ -1,6 +1,7 @@
 // Browser only: shows a theme on the whole page at once, while the
-// Appearance settings save it. A second style element after the server's
-// one (#ps-theme, written by the root layout) holds the new variables, and
+// Appearance settings save it. A style element at the end of the body, after
+// the server's ones (the root layout's light default and the staff app's
+// #ps-theme), holds the new variables, and
 // the html element's light or dark class follows the mode. Once the saved
 // theme comes back from the server the two match; preview(null) removes it.
 
@@ -18,7 +19,7 @@ export function previewTheme(theme: ResolvedTheme | null): void {
   if (!el) {
     el = document.createElement("style")
     el.id = PREVIEW_ID
-    document.head.appendChild(el)
+    document.body.appendChild(el)
   }
   el.textContent = themeCss(theme)
   const dark = theme.mode === "DARK" || (theme.mode === "SYSTEM" && window.matchMedia("(prefers-color-scheme: dark)").matches)

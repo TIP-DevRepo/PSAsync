@@ -14,9 +14,26 @@ Colors are a theme, worked out by `resolveTheme(company, user)` in `src/lib/them
 
 1. The user's own choice (My settings > Appearance, the `UserPreferences` row) for each of accent, sidebar style, and mode, but only while the company allows personal colors (`CompanySettings.allowUserTheme`, on by default).
 2. Otherwise, or for anything the user left empty, the company default (Settings > Company Settings > Appearance: `themeAccent`, `themeSidebar`, `themeMode`).
-3. Otherwise the PSAsync default: accent `#5E56E0` (PSAsync indigo), dark sidebar, match my computer.
+3. Otherwise the PSAsync default: accent `#5E56E0` (PSAsync indigo), dark sidebar, light mode.
 
-Invalid stored values fall back the same way. Row density is always the user's own. The root layout writes the theme on the server (`themeCss`, both modes on the html element, a `prefers-color-scheme` query for match my computer), so nothing flashes; the Appearance page previews a change on the whole page with `previewTheme` (`src/lib/theme-preview.ts`). Customer facing output (the portal, quote PDFs, emails) keeps the company's brand colors from Company Info & Branding.
+**The default mode is Light for now.** It goes back to Match my computer (`DEFAULT_MODE = "SYSTEM"` in `src/lib/theme.ts`) once every page below is restyled, so nobody whose computer is in dark mode lands on a page that breaks in it. Companies and users can still choose Dark or Match my computer.
+
+Invalid stored values fall back the same way. Row density is always the user's own. The staff app's layout writes the theme on the server (`StaffTheme`: `themeCss`, both modes on the html element, a `prefers-color-scheme` query for match my computer), so nothing flashes; the Appearance page previews a change on the whole page with `previewTheme` (`src/lib/theme-preview.ts`). Customer facing output (the portal, quote PDFs, emails) keeps the company's brand colors from Company Info & Branding.
+
+### Pages not yet restyled
+
+These still hardcode colors (`bg-white`, `text-gray-*`, `text-red-*`, hex values) and look wrong in dark mode. Each one moves to the theme variables and building blocks in a later branch; when the list is empty, the default mode goes back to Match my computer. The number is how many hardcoded color classes each holds today.
+
+- `src/components/quotes/LineItemBuilder.tsx` (83)
+- `src/app/portal/[token]/page.tsx` (67) and `src/app/portal/[token]/AcceptFlowModal.tsx` (11): always light anyway (signed out pages, below)
+- `src/app/login/page.tsx` (18): always light anyway
+- Settings panels: `RolesPermissionsPanel` (14), `MicrosoftSettingsPanel` (14), `DistributorSettingsPanel` (13), `QuoteSettingsPanel` (9), `ApprovalWorkflowsPanel` (6), `UsersSettingsPanel` (5), `SalesOrderSettingsPanel` (3), `NotificationSettingsPanel` (3), `CompanySettingsPanel` (1)
+- Quote pages: `src/app/dashboard/quotes/new/page.tsx` (9), `src/app/dashboard/quotes/page.tsx` (7), `src/app/dashboard/quotes/templates/[id]/page.tsx` (4)
+- Others: `src/components/ContactSearchInput.tsx` (6), `src/components/roles/RoleColorPicker.tsx` (4), `src/components/NoAccess.tsx` (2), `src/components/ui/sheet.tsx` (1), and the New vendor, client, and catalog item pages and the vendor detail page (1 each)
+
+### Signed out pages are always light
+
+The customer portal, the sign in page, the forced password change page, and every other page outside `/dashboard` show the PSAsync default theme in light mode, whatever the company, the user, or the computer prefers. The root layout only ever writes that light default (`publicThemeCss`); the staff app's layout (`src/app/dashboard/layout.tsx`, through `StaffTheme`) adds the signed in user's theme and the light or dark class, and `PublicLightMode` clears a dark class left over when someone navigates out of the staff app. Quote PDFs and emails build their own HTML and never used the theme.
 
 ### Theme variables
 

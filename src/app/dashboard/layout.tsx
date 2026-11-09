@@ -5,7 +5,8 @@ import { Topbar } from "@/components/layout/topbar"
 import { TopbarSlotsProvider } from "@/components/layout/TopbarSlots"
 import { resolvePagePermissions } from "@/lib/permissions"
 import { loadAppearance } from "@/lib/appearance"
-import { DEFAULT_DENSITY } from "@/lib/theme"
+import { DEFAULT_DENSITY, resolveTheme } from "@/lib/theme"
+import { StaffTheme } from "@/components/StaffTheme"
 import { AccessProvider } from "@/components/AccessProvider"
 import { AppearanceProvider } from "@/components/AppearanceProvider"
 import { SessionKeepAlive } from "@/components/SessionKeepAlive"
@@ -28,7 +29,7 @@ export default async function DashboardLayout({
   }
 
   const pagePermissions: PagePermissions = resolvePagePermissions(session.user.access)
-  // The same lookup the root layout made for the theme (cached per request)
+  // The theme, company name and logo, and row density in one lookup
   const appearance = session.user.id ? await loadAppearance(session.user.id) : null
   const sidebar = {
     pagePermissions,
@@ -37,7 +38,12 @@ export default async function DashboardLayout({
     userName: session.user.name ?? "User",
   }
 
+  // The signed in user's theme applies only inside the staff app; every
+  // page outside it stays on the light default (src/app/layout.tsx)
+  const theme = appearance?.theme ?? resolveTheme(null, null)
+
   return (
+    <StaffTheme theme={theme}>
     <TopbarSlotsProvider>
       <div className="flex h-screen">
         <SessionKeepAlive />
@@ -56,5 +62,6 @@ export default async function DashboardLayout({
         </div>
       </div>
     </TopbarSlotsProvider>
+    </StaffTheme>
   )
 }
