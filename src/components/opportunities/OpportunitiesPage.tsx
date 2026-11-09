@@ -6,7 +6,8 @@ import { CalendarClock, Columns3, List, Plus, Target, Trophy, UserRound, X } fro
 import { Button } from "@/components/ui/button"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { TopbarAction } from "@/components/layout/TopbarSlots"
-import { PageHeader, StatRow, StatTile, ViewTabs } from "@/components/ui/blocks"
+import { PageHeader, StatRow, StatTile } from "@/components/ui/blocks"
+import { ViewTabs, type ViewTabItem } from "@/components/ui/view-tabs"
 import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
@@ -35,9 +36,9 @@ import { OpportunityList } from "./OpportunityList"
 import { NewOpportunityModal } from "./NewOpportunityModal"
 import type { TeamSummary } from "@/lib/team-rules"
 
-const VIEWS: { key: OpportunityView; label: string; icon: typeof List }[] = [
-  { key: "board", label: "Board", icon: Columns3 },
-  { key: "list", label: "List", icon: List },
+const VIEWS: ViewTabItem<OpportunityView>[] = [
+  { key: "board", label: "Board", icon: <Columns3 size={15} aria-hidden="true" /> },
+  { key: "list", label: "List", icon: <List size={15} aria-hidden="true" /> },
 ]
 
 export function OpportunitiesPage() {

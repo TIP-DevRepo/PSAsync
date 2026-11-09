@@ -80,6 +80,8 @@ The default Won and Lost action buttons show as the ok and bad tints; any other 
 
 ### Building blocks (`src/components/ui/blocks.tsx`)
 
+`blocks.tsx` is not a client module: its blocks are plain markup, so server components (like My settings) and client components both use them, and passing an icon component (`icon={Palette}`) is fine. A block that handles events is a client component in its own file and takes icons as rendered elements (`icon: <Columns3 size={15} aria-hidden="true" />`), since a server component can't hand a component or function to a client one.
+
 - **PageHeader**: a list or settings page's title, a line under it, and its own actions. Pass `breadcrumbs`; the trail shows in the top bar. A page's single primary action (New opportunity) goes in the top bar with `TopbarAction` (`src/components/layout/TopbarSlots.tsx`) instead.
 - **Breadcrumbs** (`src/components/Breadcrumbs.tsx`): rendered by every page as before; it moves itself into the top bar. Earlier crumbs are muted links, the current page bold.
 - **Card** and **CardHeader**: any bordered section. `size="panel"` for page sections, `size="card"` for smaller groups.
@@ -88,7 +90,7 @@ The default Won and Lost action buttons show as the ok and bad tints; any other 
 - **IconTile**: a tinted square holding an icon (52px in a record header, 38px in a stat tile).
 - **CountBadge**: a small count after a tab or menu entry; tabs take `count` directly.
 - **StatTile** in a **StatRow**: a few numbers at the top of a list page. Work them out from data the page already has; never add a query just for a tile.
-- **ViewTabs**: saved view switches (Board and List, My tickets and Unassigned), pressed buttons with optional counts.
+- **ViewTabs** (`src/components/ui/view-tabs.tsx`, a client component): saved view switches (Board and List, My tickets and Unassigned), pressed buttons with optional counts and an icon element.
 - **InitialsAvatar**: a person's initials; accent for the current user, neutral for others and the system.
 - **InfoPanelCard** with **InfoField**: a side panel group, uppercase heading, label above value. `InlineEditField` sits inside as is, its hover outline is the field's box.
 - **TABLE** classes and **DENSITY_PADDING**: the table frame and toolbar, a tinted header row, a hover on each row, record numbers in the accent ink, and row padding from the user's row density (`useRowDensity`). Columns keep fixed widths and the table scrolls sideways below them; never squeeze a column.
