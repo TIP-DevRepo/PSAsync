@@ -78,6 +78,17 @@ The default Won and Lost action buttons show as the ok and bad tints; any other 
 - Tables keep their fixed column widths and scroll sideways inside their own box when the page is narrower than their minimum; a wider page just gives them more room.
 - Forms and settings pages (Appearance, My settings) keep their readable max width.
 
+### Ticket statuses and priorities
+
+- A ticket's status pill is tinted by its status's category, never its name: Open in the accent, Waiting in warn, Resolved in ok, Closed neutral. A renamed or added status follows its category.
+- A priority's marker (and its pill on the ticket header) follows its place in Ticket Settings' order: the last one, the top priority, bad; the one before it warn; the one before that the accent; every lower one neutral. Renamed or added priorities keep working, and the list's top stat tile is labelled with the top priority's own name.
+- The rules live in `src/lib/ticket-view.ts` (`statusTone`, `priorityTone`), drawn by `TicketStatusPill`, `TicketPriorityMarker`, and `TicketPriorityPill` (`src/components/tickets/TicketPills.tsx`, plain markup usable from server components).
+
+### Paged lists
+
+- A list that can grow without bound (Tickets, with NinjaOne alerts to come) pages, sorts, and filters on the server, 50 rows a page, with numbered pages under the table ("Showing 51 to 100 of 312", Previous, the first, last, current, and neighboring pages, Next). The page number, view, search, sort, and column filters are all in the URL, so a refresh, a shared link, and a saved view open the same rows. Numbered pages were chosen over Load more so a page in the URL means one fixed slice and people can jump. A short list inside another page (the client page's Tickets tab) uses Load more instead.
+- Its stat tiles come from the same response as the rows, worked out on the server for what the viewer can see; never a request of their own.
+
 ### Spacing and radius scale
 
 - Radius: controls (buttons, inputs, view tabs) 8px `rounded-control`; cards, side panels, timeline entries, stat tiles 12px `rounded-card`; page sections, record header cards, table frames 14px `rounded-panel`; pills `rounded-full`.
@@ -98,7 +109,11 @@ The default Won and Lost action buttons show as the ok and bad tints; any other 
 - **IconTile**: a tinted square holding an icon (52px in a record header, 38px in a stat tile).
 - **CountBadge**: a small count after a tab or menu entry; tabs take `count` directly.
 - **StatTile** in a **StatRow**: a few numbers at the top of a list page. Work them out from data the page already has; never add a query just for a tile.
-- **ViewTabs** (`src/components/ui/view-tabs.tsx`, a client component): saved view switches (Board and List, My tickets and Unassigned), pressed buttons with optional counts and an icon element.
+- **ViewTabs** (`src/components/ui/view-tabs.tsx`, a client component): view switches (Board and List, My tickets and Unassigned), pressed buttons with optional counts and an icon element. `active` may be null when none of them is in use (a saved view is).
+- **SavedViewTabs** (`src/components/saved-views/SavedViewTabs.tsx`, client): a user's own saved views after the built in ones, in the same pressed button look with a bookmark icon, each with a small options menu (Rename, Update to the current filters, Move left, Move right, Delete), and a Save view button. The one matching the list's current filters shows as in use, and Save view is disabled then. Any list page can adopt it (CLAUDE.md, Saved views).
+- **PriorityMarker**: a priority as a small square in its tone followed by its name (the Tickets list and the ticket card). `TONE_SOLID` holds the solid form of each tone for small marks like it.
+- **FilterChip** (`src/components/ui/filter-chip.tsx`, client): an active scope filter next to a list's search (a queue or team, an assignee or owner), an accent tinted pill removed with its X.
+- **TeamFolder** (`src/components/layout/TeamFolder.tsx`, client): a sidebar entry that opens to its teams, Unassigned, and members, each with a count; Tickets and Opportunities are both one, each a plain config.
 - **InitialsAvatar**: a person's initials; accent for the current user, neutral for others and the system.
 - **InfoPanelCard** with **InfoField**: a side panel group, uppercase heading, label above value. `InlineEditField` sits inside as is, its hover outline is the field's box.
 - **TABLE** classes and **DENSITY_PADDING**: the table frame and toolbar, a tinted header row, a hover on each row, record numbers in the accent ink, and row padding from the user's row density (`useRowDensity`). Columns keep fixed widths and the table scrolls sideways below them; never squeeze a column.
@@ -575,7 +590,7 @@ Every block has visible focus rings, real buttons with labels, and `aria-label`s
 - Truncate page links to first/last/current/neighbors with ellipsis.
 - Keep page number in the URL for shareable/refreshable state.
 - Restore scroll position on return from a detail view.
-- **PSAsync relevance:** Quotes/Clients lists as data volume grows.
+- **PSAsync relevance:** Quotes/Clients lists as data volume grows. The Tickets list is the first paged list (numbered pages, page in the URL; see Paged lists at the top).
 
 ---
 
