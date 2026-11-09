@@ -13,7 +13,7 @@ import { confirmDialog } from "@/lib/confirm-dialog"
 
 interface Notification {
   id: string
-  type: "QUOTE_VIEWED" | "QUOTE_APPROVED" | "QUOTE_LOST"
+  type: "QUOTE_VIEWED" | "QUOTE_APPROVED" | "QUOTE_LOST" | "TICKET_ASSIGNED"
   message: string
   link: string | null
   read: boolean
@@ -24,6 +24,7 @@ const TYPE_ICON: Record<Notification["type"], string> = {
   QUOTE_VIEWED: "👀",
   QUOTE_APPROVED: "✅",
   QUOTE_LOST: "❌",
+  TICKET_ASSIGNED: "🎫",
 }
 
 function timeAgo(iso: string) {

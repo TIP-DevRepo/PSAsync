@@ -162,8 +162,11 @@ export function notifiesAssignee(change: { from: string | null; to: string | nul
   return change.actorId !== change.to
 }
 
-export function ticketAssignedMessage(ticket: { number: string; title: string }, by: string | null): string {
-  return by ? `${by} assigned ticket ${ticket.number} to you: ${ticket.title}` : `Ticket ${ticket.number} was assigned to you: ${ticket.title}`
+// The notification's text: who assigned it, or round robin, or neither
+// (the system)
+export function ticketAssignedMessage(ticket: { number: string; title: string }, by: { name: string | null; roundRobin?: boolean }): string {
+  if (by.roundRobin) return `Ticket ${ticket.number} was assigned to you by round robin: ${ticket.title}`
+  return by.name ? `${by.name} assigned ticket ${ticket.number} to you: ${ticket.title}` : `Ticket ${ticket.number} was assigned to you: ${ticket.title}`
 }
 
 export const ticketHref = (id: string) => `/dashboard/tickets/${id}`

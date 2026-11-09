@@ -8,6 +8,7 @@ import { recordAudit, type AuditEntryInput } from "@/lib/audit-log"
 import { ticketAssigneeAudit, ticketCreatedAudit } from "@/lib/ticket-audit"
 import { nextRoundRobinAssignee } from "@/lib/round-robin"
 import type { TimelineAction } from "@/lib/timeline-actions"
+import { notifyTicketAssignee } from "@/lib/ticket-notifications"
 
 // Creating a ticket, shared by POST /api/tickets (a person) and the later
 // mailbox and NinjaOne phases (the system). Every ticket starts with a
@@ -117,5 +118,14 @@ async function createTicketIn(tx: Prisma.TransactionClient, input: NewTicket, no
     await recordAudit(tx, { companyId: input.companyId, actorId: null, entries: audit, at: now })
   }
   await writeInitialNote(tx, { companyId: input.companyId, subject, authorId, html: noteHtml, createdAt: now })
+  // The assignee hears about it, unless they made the ticket themselves
+  await notifyTicketAssignee(tx, {
+    companyId: input.companyId,
+    ticket: created,
+    from: null,
+    to: created.assignee?.id ?? null,
+    actorId: input.createdById,
+    roundRobin: !!roundRobin,
+  })
   return created
 }
