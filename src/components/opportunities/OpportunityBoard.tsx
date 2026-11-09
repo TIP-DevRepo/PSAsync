@@ -22,6 +22,7 @@ import {
   type UniqueIdentifier,
 } from "@dnd-kit/core"
 import { cn } from "@/lib/utils"
+import { BOARD_GRID } from "@/components/ui/blocks"
 import {
   boardColumns,
   CLOSED_COLUMN_DAYS,
@@ -126,26 +127,25 @@ export function OpportunityBoard({
       }}
       accessibility={{ announcements }}
     >
-      {/* Columns keep their width; the board scrolls sideways instead of squeezing them */}
-      <div className="-mx-1 overflow-x-auto px-1 pb-3">
-        <div className="flex w-max gap-4">
-          {columns.map((column) => (
-            <StageColumn
-              key={column.stage.id}
-              column={column}
-              canEdit={canEdit}
-              dragging={activeId !== null}
-              activeId={activeId}
-              draggedRecently={draggedRecently}
-              listHref={listHref(column.stage.id)}
-            />
-          ))}
-        </div>
+      {/* Columns share the width equally, never below their minimum; the
+          board scrolls sideways only when they can't fit (BOARD_GRID) */}
+      <div className={cn(BOARD_GRID, "pb-3")}>
+        {columns.map((column) => (
+          <StageColumn
+            key={column.stage.id}
+            column={column}
+            canEdit={canEdit}
+            dragging={activeId !== null}
+            activeId={activeId}
+            draggedRecently={draggedRecently}
+            listHref={listHref(column.stage.id)}
+          />
+        ))}
       </div>
 
       <DragOverlay dropAnimation={{ duration: 200, easing: "cubic-bezier(0.2, 0, 0, 1)" }}>
         {activeCard ? (
-          <div className="rotate-2 scale-[1.03] cursor-grabbing rounded-lg shadow-popover">
+          <div className="rotate-2 scale-[1.03] cursor-grabbing rounded-card shadow-popover">
             <CardBody card={activeCard} />
           </div>
         ) : null}
@@ -178,8 +178,8 @@ function StageColumn({
       ref={setNodeRef}
       aria-labelledby={headingId}
       className={cn(
-        "flex w-72 shrink-0 flex-col rounded-lg border bg-muted/40 transition-colors duration-150",
-        isOver ? "border-primary bg-primary/5 ring-2 ring-primary/40" : dragging ? "border-dashed border-primary/40" : "border-border"
+        "flex min-w-0 flex-col rounded-card border bg-surface-2 transition-colors duration-150",
+        isOver ? "border-acc bg-acc-tint ring-2 ring-acc/40" : dragging ? "border-dashed border-acc-ink/40" : "border-border"
       )}
     >
       <header className="space-y-1 border-b border-border px-3 py-2.5">
@@ -208,7 +208,7 @@ function StageColumn({
       {olderCount > 0 && (
         <Link
           href={listHref}
-          className="border-t border-border px-3 py-2 text-xs font-medium text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
+          className="border-t border-border px-3 py-2 text-xs font-medium text-acc-ink hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring"
         >
           {olderCount} older, view in list
         </Link>
@@ -264,13 +264,13 @@ function CardBody({ card, link = false }: { card: OpportunityRow; link?: boolean
   const shown = opportunityDisplayValue(card)
   const value = shown === null ? "-" : formatCents(valueCents(shown))
   return (
-    <article className="space-y-1.5 rounded-lg border border-border bg-card p-3 pr-9 text-sm shadow-card transition-shadow duration-200 ease-out hover:shadow-elevated">
-      <p className="text-xs font-medium tabular-nums text-muted-foreground">{card.number}</p>
+    <article className="space-y-1.5 rounded-card border border-border bg-card p-3 pr-9 text-sm transition-shadow duration-200 ease-out hover:shadow-elevated">
+      <p className="text-xs font-semibold tabular-nums text-acc-ink">{card.number}</p>
       {link ? (
         <Link
           href={`/dashboard/opportunities/${card.id}`}
           draggable={false}
-          className="block font-semibold leading-snug text-foreground after:absolute after:inset-0 after:rounded-lg focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
+          className="block font-semibold leading-snug text-foreground after:absolute after:inset-0 after:rounded-card focus-visible:outline-none focus-visible:after:ring-2 focus-visible:after:ring-ring"
         >
           <span className="line-clamp-2 break-words">{card.title}</span>
         </Link>
@@ -289,7 +289,7 @@ function CardBody({ card, link = false }: { card: OpportunityRow; link?: boolean
       <div className="flex items-center justify-between gap-2 text-xs">
         <span className="shrink-0 text-muted-foreground">Close {formatDateOnly(card.expectedCloseDate)}</span>
         {card.team && (
-          <span className="min-w-0 truncate rounded-full bg-brand-secondary-500/10 px-2 py-0.5 font-medium text-brand-secondary-500" title={`Team ${card.team.name}`}>
+          <span className="min-w-0 truncate rounded-full bg-acc-tint px-2 py-0.5 font-semibold text-acc-ink" title={`Team ${card.team.name}`}>
             {card.team.name}
           </span>
         )}

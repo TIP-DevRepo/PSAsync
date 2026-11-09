@@ -14,9 +14,11 @@ import { ClientContactPicker } from "@/components/ClientContactPicker"
 import { useClientLocations } from "./useClientLocations"
 import type { ClientContactValue } from "@/lib/client-contact-choice"
 
+// The design's form fields: 8px corners, the light surface fill, a 36px
+// minimum height, and the label small and muted above
 const FIELD =
-  "w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-const LABEL = "mb-1 block text-sm font-medium text-foreground"
+  "min-h-9 w-full rounded-control border border-border bg-surface-2 px-2.5 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+const LABEL = "mb-1 block text-[13px] font-medium text-muted-foreground"
 
 export function NewOpportunityModal({
   stages,
@@ -159,7 +161,10 @@ export function NewOpportunityModal({
 
   return (
     <Modal maxWidth="xl" scrollable onClose={saving ? undefined : onClose}>
-      <h2 className="text-lg font-bold text-foreground">New opportunity</h2>
+      <div>
+        <h2 className="text-xl font-bold tracking-[-0.01em] text-foreground">New opportunity</h2>
+        <p className="mt-1 text-[13px] text-muted-foreground">Starts unassigned unless you choose an owner.</p>
+      </div>
 
       <form
         className="space-y-4"
@@ -336,7 +341,7 @@ export function NewOpportunityModal({
         </div>
 
         {invisibleWarning && !visibleAfterSave ? (
-          <div role="alert" className="space-y-3 rounded-md bg-warning/10 px-3 py-3 text-sm text-foreground">
+          <div role="alert" className="space-y-3 rounded-card bg-warn-tint px-4 py-3 text-sm text-foreground">
             <p>{INVISIBLE_AFTER_SAVE_MESSAGE}</p>
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" onClick={() => setInvisibleWarning(false)} disabled={saving} autoFocus>
@@ -348,11 +353,11 @@ export function NewOpportunityModal({
             </div>
           </div>
         ) : (
-          <div className="flex justify-end gap-2">
-            <Button type="button" variant="outline" onClick={onClose} disabled={saving}>
+          <div className="flex justify-end gap-2 border-t border-border pt-4">
+            <Button type="button" variant="outline" size="lg" onClick={onClose} disabled={saving}>
               Cancel
             </Button>
-            <Button type="submit" disabled={saving}>
+            <Button type="submit" size="lg" className="px-3.5" disabled={saving}>
               {saving ? "Creating..." : "Create opportunity"}
             </Button>
           </div>

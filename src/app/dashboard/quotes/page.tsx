@@ -18,6 +18,7 @@ import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
 import { sortUsersByName } from "@/lib/user-picker"
 import { newQuoteHref, readOpportunityParam } from "@/lib/opportunity-quote-rules"
+import { useRowDensity } from "@/components/AppearanceProvider"
 
 // ─── Types ────────────────────────────────────────────────────────────────
 interface Quote {
@@ -331,7 +332,8 @@ function QuotesTab() {
   const [commentsFor, setCommentsFor] = useState<Quote | null>(null)
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
-  const [density, setDensity] = useState<Density>("default")
+  // The user's own row density (My settings > Appearance)
+  const density = useRowDensity()
   const selectAllRef = useRef<HTMLInputElement>(null)
 
   function loadQuotes() {
@@ -519,18 +521,6 @@ function QuotesTab() {
           </Button>
         </div>
         <div className="flex items-center gap-2">
-          <select
-            value={density}
-            onChange={(e) => {
-              setDensity(e.target.value as Density)
-              e.target.blur()
-            }}
-            className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            <option value="compact">Compact rows</option>
-            <option value="default">Default rows</option>
-            <option value="comfortable">Comfortable rows</option>
-          </select>
           <Button variant="outline" size="sm" onClick={handleExportCsv}>
             Export to CSV
           </Button>

@@ -41,10 +41,10 @@ export const actionButtonSelect = {
   sortOrder: true,
 } satisfies Prisma.ActionButtonSelect
 
-// Today's success and danger tokens (globals.css) as hex, so Won and Lost
-// keep their colors
-export const WON_BUTTON_COLOR = "#3A9742"
-export const LOST_BUTTON_COLOR = "#E62B34"
+// The default Won and Lost colors (src/lib/timeline-buttons.ts); a button
+// still holding one shows in the fixed status colors on records
+import { WON_BUTTON_COLOR, LOST_BUTTON_COLOR } from "@/lib/timeline-buttons"
+export { WON_BUTTON_COLOR, LOST_BUTTON_COLOR }
 // The CompanySettings defaults, for a company that never set its brand
 const BRAND_PRIMARY_FALLBACK = "#1B3A5C"
 const BRAND_ACCENT_FALLBACK = "#2E86AB"

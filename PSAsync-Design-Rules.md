@@ -4,6 +4,108 @@ Compiled from all 63 UX pattern breakdowns at [designmotionhq.com/patterns](http
 
 **How to use this:** when building or redesigning a component, check the relevant section(s) below first. Each pattern includes a "PSAsync relevance" note where there's an obvious connection to something in our roadmap or existing code.
 
+## PSAsync theme and building blocks (read this first)
+
+The approved look is `docs/design/ui-refresh-mockup.html` (its sample data is not real). Everything in this section is how that design is built in the app. **New screens use the building blocks and theme variables below, never hardcoded colors** (no `bg-white`, `text-gray-500`, `text-red-600`, `#hex` in a class, and no `dark:` color overrides). A color that isn't here yet goes into `src/lib/theme.ts` first.
+
+### Theme resolution
+
+Colors are a theme, worked out by `resolveTheme(company, user)` in `src/lib/theme.ts`:
+
+1. The user's own choice (My settings > Appearance, the `UserPreferences` row) for each of accent, sidebar style, and mode, but only while the company allows personal colors (`CompanySettings.allowUserTheme`, on by default).
+2. Otherwise, or for anything the user left empty, the company default (Settings > Company Settings > Appearance: `themeAccent`, `themeSidebar`, `themeMode`).
+3. Otherwise the PSAsync default: accent `#5E56E0` (PSAsync indigo), dark sidebar, light mode.
+
+**The default mode is Light for now.** It goes back to Match my computer (`DEFAULT_MODE = "SYSTEM"` in `src/lib/theme.ts`) once every page below is restyled, so nobody whose computer is in dark mode lands on a page that breaks in it. Companies and users can still choose Dark or Match my computer.
+
+Invalid stored values fall back the same way. Row density is always the user's own. The staff app's layout writes the theme on the server (`StaffTheme`: `themeCss`, both modes on the html element, a `prefers-color-scheme` query for match my computer), so nothing flashes; the Appearance page previews a change on the whole page with `previewTheme` (`src/lib/theme-preview.ts`). Customer facing output (the portal, quote PDFs, emails) keeps the company's brand colors from Company Info & Branding.
+
+### Pages not yet restyled
+
+These still hardcode colors (`bg-white`, `text-gray-*`, `text-red-*`, hex values) and look wrong in dark mode. Each one moves to the theme variables and building blocks in a later branch; when the list is empty, the default mode goes back to Match my computer. The number is how many hardcoded color classes each holds today.
+
+- `src/components/quotes/LineItemBuilder.tsx` (83)
+- `src/app/portal/[token]/page.tsx` (67) and `src/app/portal/[token]/AcceptFlowModal.tsx` (11): always light anyway (signed out pages, below)
+- `src/app/login/page.tsx` (18): always light anyway
+- Settings panels: `RolesPermissionsPanel` (14), `MicrosoftSettingsPanel` (14), `DistributorSettingsPanel` (13), `QuoteSettingsPanel` (9), `ApprovalWorkflowsPanel` (6), `UsersSettingsPanel` (5), `SalesOrderSettingsPanel` (3), `NotificationSettingsPanel` (3), `CompanySettingsPanel` (1)
+- Quote pages: `src/app/dashboard/quotes/new/page.tsx` (9), `src/app/dashboard/quotes/page.tsx` (7), `src/app/dashboard/quotes/templates/[id]/page.tsx` (4)
+- Others: `src/components/ContactSearchInput.tsx` (6), `src/components/roles/RoleColorPicker.tsx` (4), `src/components/NoAccess.tsx` (2), `src/components/ui/sheet.tsx` (1), and the New vendor, client, and catalog item pages and the vendor detail page (1 each)
+
+### Signed out pages are always light
+
+The customer portal, the sign in page, the forced password change page, and every other page outside `/dashboard` show the PSAsync default theme in light mode, whatever the company, the user, or the computer prefers. The root layout only ever writes that light default (`publicThemeCss`); the staff app's layout (`src/app/dashboard/layout.tsx`, through `StaffTheme`) adds the signed in user's theme and the light or dark class, and `PublicLightMode` clears a dark class left over when someone navigates out of the staff app. Quote PDFs and emails build their own HTML and never used the theme.
+
+### Theme variables
+
+Every value exists for light and dark. Use the Tailwind names in the second column.
+
+| Variable | Tailwind | Use it for |
+|---|---|---|
+| `--ps-bg` | `bg-background` | The page behind cards |
+| `--ps-surface` | `bg-card`, `bg-surface` | Cards, panels, the top bar, menus |
+| `--ps-surface-2` | `bg-surface-2` | Table header rows, row hover, form field fill, toolbars |
+| `--ps-border` | `border-border` | Every hairline |
+| `--ps-text` | `text-foreground` | Body text and values |
+| `--ps-muted` | `text-muted-foreground` | Labels, helper text, timestamps |
+| `--ps-neu-tint` | `bg-neu-tint` | Neutral pills and count chips |
+| `--ps-acc` / `--ps-acc-on` | `bg-acc text-acc-on` | Filled accent surfaces: the main button, the logo tile, the user avatar |
+| `--ps-acc-tint` / `--ps-acc-ink` | `bg-acc-tint text-acc-ink` | Selected and current things, accent pills, banners |
+| `--ps-acc-ink` | `text-acc-ink` | Links and record numbers (readable on surface, page, and tint) |
+| `--ps-ok`, `--ps-warn`, `--ps-bad` and their `-tint` | `text-ok bg-ok-tint` and so on | Status only (below) |
+| `--ps-sb-*` | `bg-sb-bg`, `text-sb-text`, `text-sb-muted`, `bg-sb-active`, `bg-sb-hover`, `border-sb-border`, `bg-sb-badge` | The sidebar only; they follow its dark, light, or tinted style |
+
+The older names follow the theme too, so existing screens keep working: `--primary` and HeroUI's `--accent` are the accent ink (with `--ps-ink-on` text), `brand-primary-*` and `brand-secondary-*` are built from the ink, and the shared `Button` fills with `--ps-acc`. Prefer the new names in new code.
+
+Text is always at least 4.5 to 1 and accent fills at least 3 to 1 against the surface, for all ten presets and any custom color, in both modes (`buildTheme` nudges a color only when the design's own value would fall short). The text on an accent fill is picked automatically (white or near black).
+
+### Status colors
+
+Fixed for everyone and never following the accent, so they always mean the same thing:
+
+- **ok** (green): won, resolved, done.
+- **warn** (amber): waiting on customer, needs attention soon, closing this month.
+- **bad** (red): lost, overdue, urgent, deleted, errors.
+- **neutral** (gray): on hold, draft, counts, anything without a meaning of its own.
+- **accent**: open, current, selected; the record's own color.
+
+The default Won and Lost action buttons show as the ok and bad tints; any other action button keeps the color its admin chose.
+
+### Page width
+
+- List and board pages fill the full width of the content area, with no max width container: the page header, stat tiles, toolbar, and the list or board all stretch with the screen. Use `ListPage` (or the `LIST_PAGE` classes) from `src/components/ui/blocks.tsx` as the page's outer column.
+- Boards use `BOARD_GRID`: equal flexible columns (`grid-auto-flow: column`, `grid-auto-columns: minmax(240px, 1fr)`), so the six default stages fit a 1920px screen with the sidebar open and stretch on bigger ones. A board scrolls sideways, inside its own box, only when its columns can't fit at the 240px minimum (a small screen or phone, or more stages). Columns never get narrower than that.
+- Record pages use `RECORD_LAYOUT` under their header card: the main column (tabs and timeline) takes the remaining width and the info cards keep a fixed 360px column on the right from `lg` up; below that they stack.
+- Tables keep their fixed column widths and scroll sideways inside their own box when the page is narrower than their minimum; a wider page just gives them more room.
+- Forms and settings pages (Appearance, My settings) keep their readable max width.
+
+### Spacing and radius scale
+
+- Radius: controls (buttons, inputs, view tabs) 8px `rounded-control`; cards, side panels, timeline entries, stat tiles 12px `rounded-card`; page sections, record header cards, table frames 14px `rounded-panel`; pills `rounded-full`.
+- Page padding 24px top, 28px sides (16px at phone width). Gaps: 18 to 20px between page sections, 12px between stat tiles, 14px between timeline entries, 8px between buttons.
+- Card padding: sections 20px by 22px, side panels 16px, timeline cards 16px by 18px.
+- Type: page and record titles 26px bold with -0.02em tracking; card headings 16px semibold; panel headings 12px uppercase semibold with 0.08em tracking; body 14px; labels, tabs counts, and timestamps 12 to 13px. Numbers use `tabular-nums`. The font is Geist.
+- Controls are at least 36px tall (34px for view tabs). Cards separate with borders, not shadows.
+
+### Building blocks (`src/components/ui/blocks.tsx`)
+
+`blocks.tsx` is not a client module: its blocks are plain markup, so server components (like My settings) and client components both use them, and passing an icon component (`icon={Palette}`) is fine. A block that handles events is a client component in its own file and takes icons as rendered elements (`icon: <Columns3 size={15} aria-hidden="true" />`), since a server component can't hand a component or function to a client one.
+
+- **PageHeader**: a list or settings page's title, a line under it, and its own actions. Pass `breadcrumbs`; the trail shows in the top bar. A page's single primary action (New opportunity) goes in the top bar with `TopbarAction` (`src/components/layout/TopbarSlots.tsx`) instead.
+- **Breadcrumbs** (`src/components/Breadcrumbs.tsx`): rendered by every page as before; it moves itself into the top bar. Earlier crumbs are muted links, the current page bold.
+- **Card** and **CardHeader**: any bordered section. `size="panel"` for page sections, `size="card"` for smaller groups.
+- **RecordHeaderCard**: the top of a record page: icon tile, title line (a name and the record's number), the line under it, pills and a More actions menu on the right, the action buttons row, and a summary strip of key facts. Destructive actions go in the More actions menu, not as a standing button.
+- **StatusPill**: a short tinted label in one of the tones above (`shape="tag"` for the squarer kind tag on timeline cards).
+- **IconTile**: a tinted square holding an icon (52px in a record header, 38px in a stat tile).
+- **CountBadge**: a small count after a tab or menu entry; tabs take `count` directly.
+- **StatTile** in a **StatRow**: a few numbers at the top of a list page. Work them out from data the page already has; never add a query just for a tile.
+- **ViewTabs** (`src/components/ui/view-tabs.tsx`, a client component): saved view switches (Board and List, My tickets and Unassigned), pressed buttons with optional counts and an icon element.
+- **InitialsAvatar**: a person's initials; accent for the current user, neutral for others and the system.
+- **InfoPanelCard** with **InfoField**: a side panel group, uppercase heading, label above value. `InlineEditField` sits inside as is, its hover outline is the field's box.
+- **TABLE** classes and **DENSITY_PADDING**: the table frame and toolbar, a tinted header row, a hover on each row, record numbers in the accent ink, and row padding from the user's row density (`useRowDensity`). Columns keep fixed widths and the table scrolls sideways below them; never squeeze a column.
+- **Appearance controls** (`src/components/appearance/AppearanceControls.tsx`): the accent swatches with the custom color and readability check, the sidebar style cards, the mode switch, row density, status colors, and an accessible `Switch`.
+
+Every block has visible focus rings, real buttons with labels, and `aria-label`s on icon only buttons. Layouts wrap at phone width, and the sidebar folds into the top bar's menu button.
+
 ---
 
 ## Motion

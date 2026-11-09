@@ -150,6 +150,18 @@ export function presetStageId(button: ActionButtonDefinition, stages: readonly {
 
 export const DEFAULT_BUTTON_COLOR = "#1B3A5C"
 
+// The colors the default Won and Lost buttons are made with. A button
+// still holding one shows in the fixed status colors (the success and
+// danger tints, src/lib/theme.ts) instead, so Won and Lost read the same
+// in every theme and mode; any other color is the admin's and shows as is.
+export const WON_BUTTON_COLOR = "#3A9742"
+export const LOST_BUTTON_COLOR = "#E62B34"
+
+export function statusToneForButtonColor(color: string): "ok" | "bad" | null {
+  const c = color.toUpperCase()
+  return c === WON_BUTTON_COLOR ? "ok" : c === LOST_BUTTON_COLOR ? "bad" : null
+}
+
 export function isHexColor(value: unknown): value is string {
   return typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value)
 }

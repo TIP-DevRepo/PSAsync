@@ -120,7 +120,7 @@ function LoginPage() {
       setLoading(false)
     } else {
       // Full navigation, not router.push: the root layout (and
-      // CompanyThemeProvider within it) is shared with the dashboard route,
+      // the theme it writes, src/lib/theme.ts) is shared with the dashboard route,
       // so a client-side transition would reuse the pre-login Router Cache
       // entry and serve the default theme until a manual refresh.
       window.location.href = "/dashboard"

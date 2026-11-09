@@ -19,7 +19,7 @@ import {
   User,
   type LucideIcon,
 } from "lucide-react"
-import { buttonTextColor, type ActionButtonDefinition, type ActionButtonIcon } from "@/lib/timeline-buttons"
+import { buttonTextColor, statusToneForButtonColor, type ActionButtonDefinition, type ActionButtonIcon } from "@/lib/timeline-buttons"
 import { cn } from "@/lib/utils"
 
 export const ACTION_BUTTON_ICON_COMPONENTS: Record<ActionButtonIcon, LucideIcon> = {
@@ -42,8 +42,10 @@ export const ACTION_BUTTON_ICON_COMPONENTS: Record<ActionButtonIcon, LucideIcon>
 }
 
 // One button as it shows on a record: a rounded pill filled with the
-// button's color, its text white or near black for contrast. Also the live
-// preview in Settings > Action Buttons.
+// button's color, its text white or near black for contrast. The default
+// Won and Lost colors show as the fixed success and danger tints instead
+// (statusToneForButtonColor). Also the live preview in Settings > Action
+// Buttons.
 export function ActionButtonPill({
   label,
   icon,
@@ -65,18 +67,21 @@ export function ActionButtonPill({
   as?: "button" | "span"
 }) {
   const Icon = ACTION_BUTTON_ICON_COMPONENTS[icon] ?? StickyNote
-  const style = { backgroundColor: color, borderColor: color, color: buttonTextColor(color) }
+  const tone = statusToneForButtonColor(color)
+  const style = tone ? undefined : { backgroundColor: color, borderColor: color, color: buttonTextColor(color) }
   const className = cn(
-    "inline-flex shrink-0 items-center gap-1.5 whitespace-nowrap rounded-full border px-3.5 py-1.5 text-sm font-medium transition-[filter] duration-100",
+    "inline-flex min-h-9 shrink-0 items-center gap-[7px] whitespace-nowrap rounded-full border px-3.5 py-2 text-[13px] font-semibold transition-[filter] duration-100",
+    tone === "ok" && "border-ok-tint bg-ok-tint text-ok",
+    tone === "bad" && "border-bad-tint bg-bad-tint text-bad",
     as === "button" &&
       "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background",
-    as === "button" && !unavailableReason && "hover:brightness-110",
+    as === "button" && !unavailableReason && "hover:brightness-[0.96]",
     unavailableReason && "cursor-not-allowed opacity-50",
     pressed && "ring-2 ring-ring ring-offset-2 ring-offset-background"
   )
   const content = (
     <>
-      <Icon size={15} aria-hidden="true" />
+      <Icon size={16} strokeWidth={2} aria-hidden="true" />
       {label}
     </>
   )

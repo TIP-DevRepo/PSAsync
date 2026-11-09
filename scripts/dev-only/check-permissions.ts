@@ -568,6 +568,8 @@ const SETTINGS_GUARDED: Guarded[] = [
   { name: "Change distributor settings", method: "PATCH", path: () => "/api/distributor-settings/INGRAM_MICRO", body: () => ({ enabled: true }), expectError: "change distributor settings" },
   { name: "Edit company settings", method: "PATCH", path: () => "/api/company-settings", body: () => ({ name: "Changed" }), expectError: "edit company settings" },
   { name: "Upload a company logo", method: "POST", path: () => "/api/company-settings/logo", expectError: "change the company logo" },
+  { name: "Company appearance", method: "GET", path: () => "/api/company-settings/appearance", expectError: "edit company settings" },
+  { name: "Save company appearance", method: "PATCH", path: () => "/api/company-settings/appearance", body: () => ({ themeAccent: "#DC2626", allowUserTheme: false }), expectError: "edit company settings" },
   { name: "Change Microsoft settings", method: "PATCH", path: () => "/api/microsoft-settings", body: () => ({ microsoftTenantId: "00000000-0000-0000-0000-000000000000" }), expectError: "configure Microsoft integration" },
   { name: "Edit quote settings", method: "PATCH", path: () => "/api/quote-settings", body: () => ({ quotePrefix: "NOPE" }), expectError: "edit quote settings" },
   { name: "Invite a user", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: "should-not-exist@example.test", tempPassword: "ShouldNotExist123" }), expectError: "invite users" },
@@ -1784,6 +1786,8 @@ async function snapshot(prisma: PrismaClient, b: string, c: string): Promise<Rec
       select: { quoteSendFromMode: true, quoteSendFromConnectionId: true, updatedAt: true },
     }),
     company: prisma.company.findUnique({ where: { id: b }, select: { name: true, logoUrl: true, secondaryLogoUrl: true } }),
+    // Every user's own appearance preferences, in both companies
+    preferences: prisma.userPreferences.findMany({ where: { user: { companyId: { in: [b, c] } } }, ...byId }),
     salesOrders: prisma.salesOrder.findMany({
       where: { companyId: b },
       ...byId,
@@ -4224,6 +4228,11 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // never gives one back
     await checkRecordNumbering(prisma, sessions.admin, ctx, rows)
 
+    // Appearance: each user reads and saves only their own preferences, bad
+    // values are refused, personal colors can be turned off, and the company
+    // defaults need the company settings permission
+    await checkAppearancePreferences(prisma, sessions, ctx, rows)
+
     // Tickets: round robin in rotation, status timestamps, the audit flow
     // (undo, delete, restore), and the daily auto close job on Test Company B only
     await checkTicketRoundRobin(prisma, sessions.admin, ctx, rows)
@@ -4465,4 +4474,123 @@ if (isEntryScript("check-permissions")) {
       console.error(err instanceof Error ? err.message : err)
       process.exit(err instanceof HarnessBroken ? 2 : 1)
     })
+}
+
+// My settings > Appearance (PATCH /api/account/preferences) and the company
+// defaults (/api/company-settings/appearance). Test Everyone B saves its own
+// colors and row density (a body naming Test Admin B is ignored), bad hex and
+// enum values are refused with nothing written, Test Manager B (no company
+// settings permission) can't change the company defaults, and with personal
+// colors turned off a color change is refused while row density still
+// saves. Everything is put back.
+async function checkAppearancePreferences(prisma: PrismaClient, sessions: Record<Actor, Session>, ctx: AttemptContext, rows: Row[]) {
+  const push = (who: string, name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[${who}] Appearance: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const everyoneId = ctx.fx.everyoneUserId
+  const adminId = ctx.b.adminId
+  const prefsOf = (userId: string) => prisma.userPreferences.findUnique({ where: { userId } })
+  const companySelect = { themeAccent: true, themeSidebar: true, themeMode: true, allowUserTheme: true } as const
+  const savedCompany = await prisma.companySettings.findUnique({ where: { companyId: ctx.b.companyId }, select: companySelect })
+  const savedEveryone = await prefsOf(everyoneId)
+  const savedAdmin = JSON.stringify(await prefsOf(adminId))
+  const everyone = sessions.everyone
+
+  try {
+    // Own row, saved and read back; the body's userId means nothing
+    let res = await everyone.request("PATCH", "/api/account/preferences", {
+      json: { themeAccent: "#2563eb", themeSidebar: "TINTED", themeMode: "DARK", rowDensity: "COMPACT", userId: adminId },
+    })
+    let row = await prefsOf(everyoneId)
+    push(
+      "Everyone B",
+      "save own colors and density",
+      "200, saved on own row",
+      String(res.status),
+      res.status !== 200
+        ? `got ${res.status}: ${errorText(res.text)}`
+        : row?.themeAccent !== "#2563EB" || row.themeSidebar !== "TINTED" || row.themeMode !== "DARK" || row.rowDensity !== "COMPACT"
+          ? "the saved row does not hold the new values"
+          : JSON.stringify(await prefsOf(adminId)) !== savedAdmin
+            ? "Test Admin B's preferences changed"
+            : null
+    )
+    res = await everyone.request("GET", "/api/account/preferences")
+    push("Everyone B", "read own preferences", "200, own values", String(res.status), res.status !== 200 ? `got ${res.status}` : !res.text.includes("#2563EB") || !res.text.includes("COMPACT") ? "own values missing" : null)
+
+    // Bad values: 400 and nothing written
+    const bad: [string, Record<string, unknown>][] = [
+      ["three digit hex", { themeAccent: "#FFF" }],
+      ["named color", { themeAccent: "red" }],
+      ["lower case sidebar", { themeSidebar: "dark" }],
+      ["unknown mode", { themeMode: "AUTO" }],
+      ["unknown density", { rowDensity: "TIGHT" }],
+    ]
+    for (const [name, body] of bad) {
+      const before = JSON.stringify(await prefsOf(everyoneId))
+      res = await everyone.request("PATCH", "/api/account/preferences", { json: body })
+      const changed = JSON.stringify(await prefsOf(everyoneId)) !== before
+      push("Everyone B", `refuse ${name}`, "400", String(res.status), res.status !== 400 ? `got ${res.status}: ${errorText(res.text)}` : changed ? "data changed" : null)
+    }
+
+    // The company defaults need settingsSections.company
+    res = await sessions.manager.request("PATCH", "/api/company-settings/appearance", { json: { allowUserTheme: false } })
+    const afterManager = await prisma.companySettings.findUnique({ where: { companyId: ctx.b.companyId }, select: companySelect })
+    push(
+      "Manager B",
+      "refuse company appearance",
+      "403",
+      String(res.status),
+      res.status !== 403 ? `got ${res.status}: ${errorText(res.text)}` : JSON.stringify(afterManager) !== JSON.stringify(savedCompany) ? "company appearance changed" : null
+    )
+
+    // Personal colors off: colors refused, row density still saves
+    res = await sessions.admin.request("PATCH", "/api/company-settings/appearance", { json: { allowUserTheme: false, themeAccent: "#475569" } })
+    push("Admin B", "turn personal colors off", "200", String(res.status), res.status !== 200 ? `got ${res.status}: ${errorText(res.text)}` : null)
+    const lockedBefore = JSON.stringify(await prefsOf(everyoneId))
+    res = await everyone.request("PATCH", "/api/account/preferences", { json: { themeAccent: "#DC2626" } })
+    push(
+      "Everyone B",
+      "color change refused while turned off",
+      "403 THEME_LOCKED",
+      String(res.status),
+      res.status !== 403 || !res.text.includes("THEME_LOCKED")
+        ? `got ${res.status}: ${errorText(res.text)}`
+        : JSON.stringify(await prefsOf(everyoneId)) !== lockedBefore
+          ? "data changed"
+          : null
+    )
+    res = await everyone.request("GET", "/api/account/preferences")
+    push(
+      "Everyone B",
+      "sees the company theme while turned off",
+      "200, company accent",
+      String(res.status),
+      res.status !== 200 ? `got ${res.status}` : !res.text.includes('"theme":{"accent":"#475569"') ? "the resolved theme is not the company's" : null
+    )
+    res = await everyone.request("PATCH", "/api/account/preferences", { json: { rowDensity: "COMFORTABLE" } })
+    row = await prefsOf(everyoneId)
+    push(
+      "Everyone B",
+      "row density still saves while turned off",
+      "200",
+      String(res.status),
+      res.status !== 200 ? `got ${res.status}: ${errorText(res.text)}` : row?.rowDensity !== "COMFORTABLE" ? "row density not saved" : null
+    )
+  } finally {
+    await prisma.companySettings.updateMany({
+      where: { companyId: ctx.b.companyId },
+      data: {
+        themeAccent: savedCompany?.themeAccent ?? null,
+        themeSidebar: savedCompany?.themeSidebar ?? null,
+        themeMode: savedCompany?.themeMode ?? null,
+        allowUserTheme: savedCompany?.allowUserTheme ?? true,
+      },
+    })
+    if (savedEveryone) {
+      const { themeAccent, themeSidebar, themeMode, rowDensity } = savedEveryone
+      await prisma.userPreferences.update({ where: { userId: everyoneId }, data: { themeAccent, themeSidebar, themeMode, rowDensity } })
+    } else {
+      await prisma.userPreferences.deleteMany({ where: { userId: everyoneId } })
+    }
+  }
 }

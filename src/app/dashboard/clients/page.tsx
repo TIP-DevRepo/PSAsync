@@ -12,6 +12,7 @@ import { CLIENT_IMPORT_FIELDS, CLIENT_EXPORT_HEADERS, clientToExportRow } from "
 import { formatPhoneDisplay } from "@/lib/phone"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
+import { useRowDensity } from "@/components/AppearanceProvider"
 
 interface Client {
   id: string
@@ -105,7 +106,8 @@ function ClientsListPageContent() {
   const [statusFilter, setStatusFilter] = useState("ALL")
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null)
   const [sortDirection, setSortDirection] = useState<SortDirection>(null)
-  const [density, setDensity] = useState<Density>("default")
+  // The user's own row density (My settings > Appearance)
+  const density = useRowDensity()
   const [showImportModal, setShowImportModal] = useState(false)
 
   function loadClients() {
@@ -216,18 +218,6 @@ function ClientsListPageContent() {
             <option value="LOST">Lost</option>
           </select>
         </div>
-        <select
-          value={density}
-          onChange={(e) => {
-            setDensity(e.target.value as Density)
-            e.target.blur()
-          }}
-          className="rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-        >
-          <option value="compact">Compact rows</option>
-          <option value="default">Default rows</option>
-          <option value="comfortable">Comfortable rows</option>
-        </select>
       </div>
 
       <div className="max-h-[70vh] overflow-y-auto overflow-x-auto rounded-lg border border-border bg-card shadow-card">

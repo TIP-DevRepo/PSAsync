@@ -3,7 +3,6 @@
 import { useState, useEffect, useCallback } from "react"
 import { useRouter } from "next/navigation"
 import { Bell, X } from "lucide-react"
-import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -98,15 +97,20 @@ export function NotificationBell() {
 
   return (
     <DropdownMenu>
+      {/* The design's bell: a bordered square, with a dot while anything is
+          unread. The count is in the label and the tooltip. */}
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="icon" className="relative">
-          <Bell className="h-5 w-5" />
+        <button
+          type="button"
+          aria-label={unreadCount > 0 ? `Notifications, ${unreadCount} unread` : "Notifications"}
+          title={unreadCount > 0 ? `${unreadCount} unread` : undefined}
+          className="relative flex h-[38px] w-[38px] shrink-0 items-center justify-center rounded-control border border-border bg-card text-muted-foreground transition-colors hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+        >
+          <Bell size={18} strokeWidth={1.8} aria-hidden="true" />
           {unreadCount > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-medium text-danger-foreground">
-              {unreadCount > 9 ? "9+" : unreadCount}
-            </span>
+            <span aria-hidden="true" className="absolute right-2 top-[7px] h-2 w-2 rounded-full border-2 border-card bg-bad" />
           )}
-        </Button>
+        </button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 bg-popover border-border shadow-popover">
         <div className="flex items-center justify-between px-2 py-1.5">

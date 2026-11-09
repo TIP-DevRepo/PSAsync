@@ -1,10 +1,13 @@
 "use client"
 
 import { useState, useRef, useLayoutEffect } from "react"
+import { CountBadge } from "@/components/ui/blocks"
 
 export interface TabItem<T extends string> {
   key: T
   label: string
+  // A count chip after the label (the design's tab counts); none when left out
+  count?: number
 }
 
 interface TabsBarProps<T extends string> {
@@ -43,7 +46,7 @@ export function TabsBar<T extends string>({ tabs, activeTab, onChange, ariaLabel
     <div
       role="tablist"
       aria-label={ariaLabel}
-      className="relative flex gap-4 border-b border-border text-sm overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="relative flex gap-1 border-b border-border text-sm overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
       {tabs.map((tab, idx) => {
         const isActive = activeTab === tab.key
@@ -60,16 +63,17 @@ export function TabsBar<T extends string>({ tabs, activeTab, onChange, ariaLabel
             tabIndex={isActive ? 0 : -1}
             onClick={() => onChange(tab.key)}
             onKeyDown={(e) => handleKeyDown(e, idx)}
-            className={`pb-2 whitespace-nowrap rounded-t-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 ${
+            className={`inline-flex items-center gap-1.5 px-3 py-2.5 whitespace-nowrap rounded-t-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring ${
               isActive ? "font-semibold text-foreground" : "text-muted-foreground hover:text-foreground"
             }`}
           >
             {tab.label}
+            {tab.count !== undefined && <CountBadge count={tab.count} label={`${tab.count}`} />}
           </button>
         )
       })}
       <div
-        className="absolute bottom-0 h-0.5 bg-primary transition-[left,width] duration-300"
+        className="absolute bottom-0 h-0.5 bg-acc transition-[left,width] duration-300"
         style={{ left: indicator.left, width: indicator.width, transitionTimingFunction: "cubic-bezier(0.34, 1.56, 0.64, 1)" }}
       />
     </div>

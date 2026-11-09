@@ -88,6 +88,16 @@ model CompanySettings {
   primaryColor String @default("#1B3A5C")
   accentColor  String @default("#2E86AB")
 
+  // Appearance defaults for the app itself (src/lib/theme.ts). Null means
+  // the company hasn't chosen, and the PSAsync default applies: accent
+  // #5E56E0, dark sidebar, match the computer. Customer facing output (the
+  // portal, quote PDFs, emails) keeps using primaryColor and accentColor.
+  themeAccent    String?
+  themeSidebar   ThemeSidebarStyle?
+  themeMode      ThemeMode?
+  // Off: every user sees the company theme and can't pick their own colors
+  allowUserTheme Boolean            @default(true)
+
   // Email settings
   microsoftClientId     String?
   microsoftTenantId     String?
@@ -178,6 +188,41 @@ model User {
   deletedTickets              Ticket[]                   @relation("TicketDeletedBy")
   ticketAttachments           TicketAttachment[]
   roundRobinLastForTeams      Team[]                     @relation("TeamRoundRobinLastUser")
+  preferences                 UserPreferences?
+}
+
+// ─── USER PREFERENCES ────────────────────────────────────────────────────────
+// One row per user, made on their first save. Every field is optional:
+// null means use the company default (src/lib/theme.ts resolveTheme), and
+// the theme fields only count while the company allows personal colors.
+model UserPreferences {
+  id           String             @id @default(cuid())
+  userId       String             @unique
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  themeAccent  String?
+  themeSidebar ThemeSidebarStyle?
+  themeMode    ThemeMode?
+  rowDensity   RowDensity?
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+}
+
+enum ThemeSidebarStyle {
+  DARK
+  LIGHT
+  TINTED
+}
+
+enum ThemeMode {
+  LIGHT
+  DARK
+  SYSTEM
+}
+
+enum RowDensity {
+  COMPACT
+  DEFAULT
+  COMFORTABLE
 }
 
 // ─── SESSION (Auth.js) ───────────────────────────────────────────────────────

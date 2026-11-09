@@ -24,7 +24,7 @@ export function isHexColor(value: unknown): value is string {
 }
 
 // For rendering a stored brand color into CSS. Also allows the 4 and 8
-// digit forms CompanyThemeProvider already accepts, so any color that
+// digit forms the app theme used to accept, so any color that
 // renders in the app renders the same here. Anything else falls back.
 export function safeHexColor(value: string | null | undefined, fallback: string): string {
   return value && /^#([0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(value) ? value : fallback

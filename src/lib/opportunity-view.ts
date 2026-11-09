@@ -330,3 +330,37 @@ export function addressLines(location: ClientLocationSummary): string[] {
   const cityLine = [[location.city, location.state].filter(Boolean).join(", "), location.zip].filter(Boolean).join(" ")
   return [location.address, location.address2, cityLine, location.country].filter((line): line is string => !!line && line.trim() !== "")
 }
+
+// ─── Stat tiles ─────────────────────────────────────────────────────────────
+
+export interface OpportunityStats {
+  open: number
+  unassigned: number
+  closingThisMonth: number
+  wonThisMonth: number
+}
+
+// The Opportunities page's stat tiles, worked out from the rows it already
+// loaded (so they follow its search, team, and owner): open ones, open ones
+// with no owner, open ones whose expected close date is this month, and
+// ones closed into a Won stage this month. "This month" is the viewer's
+// own calendar month; an expected close date is a calendar date (midnight
+// UTC), so it is compared as one.
+export function opportunityStats(rows: readonly OpportunityRow[], now: Date): OpportunityStats {
+  const month = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
+  const localMonth = (iso: string) => {
+    const d = new Date(iso)
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+  }
+  const stats: OpportunityStats = { open: 0, unassigned: 0, closingThisMonth: 0, wonThisMonth: 0 }
+  for (const o of rows) {
+    if (o.stage.category === "OPEN") {
+      stats.open++
+      if (!o.owner) stats.unassigned++
+      if (o.expectedCloseDate && o.expectedCloseDate.slice(0, 7) === month) stats.closingThisMonth++
+    } else if (o.stage.category === "WON" && o.closedAt && localMonth(o.closedAt) === month) {
+      stats.wonThisMonth++
+    }
+  }
+  return stats
+}

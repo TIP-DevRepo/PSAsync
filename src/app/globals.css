@@ -36,9 +36,12 @@
   --color-info-bg: var(--info-bg);
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-sans);
-  --font-mono: var(--font-geist-mono);
-  --font-heading: var(--font-sans);
+  /* Geist (next/font in src/app/layout.tsx sets --font-geist-sans on the
+     html element). Never point --font-sans at itself: the loop makes it
+     invalid and every page falls back to the browser serif. */
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+  --font-heading: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -80,34 +83,57 @@
   --shadow-card: var(--shadow-card);
   --shadow-elevated: var(--shadow-elevated);
   --shadow-popover: var(--shadow-popover);
+  /* The theme variables themselves (src/lib/theme.ts), for the building
+     blocks: bg-acc text-acc-on, bg-acc-tint text-acc-ink, bg-ok-tint
+     text-ok, bg-sb-bg, and so on */
+  --color-acc: var(--ps-acc);
+  --color-acc-on: var(--ps-acc-on);
+  --color-acc-tint: var(--ps-acc-tint);
+  --color-acc-ink: var(--ps-acc-ink);
+  --color-surface-2: var(--ps-surface-2);
+  --color-neu-tint: var(--ps-neu-tint);
+  --color-ok: var(--ps-ok);
+  --color-ok-tint: var(--ps-ok-tint);
+  --color-warn: var(--ps-warn);
+  --color-warn-tint: var(--ps-warn-tint);
+  --color-bad: var(--ps-bad);
+  --color-bad-tint: var(--ps-bad-tint);
+  --color-sb-bg: var(--ps-sb-bg);
+  --color-sb-text: var(--ps-sb-text);
+  --color-sb-muted: var(--ps-sb-muted);
+  --color-sb-active: var(--ps-sb-active);
+  --color-sb-active-text: var(--ps-sb-active-text);
+  --color-sb-hover: var(--ps-sb-hover);
+  --color-sb-border: var(--ps-sb-border);
+  --color-sb-badge: var(--ps-sb-badge);
+  --color-sb-badge-text: var(--ps-sb-badge-text);
+  /* The radius scale: controls 8px, cards 12px, record and section cards 14px */
+  --radius-control: 8px;
+  --radius-card: 12px;
+  --radius-panel: 14px;
 }
 
+/* ─── Theme ─────────────────────────────────────────────────────────────
+   Every color below comes from the --ps-* theme variables, which the root
+   layout writes on the html element for the signed in user's theme
+   (src/lib/theme.ts: the company default, or the user's own choice when
+   the company allows it). Both modes are written there, :root for light
+   and :root.dark for dark, so the blocks here only map the older names
+   (shadcn, HeroUI, brand-primary/brand-secondary) onto them and every
+   existing component follows the theme and dark mode without changes.
+   PSAsync-Design-Rules.md lists the variables and when to use each. */
 :root {
   color-scheme: light;
-  /* ─── Brand base colors ───────────────────────────────────────────────
-     Overridden per-company at runtime by CompanyThemeProvider, which
-     injects each company's actual primaryColor/accentColor from Settings.
-     These are just fallback values used before that loads (or if a page
-     renders with no company context, e.g. the login screen).
 
-     NAMING NOTE: "brand-primary" always means the company's MAIN brand
-     color (Settings → primaryColor), and "brand-secondary" always means
-     their second color (Settings → accentColor). This is deliberately
-     NOT called "brand-accent" — HeroUI v3 renamed its own "primary"
-     concept to a variable literally named --accent, so using "accent" for
-     our secondary brand hue would collide with an unrelated meaning in
-     every HeroUI component. --accent below is wired to brand-primary,
-     matching both shadcn's --primary and HeroUI's --accent to the SAME
-     real color, which is what actually makes the two libraries look
-     unified. */
-  --brand-primary-base: oklch(0.52 0.19 275);
-  --brand-secondary-base: oklch(0.6 0.15 300);
+  /* The brand scale now follows the accent. Its readable "ink" form is the
+     base, so text-brand-primary-500 and the tinted pill pattern
+     (bg-brand-secondary-500/10 text-brand-secondary-500) stay readable
+     with every accent, in both modes. Customer facing output (the portal,
+     quote PDFs, emails) still uses the company's primaryColor and
+     accentColor from Company Info & Branding, not these. */
+  --brand-primary-base: var(--ps-acc-ink);
+  --brand-secondary-base: var(--ps-acc-ink);
 
-  /* Full 50-900 scale generated from the one base color above, using
-     OKLCH color-mix so every step stays perceptually even. Lighter tints
-     mix toward white, darker shades mix toward black. This regenerates
-     automatically the instant --brand-primary-base/--brand-secondary-base
-     change — no JS color math needed anywhere. */
   --brand-primary-50: color-mix(in oklch, var(--brand-primary-base) 8%, white);
   --brand-primary-100: color-mix(in oklch, var(--brand-primary-base) 16%, white);
   --brand-primary-200: color-mix(in oklch, var(--brand-primary-base) 30%, white);
@@ -130,67 +156,91 @@
   --brand-secondary-800: color-mix(in oklch, var(--brand-secondary-base) 55%, black);
   --brand-secondary-900: color-mix(in oklch, var(--brand-secondary-base) 40%, black);
 
-  /* ─── Semantic status colors ──────────────────────────────────────────
-     Fixed regardless of company branding — a success/error/warning
-     should mean the same thing everywhere. Replaces the ad-hoc
-     text-green-600/text-amber-600/text-red-600 classes used throughout
-     the app today with one real source of truth per status. */
-  --success: oklch(0.6 0.15 145);
-  --success-bg: oklch(0.96 0.03 145);
-  --warning: oklch(0.75 0.15 80);
-  --warning-bg: oklch(0.97 0.04 80);
-  --danger: oklch(0.6 0.22 25);
-  --danger-bg: oklch(0.96 0.03 25);
-  --info: oklch(0.6 0.15 235);
+  /* ─── Status colors: fixed for everyone (src/lib/theme.ts STATUS_COLORS),
+     never following the accent. Info isn't one of them and keeps its own
+     fixed blue. */
+  --success: var(--ps-ok);
+  --success-bg: var(--ps-ok-tint);
+  --success-foreground: #ffffff;
+  --success-soft: var(--ps-ok-tint);
+  --success-soft-foreground: var(--ps-ok);
+  --warning: var(--ps-warn);
+  --warning-bg: var(--ps-warn-tint);
+  --warning-foreground: #ffffff;
+  --warning-soft: var(--ps-warn-tint);
+  --warning-soft-foreground: var(--ps-warn);
+  --danger: var(--ps-bad);
+  --danger-bg: var(--ps-bad-tint);
+  --danger-foreground: #ffffff;
+  --danger-soft: var(--ps-bad-tint);
+  --danger-soft-foreground: var(--ps-bad);
+  --info: oklch(0.52 0.15 235);
   --info-bg: oklch(0.96 0.03 235);
 
-  --background: oklch(0.95 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(0.985 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(0.985 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --surface: oklch(0.985 0 0);
-  --surface-hover: oklch(0.93 0 0);
-  --primary: var(--brand-primary-600);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.93 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.93 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  /* --accent is the ONE variable HeroUI's own components read directly
-     for their primary/main-action color — set to the real brand color,
-     not a pale tint, so HeroUI components visually match our Button's
-     "default" variant instead of rendering washed-out */
-  --accent: var(--brand-primary-600);
-  --accent-foreground: oklch(0.985 0 0);
-  --accent-hover: color-mix(in oklch, var(--brand-primary-600) 85%, black);
+  /* ─── Neutrals ─────────────────────────────────────────────────────── */
+  --background: var(--ps-bg);
+  --foreground: var(--ps-text);
+  --card: var(--ps-surface);
+  --card-foreground: var(--ps-text);
+  --popover: var(--ps-surface);
+  --popover-foreground: var(--ps-text);
+  --surface: var(--ps-surface);
+  --surface-foreground: var(--ps-text);
+  --surface-hover: var(--ps-surface-2);
+  --secondary: var(--ps-neu-tint);
+  --secondary-foreground: var(--ps-text);
+  --muted: var(--ps-neu-tint);
+  --muted-foreground: var(--ps-muted);
+  --border: var(--ps-border);
+  --input: var(--ps-border);
+  --separator: var(--ps-border);
+
+  /* ─── Accent ──────────────────────────────────────────────────────────
+     --primary and HeroUI's --accent are used both as text (text-primary
+     links) and as fills, so they take the readable ink with its own text
+     color. The shared Button fills with the exact accent (--ps-acc, with
+     --ps-acc-on text), as the design shows. */
+  --primary: var(--ps-acc-ink);
+  --primary-foreground: var(--ps-ink-on);
+  --accent: var(--ps-acc-ink);
+  --accent-foreground: var(--ps-ink-on);
+  --accent-hover: color-mix(in oklch, var(--ps-acc-ink) 88%, black);
+  --accent-soft: var(--ps-acc-tint);
+  --accent-soft-foreground: var(--ps-acc-ink);
   --destructive: var(--danger);
-  --border: oklch(0.85 0 0);
-  --input: oklch(0.85 0 0);
-  --ring: var(--brand-primary-500);
+  --ring: var(--ps-acc-ink);
+  --focus: var(--ps-acc-ink);
+
+  /* HeroUI's own field and overlay names */
+  --default: var(--ps-neu-tint);
+  --default-foreground: var(--ps-text);
+  --overlay: var(--ps-surface);
+  --overlay-foreground: var(--ps-text);
+  --field-background: var(--ps-surface);
+  --field-foreground: var(--ps-text);
+  --field-placeholder: var(--ps-muted);
+  --field-border: var(--ps-border);
+
   --chart-1: oklch(0.87 0 0);
   --chart-2: oklch(0.556 0 0);
   --chart-3: oklch(0.439 0 0);
   --chart-4: oklch(0.371 0 0);
   --chart-5: oklch(0.269 0 0);
   --radius: 0.625rem;
-  --sidebar: oklch(0.93 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: var(--brand-primary-600);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.90 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.85 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
 
-  /* ─── Layered shadows (light mode only — see Depth Layers pattern) ────
-     Two shadows stacked per token: a tight, slightly-dark contact shadow
-     plus a wide, soft ambient one. This is what makes flat cards read as
-     "lifted" instead of just having a border. Deliberately NOT used as
-     heavily in dark mode — on a near-black surface, shadows barely
-     register, so dark mode leans on the surface-tier + hairline-border
-     system instead (see .dark below). */
+  /* ─── Sidebar: follows the sidebar style (dark, light, tinted) ──────── */
+  --sidebar: var(--ps-sb-bg);
+  --sidebar-foreground: var(--ps-sb-text);
+  --sidebar-primary: var(--ps-sb-active);
+  --sidebar-primary-foreground: var(--ps-sb-active-text);
+  --sidebar-accent: var(--ps-sb-hover);
+  --sidebar-accent-foreground: var(--ps-sb-text);
+  --sidebar-border: var(--ps-sb-border);
+  --sidebar-ring: var(--ps-sb-text);
+
+  /* ─── Layered shadows (light mode only) ───────────────────────────────
+     The new building blocks (src/components/ui/blocks.tsx) separate with
+     borders as the design does; these stay for popovers and older cards. */
   --shadow-card: 0 1px 2px oklch(0 0 0 / 0.06), 0 4px 12px oklch(0 0 0 / 0.05);
   --shadow-elevated: 0 2px 4px oklch(0 0 0 / 0.08), 0 12px 24px oklch(0 0 0 / 0.08);
   --shadow-popover: 0 4px 8px oklch(0 0 0 / 0.10), 0 16px 40px oklch(0 0 0 / 0.12);
@@ -198,56 +248,16 @@
 
 .dark {
   color-scheme: dark;
-  /* Per our Dark Mode pattern reference: base on near-black, never pure
-     black, and desaturate accent colors ~20% so they don't vibrate
-     against the dark surface */
-  --background: oklch(0.22 0 0);
-  --foreground: oklch(0.96 0 0);
-  --card: oklch(0.27 0 0);
-  --card-foreground: oklch(0.96 0 0);
-  --popover: oklch(0.29 0 0);
-  --popover-foreground: oklch(0.96 0 0);
-  --surface: oklch(0.27 0 0);
-  --surface-hover: oklch(0.32 0 0);
-  --primary: var(--brand-primary-400);
-  --primary-foreground: oklch(0.16 0 0);
-  --secondary: oklch(0.30 0 0);
-  --secondary-foreground: oklch(0.96 0 0);
-  --muted: oklch(0.30 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: var(--brand-primary-400);
-  --accent-foreground: oklch(0.16 0 0);
-  --accent-hover: color-mix(in oklch, var(--brand-primary-400) 85%, white);
-  --destructive: var(--danger);
-  --success: oklch(0.65 0.13 145);
-  --success-bg: oklch(0.25 0.04 145);
-  --warning: oklch(0.78 0.13 80);
-  --warning-bg: oklch(0.27 0.05 80);
-  --danger: oklch(0.68 0.19 25);
-  --danger-bg: oklch(0.25 0.04 25);
-  --info: oklch(0.68 0.13 235);
+  /* Text on the lighter dark mode status colors reads in near black */
+  --success-foreground: #141821;
+  --warning-foreground: #141821;
+  --danger-foreground: #141821;
+  --info: oklch(0.72 0.12 235);
   --info-bg: oklch(0.25 0.04 235);
-  --border: oklch(1 0 0 / 12%);
-  --input: oklch(1 0 0 / 18%);
-  --ring: var(--brand-primary-400);
-  --chart-1: oklch(0.87 0 0);
-  --chart-2: oklch(0.556 0 0);
-  --chart-3: oklch(0.439 0 0);
-  --chart-4: oklch(0.371 0 0);
-  --chart-5: oklch(0.269 0 0);
-  --sidebar: oklch(0.18 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: var(--brand-primary-400);
-  --sidebar-primary-foreground: oklch(0.16 0 0);
-  --sidebar-accent: oklch(0.27 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 12%);
-  --sidebar-ring: var(--brand-primary-400);
+  --accent-hover: color-mix(in oklch, var(--ps-acc-ink) 88%, white);
 
-  /* Dark mode shadows: much lower opacity, black barely reads on a dark
-     surface — kept mainly for popovers/menus that float above content,
-     where SOME separation cue still helps even if subtle. Cards rely on
-     the border + surface-tier system above instead. */
+  /* Dark mode leans on borders and surface tiers; shadows only help
+     popovers and menus that float above content */
   --shadow-card: none;
   --shadow-elevated: 0 4px 12px oklch(0 0 0 / 0.3);
   --shadow-popover: 0 8px 24px oklch(0 0 0 / 0.45);

@@ -3,8 +3,9 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from "react"
 import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
-import { ChevronRight, Target } from "lucide-react"
+import { ChevronRight } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { NAV_ROW, NavIcon, navRowState } from "./sidebar"
 import { OPPORTUNITIES_CHANGED_EVENT, opportunityFolderHref, OWNER_UNASSIGNED } from "@/lib/opportunity-view"
 import type { SidebarCounts } from "@/lib/team-rules"
 
@@ -40,17 +41,19 @@ function subscribeOpen(onChange: () => void) {
   }
 }
 
+// The folder rows, as the design draws a sidebar folder: smaller rows under
+// a thin line, each count in the muted sidebar text
 const ROW =
-  "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-const ROW_IDLE = "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-const ROW_CURRENT = "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+  "flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-[7px] px-2.5 py-1.5 text-[13px] text-sb-text transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
+const ROW_IDLE = "hover:bg-sb-hover"
+const ROW_CURRENT = "bg-sb-hover font-semibold"
 const CHEVRON_BUTTON =
-  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+  "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-sb-muted hover:bg-sb-hover hover:text-sb-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-sidebar-ring"
 
 function Count({ value }: { value: number | undefined }) {
   if (value === undefined) return null
   return (
-    <span className="ml-auto shrink-0 text-xs tabular-nums" aria-label={`${value} open`}>
+    <span className="ml-auto shrink-0 text-xs tabular-nums text-sb-muted" aria-label={`${value} open`}>
       {value}
     </span>
   )
@@ -64,8 +67,10 @@ function Count({ value }: { value: number | undefined }) {
 // folder). A team opens the board filtered to it, a member to that team and
 // owner, Unassigned to that team's unassigned ones. Counts reload when the
 // folder opens, when the window regains focus, and when a page reports a
-// change (notifyOpportunitiesChanged). The mobile menu shows the same
-// folder; the sidebar has no collapsed mode.
+// change (notifyOpportunitiesChanged). The entry's badge is the total open
+// count from the same request, so the counts also load (once) while the
+// folder is closed. The mobile menu shows the same folder; the sidebar has
+// no collapsed mode.
 export function OpportunitiesFolder({ isActive }: { isActive: boolean }) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -90,15 +95,18 @@ export function OpportunitiesFolder({ isActive }: { isActive: boolean }) {
       })
   }, [])
 
+  // Once for the badge, again whenever the folder opens; while open, also on
+  // focus. A reported change always reloads, since the badge shows it.
+  useEffect(() => {
+    load()
+    window.addEventListener(OPPORTUNITIES_CHANGED_EVENT, load)
+    return () => window.removeEventListener(OPPORTUNITIES_CHANGED_EVENT, load)
+  }, [load])
   useEffect(() => {
     if (!open) return
     load()
     window.addEventListener("focus", load)
-    window.addEventListener(OPPORTUNITIES_CHANGED_EVENT, load)
-    return () => {
-      window.removeEventListener("focus", load)
-      window.removeEventListener(OPPORTUNITIES_CHANGED_EVENT, load)
-    }
+    return () => window.removeEventListener("focus", load)
   }, [open, load])
 
   const isExpanded = (teamId: string) => expanded.get(teamId) ?? teamId === currentTeam
@@ -112,15 +120,17 @@ export function OpportunitiesFolder({ isActive }: { isActive: boolean }) {
   return (
     <div>
       <div className="flex items-center gap-1">
-        <Link
-          href="/dashboard/opportunities"
-          className={cn(
-            "flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            isActive ? "bg-sidebar-primary text-sidebar-primary-foreground" : "text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+        <Link href="/dashboard/opportunities" aria-current={isActive ? "page" : undefined} className={cn(NAV_ROW, "flex-1", navRowState(isActive))}>
+          <NavIcon name="opp" />
+          <span className="min-w-0 flex-1 truncate">Opportunities</span>
+          {counts && (
+            <span
+              aria-label={`${counts.total} open`}
+              className="min-w-5 rounded-full bg-sb-badge px-1.5 py-px text-center text-[11px] font-semibold tabular-nums text-sb-badge-text"
+            >
+              {counts.total}
+            </span>
           )}
-        >
-          <Target className="h-4 w-4" />
-          Opportunities
         </Link>
         <button
           type="button"
@@ -135,14 +145,14 @@ export function OpportunitiesFolder({ isActive }: { isActive: boolean }) {
       </div>
 
       {open && (
-        <ul id="sidebar-opportunities-folder" className="ml-4 mt-1 space-y-0.5 border-l border-sidebar-border pl-2">
+        <ul id="sidebar-opportunities-folder" className="mb-1.5 ml-5 mt-0.5 space-y-0.5 border-l border-sb-border pl-2.5">
           <li>
             <Link href={opportunityFolderHref()} className={rowClass(onBoard && !currentTeam && !currentOwner)}>
               <span className="truncate">All opportunities</span>
               <Count value={counts?.total} />
             </Link>
           </li>
-          {counts === null && <li className="px-2 py-1.5 text-xs text-muted-foreground">Loading...</li>}
+          {counts === null && <li className="px-2.5 py-1.5 text-xs text-sb-muted">Loading...</li>}
           {counts?.teams.map((team) => {
             const teamOpen = isExpanded(team.id)
             const groupId = `sidebar-team-${team.id}`
