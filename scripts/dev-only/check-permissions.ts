@@ -572,6 +572,9 @@ const SETTINGS_GUARDED: Guarded[] = [
   { name: "Remove the secondary company logo", method: "DELETE", path: () => "/api/company-settings/logo?slot=secondary", expectError: "change the company logo" },
   { name: "Company appearance", method: "GET", path: () => "/api/company-settings/appearance", expectError: "edit company settings" },
   { name: "Save company appearance", method: "PATCH", path: () => "/api/company-settings/appearance", body: () => ({ themeAccent: "#DC2626", allowUserTheme: false }), expectError: "edit company settings" },
+  { name: "Company sidebar", method: "GET", path: () => "/api/company-settings/sidebar", expectError: "edit company settings" },
+  { name: "Save company sidebar", method: "PATCH", path: () => "/api/company-settings/sidebar", body: () => ({ allowUserSidebar: false, layout: { defaultViews: { tickets: "all" } } }), expectError: "edit company settings" },
+  { name: "Reset company sidebar", method: "DELETE", path: () => "/api/company-settings/sidebar", expectError: "edit company settings" },
   { name: "Change Microsoft settings", method: "PATCH", path: () => "/api/microsoft-settings", body: () => ({ microsoftTenantId: "00000000-0000-0000-0000-000000000000" }), expectError: "configure Microsoft integration" },
   { name: "Edit quote settings", method: "PATCH", path: () => "/api/quote-settings", body: () => ({ quotePrefix: "NOPE" }), expectError: "edit quote settings" },
   { name: "Invite a user", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: "should-not-exist@example.test", tempPassword: "ShouldNotExist123" }), expectError: "invite users" },
@@ -4472,6 +4475,11 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // defaults need the company settings permission
     await checkAppearancePreferences(prisma, sessions, ctx, rows)
 
+    // Sidebar layouts: the company layout needs the company settings
+    // permission, each user saves and resets only their own, bad values are
+    // refused, and personal layouts can be turned off
+    await checkSidebarPreferences(prisma, sessions, ctx, rows)
+
     // Company logos: removing one needs the upload permission, clears it,
     // and the portal and quote PDFs still render without it
     await checkLogoRemoval(prisma, sessions, ctx, rows)
@@ -4841,6 +4849,215 @@ async function checkAppearancePreferences(prisma: PrismaClient, sessions: Record
     if (savedEveryone) {
       const { themeAccent, themeSidebar, themeMode, rowDensity } = savedEveryone
       await prisma.userPreferences.update({ where: { userId: everyoneId }, data: { themeAccent, themeSidebar, themeMode, rowDensity } })
+    } else {
+      await prisma.userPreferences.deleteMany({ where: { userId: everyoneId } })
+    }
+  }
+}
+
+// Sidebar layouts (/api/company-settings/sidebar and /api/account/sidebar).
+// Test Admin B saves the company layout (unknown pages and a made up or
+// foreign team dropped) and resets it; Test Manager B (no company settings
+// permission) is refused; bad values are refused with 400; Test Everyone B
+// saves, reads, and resets its own layout (never anyone else's), and is
+// refused with 403 SIDEBAR_LOCKED while the company switch is off, when it
+// sees the company layout but may still reset its own. Everything is put
+// back.
+async function checkSidebarPreferences(prisma: PrismaClient, sessions: Record<Actor, Session>, ctx: AttemptContext, rows: Row[]) {
+  const push = (who: string, name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[${who}] Sidebar: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const everyoneId = ctx.fx.everyoneUserId
+  const adminId = ctx.b.adminId
+  const companySelect = { sidebarLayout: true, allowUserSidebar: true } as const
+  const companyNow = () => prisma.companySettings.findUnique({ where: { companyId: ctx.b.companyId }, select: companySelect })
+  const prefsOf = (userId: string) => prisma.userPreferences.findUnique({ where: { userId }, select: { sidebarLayout: true } })
+  const savedCompany = await companyNow()
+  const savedEveryone = await prefsOf(everyoneId)
+  const savedAdmin = JSON.stringify(await prefsOf(adminId))
+  const everyone = sessions.everyone
+  const admin = sessions.admin
+  // The stored layout as plain data
+  type Stored = { sections?: Record<string, string[]>; folders?: Record<string, { teamOrder?: string[]; openByDefault?: boolean }>; defaultViews?: Record<string, string> }
+  const stored = (value: unknown) => (value && typeof value === "object" ? (value as Stored) : null)
+  const status = (res: { status: number; text: string }, want: number) => (res.status !== want ? `got ${res.status}: ${errorText(res.text)}` : null)
+
+  try {
+    // ── Company layout ──
+    let res = await admin.request("PATCH", "/api/company-settings/sidebar", {
+      json: {
+        allowUserSidebar: true,
+        layout: {
+          sections: { work: ["opportunities", "made-up-page", "dashboard", "tickets"], notASection: ["dashboard"] },
+          folders: { tickets: { teamOrder: [ctx.b.salesTeamId, ctx.fakeId, ctx.c.generalTeamId, ctx.b.generalTeamId], openByDefault: true } },
+          defaultViews: { tickets: "mine", opportunities: "list" },
+        },
+        companyId: ctx.c.companyId,
+      },
+    })
+    let company = await companyNow()
+    let layout = stored(company?.sidebarLayout)
+    push(
+      "Admin B",
+      "save the company layout",
+      "200, unknown keys and foreign teams dropped",
+      String(res.status),
+      status(res, 200) ??
+        (JSON.stringify(layout?.sections) !== JSON.stringify({ work: ["opportunities", "dashboard", "tickets"] })
+          ? `stored sections are ${JSON.stringify(layout?.sections)}`
+          : JSON.stringify(layout?.folders?.tickets) !== JSON.stringify({ teamOrder: [ctx.b.salesTeamId, ctx.b.generalTeamId], openByDefault: true })
+            ? `stored tickets folder is ${JSON.stringify(layout?.folders?.tickets)}`
+            : layout?.defaultViews?.tickets !== "mine" || layout?.defaultViews?.opportunities !== "list"
+              ? "default views not saved"
+              : null)
+    )
+    res = await admin.request("GET", "/api/company-settings/sidebar")
+    push(
+      "Admin B",
+      "read the company layout",
+      "200, saved order and own teams",
+      String(res.status),
+      status(res, 200) ??
+        (!res.text.includes('"work":["opportunities","dashboard","tickets"]')
+          ? "the saved order is not the effective one"
+          : !res.text.includes(ctx.b.generalTeamId)
+            ? "its own teams are missing"
+            : res.text.includes(ctx.c.generalTeamId)
+              ? "the response holds Test Company C's team"
+              : null)
+    )
+
+    // The company layout needs settingsSections.company
+    const beforeManager = JSON.stringify(await companyNow())
+    res = await sessions.manager.request("PATCH", "/api/company-settings/sidebar", { json: { allowUserSidebar: false } })
+    push("Manager B", "refuse saving the company layout", "403", String(res.status), status(res, 403) ?? (JSON.stringify(await companyNow()) !== beforeManager ? "the company layout changed" : null))
+    res = await sessions.manager.request("DELETE", "/api/company-settings/sidebar")
+    push("Manager B", "refuse resetting the company layout", "403", String(res.status), status(res, 403) ?? (JSON.stringify(await companyNow()) !== beforeManager ? "the company layout changed" : null))
+
+    // Bad company values: 400 and nothing written
+    const badCompany: [string, Record<string, unknown>][] = [
+      ["an unknown ticket view", { layout: { defaultViews: { tickets: "everything" } } }],
+      ["an unknown opportunity view", { layout: { defaultViews: { opportunities: "calendar" } } }],
+      ["a switch that isn't true or false", { allowUserSidebar: "no" }],
+      ["a section that isn't a list", { layout: { sections: { work: "tickets" } } }],
+      ["a team id that isn't an id", { layout: { folders: { tickets: { teamOrder: ["not an id!"] } } } }],
+      ["a layout that isn't an object", { layout: "board" }],
+    ]
+    for (const [name, body] of badCompany) {
+      const before = JSON.stringify(await companyNow())
+      res = await admin.request("PATCH", "/api/company-settings/sidebar", { json: body })
+      push("Admin B", `refuse ${name}`, "400", String(res.status), status(res, 400) ?? (JSON.stringify(await companyNow()) !== before ? "data changed" : null))
+    }
+
+    // ── A user's own layout ──
+    res = await everyone.request("PATCH", "/api/account/sidebar", {
+      json: { layout: { defaultViews: { tickets: "waiting" }, folders: { opportunities: { openByDefault: true } } }, userId: adminId },
+    })
+    let own = stored((await prefsOf(everyoneId))?.sidebarLayout)
+    push(
+      "Everyone B",
+      "save own layout",
+      "200, saved on own row",
+      String(res.status),
+      status(res, 200) ??
+        (own?.defaultViews?.tickets !== "waiting" || own?.folders?.opportunities?.openByDefault !== true
+          ? `stored layout is ${JSON.stringify(own)}`
+          : JSON.stringify(await prefsOf(adminId)) !== savedAdmin
+            ? "Test Admin B's layout changed"
+            : null)
+    )
+    res = await everyone.request("GET", "/api/account/sidebar")
+    push(
+      "Everyone B",
+      "read own layout over the company's",
+      "200, own view and the company order",
+      String(res.status),
+      status(res, 200) ??
+        (!res.text.includes('"effective":{"sections":{"work":["opportunities","dashboard","tickets"]')
+          ? "the company order is not in effect"
+          : !/"effective":.*"tickets":"waiting"/.test(res.text)
+            ? "its own ticket view is not in effect"
+            : null)
+    )
+
+    // Bad user values: 400 and nothing written
+    const badUser: [string, unknown][] = [
+      ["no layout", { defaultViews: { tickets: "mine" } }],
+      ["an unknown ticket view", { layout: { defaultViews: { tickets: "everything" } } }],
+      ["an open switch that isn't true or false", { layout: { folders: { tickets: { openByDefault: "yes" } } } }],
+      ["a body that isn't an object", ["layout"]],
+    ]
+    for (const [name, body] of badUser) {
+      const before = JSON.stringify(await prefsOf(everyoneId))
+      res = await everyone.request("PATCH", "/api/account/sidebar", { json: body })
+      push("Everyone B", `refuse ${name}`, "400", String(res.status), status(res, 400) ?? (JSON.stringify(await prefsOf(everyoneId)) !== before ? "data changed" : null))
+    }
+
+    // ── Company switch off ──
+    res = await admin.request("PATCH", "/api/company-settings/sidebar", { json: { allowUserSidebar: false } })
+    company = await companyNow()
+    push(
+      "Admin B",
+      "turn personal layouts off",
+      "200, layout kept",
+      String(res.status),
+      status(res, 200) ?? (company?.allowUserSidebar !== false ? "the switch is still on" : stored(company?.sidebarLayout)?.defaultViews?.tickets !== "mine" ? "the company layout changed" : null)
+    )
+    const lockedBefore = JSON.stringify(await prefsOf(everyoneId))
+    res = await everyone.request("PATCH", "/api/account/sidebar", { json: { layout: { defaultViews: { tickets: "all" } } } })
+    push(
+      "Everyone B",
+      "saving refused while turned off",
+      "403 SIDEBAR_LOCKED",
+      String(res.status),
+      res.status !== 403 || !res.text.includes("SIDEBAR_LOCKED")
+        ? `got ${res.status}: ${errorText(res.text)}`
+        : JSON.stringify(await prefsOf(everyoneId)) !== lockedBefore
+          ? "data changed"
+          : null
+    )
+    res = await everyone.request("GET", "/api/account/sidebar")
+    push(
+      "Everyone B",
+      "sees the company layout while turned off",
+      "200, company views",
+      String(res.status),
+      status(res, 200) ?? (!res.text.includes('"allowUserSidebar":false') ? "the switch is not reported off" : !/"effective":.*"tickets":"mine"/.test(res.text) ? "its own layout is still in effect" : null)
+    )
+    res = await everyone.request("DELETE", "/api/account/sidebar")
+    own = stored((await prefsOf(everyoneId))?.sidebarLayout)
+    push("Everyone B", "reset own layout, allowed while turned off", "200, own layout cleared", String(res.status), status(res, 200) ?? (own !== null ? "its own layout is still stored" : null))
+
+    // ── Company reset ──
+    res = await admin.request("DELETE", "/api/company-settings/sidebar")
+    company = await companyNow()
+    layout = stored(company?.sidebarLayout)
+    push(
+      "Admin B",
+      "reset the company layout to the PSAsync default",
+      "200, layout cleared, switch kept",
+      String(res.status),
+      status(res, 200) ??
+        (layout !== null
+          ? "the company layout is still stored"
+          : company?.allowUserSidebar !== false
+            ? "the switch changed"
+            : !res.text.includes('"work":["dashboard","tickets","opportunities"]')
+              ? "the effective layout is not the PSAsync default"
+              : null)
+    )
+  } finally {
+    await prisma.companySettings.updateMany({
+      where: { companyId: ctx.b.companyId },
+      data: {
+        sidebarLayout: savedCompany?.sidebarLayout == null ? Prisma.DbNull : (savedCompany.sidebarLayout as Prisma.InputJsonValue),
+        allowUserSidebar: savedCompany?.allowUserSidebar ?? true,
+      },
+    })
+    if (savedEveryone) {
+      await prisma.userPreferences.update({
+        where: { userId: everyoneId },
+        data: { sidebarLayout: savedEveryone.sidebarLayout == null ? Prisma.DbNull : (savedEveryone.sidebarLayout as Prisma.InputJsonValue) },
+      })
     } else {
       await prisma.userPreferences.deleteMany({ where: { userId: everyoneId } })
     }
