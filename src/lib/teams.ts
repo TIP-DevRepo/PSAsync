@@ -45,6 +45,9 @@ export function toTeamResponse(team: TeamRow, ctx: Pick<AccessContext, "userId" 
     sortOrder: team.sortOrder,
     // New unassigned tickets in this team go round its active members
     roundRobinEnabled: team.roundRobinEnabled,
+    // Whether tickets and opportunities use this team (src/lib/team-modules.ts)
+    usesTickets: team.usesTickets,
+    usesOpportunities: team.usesOpportunities,
     memberCount: team.members.length,
     defaultRoles: team.defaultRoles.map(({ role }) => ({ id: role.id, name: role.name, rank: role.rank, color: role.color, isGlobalAdmin: role.isGlobalAdmin })),
     isMember,
@@ -53,6 +56,8 @@ export function toTeamResponse(team: TeamRow, ctx: Pick<AccessContext, "userId" 
     ...(ctx.can("settingsSections.teams")
       ? {
           members: team.members.map((m) => m.user),
+          openTicketCount: team._count.tickets,
+          openOpportunityCount: team._count.opportunities,
           memberGrantRefusal: roleGrantProblem(ctx.access, team.defaultRoles.map((d) => d.role), "teamMember"),
         }
       : {}),

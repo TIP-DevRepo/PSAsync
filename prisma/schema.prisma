@@ -1433,6 +1433,11 @@ model Team {
   roundRobinEnabled    Boolean  @default(false)
   roundRobinLastUserId String?
   roundRobinLastUser   User?    @relation("TeamRoundRobinLastUser", fields: [roundRobinLastUserId], references: [id], onDelete: SetNull)
+  // Whether tickets and opportunities use this team (src/lib/team-modules.ts).
+  // Off: hidden from that module's folder and pickers, and no new or moved
+  // record may use it; records already on it keep it.
+  usesTickets          Boolean  @default(true)
+  usesOpportunities    Boolean  @default(true)
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 

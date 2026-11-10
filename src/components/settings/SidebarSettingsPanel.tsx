@@ -11,12 +11,13 @@ import { useAccess } from "@/components/AccessProvider"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { diffSidebarLayout, layoutFromResolved, PSASYNC_SIDEBAR_LAYOUT, type SidebarLayout } from "@/lib/sidebar-layout"
+import { teamsForModule, type TeamModuleFlags } from "@/lib/team-modules"
 
 interface CompanySidebar {
   layout: SidebarLayout | null
   allowUserSidebar: boolean
   effective: SidebarLayout
-  teams: SidebarEditorTeam[]
+  teams: (SidebarEditorTeam & TeamModuleFlags)[]
 }
 
 const PSASYNC_LAYOUT = layoutFromResolved(PSASYNC_SIDEBAR_LAYOUT)
@@ -121,7 +122,8 @@ export function SidebarSettingsPanel() {
         value={draft.layout}
         onChange={(layout) => setDraft({ ...draft, layout })}
         canSeeItem={() => true}
-        folderTeams={{ tickets: saved.teams, opportunities: saved.teams }}
+        // Each folder only holds the teams that use its module
+        folderTeams={{ tickets: teamsForModule(saved.teams, "tickets"), opportunities: teamsForModule(saved.teams, "opportunities") }}
       />
 
       <div className="flex flex-wrap items-center justify-end gap-2">

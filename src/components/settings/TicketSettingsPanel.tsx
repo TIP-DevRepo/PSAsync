@@ -25,6 +25,7 @@ import { cn } from "@/lib/utils"
 import { AUTO_CLOSE_DAYS_MAX, AUTO_CLOSE_DAYS_MESSAGE, TICKET_CATEGORY_LABELS, TICKET_NAME_MAX, TICKET_STATUS_CATEGORIES } from "@/lib/ticket-rules"
 import type { TicketOption, TicketStatusOption } from "@/lib/ticket-view"
 import type { TicketStatusCategory } from "@/generated/prisma"
+import { teamsForModule, type TeamModuleFlags } from "@/lib/team-modules"
 
 const FIELD =
   "rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
@@ -269,7 +270,7 @@ interface TicketSettings {
 
 function GeneralSection() {
   const [settings, setSettings] = useState<TicketSettings | null>(null)
-  const [teams, setTeams] = useState<{ id: string; name: string }[]>([])
+  const [teams, setTeams] = useState<({ id: string; name: string } & TeamModuleFlags)[]>([])
   const [prefix, setPrefix] = useState("")
   const [defaultTeamId, setDefaultTeamId] = useState("")
   const [days, setDays] = useState("")
@@ -314,7 +315,9 @@ function GeneralSection() {
     toast.success("Ticket settings saved")
   }
 
-  const teamOptions = teams.some((t) => t.id === defaultTeamId) || !settings ? teams : [{ id: defaultTeamId, name: "Current queue" }, ...teams]
+  // Only queues that use tickets; the saved one stays listed so the field shows it
+  const queues = teamsForModule(teams, "tickets", defaultTeamId)
+  const teamOptions = queues.some((t) => t.id === defaultTeamId) || !settings ? queues : [{ id: defaultTeamId, name: "Current queue" }, ...queues]
 
   return (
     <section className="space-y-4" aria-labelledby="ticket-general-heading">

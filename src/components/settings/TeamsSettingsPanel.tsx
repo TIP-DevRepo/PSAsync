@@ -15,6 +15,7 @@ import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
 import { announcementsFor, DragHandle, errorOf, SectionError, send, useReorderSensors } from "@/components/settings/OpportunitySettingsPanel"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
+import { openRecordsNote, TEAM_MODULE_FIELD, type TeamModule } from "@/lib/team-modules"
 import { sortUsersByName } from "@/lib/user-picker"
 import { cn } from "@/lib/utils"
 import {
@@ -126,6 +127,34 @@ export function TeamsSettingsPanel() {
     toast.success(on ? `Round robin on for ${team.name}` : `Round robin off for ${team.name}`)
   }
 
+  // Use for tickets and Use for opportunities: saved at once. Turning one
+  // off first says how many open records are still on the team (never
+  // blocking); the server refuses the last team using the module, and for
+  // tickets the default queue, and that message shows as is.
+  async function handleModule(team: TeamSummary, module: TeamModule, on: boolean) {
+    const field = TEAM_MODULE_FIELD[module]
+    if (!on) {
+      const open = module === "tickets" ? team.openTicketCount : team.openOpportunityCount
+      const confirmed = await confirmDialog({
+        title: `Stop using ${team.name} for ${module}?`,
+        description: `It will be hidden from the ${module === "tickets" ? "Tickets" : "Opportunities"} folder and every ${module === "tickets" ? "queue" : "team"} picker, and no new or moved ${module} can use it. ${open === undefined ? "" : openRecordsNote(open, module)}`.trim(),
+        confirmLabel: "Turn off",
+      })
+      if (!confirmed) return
+    }
+    setTeams((prev) => prev && prev.map((t) => (t.id === team.id ? { ...t, [field]: on } : t)))
+    setBusy(true)
+    setError(null)
+    const { ok, data } = await send(`/api/teams/${team.id}`, "PATCH", { [field]: on })
+    setBusy(false)
+    if (!ok) {
+      setTeams((prev) => prev && prev.map((t) => (t.id === team.id ? { ...t, [field]: !on } : t)))
+      setError(errorOf(data, `Couldn't change whether ${team.name} is used for ${module}.`))
+      return
+    }
+    toast.success(on ? `${team.name} is used for ${module}` : `${team.name} is no longer used for ${module}`)
+  }
+
   async function handleDelete(team: TeamSummary) {
     const confirmed = await confirmDialog({
       title: `Delete the ${team.name} team?`,
@@ -164,7 +193,15 @@ export function TeamsSettingsPanel() {
         <SortableContext items={teams.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           <ul className="space-y-2">
             {teams.map((team) => (
-              <TeamRow key={team.id} team={team} busy={busy} onEdit={() => setEditing(team)} onDelete={() => handleDelete(team)} onRoundRobin={(on) => handleRoundRobin(team, on)} />
+              <TeamRow
+                key={team.id}
+                team={team}
+                busy={busy}
+                onEdit={() => setEditing(team)}
+                onDelete={() => handleDelete(team)}
+                onRoundRobin={(on) => handleRoundRobin(team, on)}
+                onModule={(module, on) => handleModule(team, module, on)}
+              />
             ))}
           </ul>
         </SortableContext>
@@ -193,12 +230,14 @@ function TeamRow({
   onEdit,
   onDelete,
   onRoundRobin,
+  onModule,
 }: {
   team: TeamSummary
   busy: boolean
   onEdit: () => void
   onDelete: () => void
   onRoundRobin: (on: boolean) => void
+  onModule: (module: TeamModule, on: boolean) => void
 }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: team.id, disabled: busy })
   return (
@@ -228,14 +267,33 @@ function TeamRow({
             team.defaultRoles.map((role) => <RolePill key={role.id} role={role} />)
           )}
         </div>
-        <div className="max-w-md pt-1">
+        <div className="flex max-w-md flex-col gap-3 pt-1">
           <Switch
-            id={`team-round-robin-${team.id}`}
-            checked={team.roundRobinEnabled}
-            onChange={(on) => !busy && onRoundRobin(on)}
-            label="Round robin"
-            description="New tickets left unassigned in this queue go to its active members in turn."
+            id={`team-uses-tickets-${team.id}`}
+            checked={team.usesTickets}
+            onChange={(on) => !busy && onModule("tickets", on)}
+            label="Use for tickets"
+            description={team.usesTickets ? "A ticket queue: it shows in the Tickets folder and queue pickers." : "Hidden from the Tickets folder and queue pickers. Tickets already here keep it."}
           />
+          <Switch
+            id={`team-uses-opportunities-${team.id}`}
+            checked={team.usesOpportunities}
+            onChange={(on) => !busy && onModule("opportunities", on)}
+            label="Use for opportunities"
+            description={
+              team.usesOpportunities ? "It shows in the Opportunities folder and team pickers." : "Hidden from the Opportunities folder and team pickers. Opportunities already here keep it."
+            }
+          />
+          {/* Round robin only means something for a queue that takes tickets */}
+          {team.usesTickets && (
+            <Switch
+              id={`team-round-robin-${team.id}`}
+              checked={team.roundRobinEnabled}
+              onChange={(on) => !busy && onRoundRobin(on)}
+              label="Round robin"
+              description="New tickets left unassigned in this queue go to its active members in turn."
+            />
+          )}
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-3 pt-1">

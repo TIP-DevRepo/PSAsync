@@ -32,7 +32,9 @@ export async function GET() {
 
   const [teams, groups] = await Promise.all([
     prisma.team.findMany({
-      where: { companyId: ctx.companyId, ...(viewer.canViewAll ? {} : { members: { some: { userId: ctx.userId } } }) },
+      // Teams off for tickets aren't in the folder; their open tickets
+      // still count in the total (All tickets)
+      where: { companyId: ctx.companyId, usesTickets: true, ...(viewer.canViewAll ? {} : { members: { some: { userId: ctx.userId } } }) },
       select: {
         id: true,
         name: true,

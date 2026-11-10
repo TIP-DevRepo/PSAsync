@@ -4510,6 +4510,11 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await checkTicketPages(sessions, ACTOR_LABEL, ctx, rows)
     await checkTicketAssignmentNotifications(prisma, sessions, ctx, rows)
 
+    // Teams off for tickets or opportunities: hidden from the folders,
+    // refused for new and moved records, existing records kept, and the
+    // default queue and the last team can't be turned off
+    await checkTeamModules(prisma, sessions.admin, ctx, rows)
+
     // Attachment downloads: the parent's view check, the redirect, and no
     // bucket link in any attachment response
     await checkAttachmentDownloads(prisma, sessions, ACTOR_LABEL, ctx, rows)
@@ -5069,6 +5074,173 @@ async function checkSidebarPreferences(prisma: PrismaClient, sessions: Record<Ac
       })
     } else {
       await prisma.userPreferences.deleteMany({ where: { userId: everyoneId } })
+    }
+  }
+}
+
+// Teams that tickets and opportunities use (Team.usesTickets and
+// Team.usesOpportunities). Test Admin B turns tickets off for the Alerts
+// queue and opportunities off for Sales, then checks: the sidebar folders
+// leave them out (their open records still count in the total); new and
+// moved tickets and opportunities are refused on them with 400 and nothing
+// is written; records already on them still open with their team and still
+// list under All; the default ticket queue and the last team using
+// opportunities can't be turned off (409); a bad value is 400. Every flag
+// is put back.
+async function checkTeamModules(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[Admin B] Team modules: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const status = (res: { status: number; text: string }, want: number) => (res.status !== want ? `got ${res.status}: ${errorText(res.text)}` : null)
+  const companyId = ctx.b.companyId
+  const savedFlags = await prisma.team.findMany({ where: { companyId }, select: { id: true, usesTickets: true, usesOpportunities: true } })
+  const alertsTicket = await prisma.ticket.findUnique({ where: { id: ctx.fx.alertsTicketId }, select: { teamId: true } })
+  const settings = await prisma.ticketSettings.findUnique({ where: { companyId }, select: { defaultTeamId: true } })
+  const alertsTeamId = alertsTicket?.teamId
+  const helpdeskId = settings?.defaultTeamId
+  if (!alertsTeamId || !helpdeskId) {
+    push("fixtures", "Alerts and Helpdesk queues", "missing", "the Alerts ticket or the default ticket queue is missing")
+    return
+  }
+  const salesId = ctx.b.salesTeamId
+  const counts = (path: string) => admin.request("GET", path).then((res) => ({ res, json: res.status === 200 ? (JSON.parse(res.text) as { total: number; teams: { id: string }[] }) : null }))
+  const ticketCount = () => prisma.ticket.count({ where: { companyId } })
+  const opportunityCount = () => prisma.opportunity.count({ where: { companyId } })
+
+  try {
+    // ── Tickets off for Alerts ──
+    const ticketsBefore = await counts("/api/tickets/sidebar-counts")
+    let res = await admin.request("PATCH", `/api/teams/${alertsTeamId}`, { json: { usesTickets: false } })
+    push(
+      "turn tickets off for Alerts",
+      "200, the open count still returned",
+      String(res.status),
+      status(res, 200) ?? (!res.text.includes('"usesTickets":false') ? "the team still uses tickets" : !res.text.includes('"openTicketCount":') ? "no open ticket count" : null)
+    )
+    const ticketsAfter = await counts("/api/tickets/sidebar-counts")
+    push(
+      "the Tickets folder leaves Alerts out, the total keeps its tickets",
+      "200, no Alerts, same total",
+      String(ticketsAfter.res.status),
+      status(ticketsAfter.res, 200) ??
+        (ticketsAfter.json?.teams.some((t) => t.id === alertsTeamId)
+          ? "Alerts is still in the folder"
+          : ticketsAfter.json?.total !== ticketsBefore.json?.total
+            ? `the total changed from ${ticketsBefore.json?.total} to ${ticketsAfter.json?.total}`
+            : null)
+    )
+    res = await admin.request("GET", "/api/company-settings/sidebar")
+    push(
+      "Settings > Sidebar gets the flag to leave Alerts out of the Tickets folder",
+      "200, Alerts marked off",
+      String(res.status),
+      status(res, 200) ?? (!new RegExp(`"id":"${alertsTeamId}"[^}]*"usesTickets":false`).test(res.text) ? "Alerts is not marked off for tickets" : null)
+    )
+
+    let before = await ticketCount()
+    res = await admin.request("POST", "/api/tickets", { json: { title: "Dev check, never saved", initialNote: OPP_NOTE, teamId: alertsTeamId } })
+    push(
+      "refuse a new ticket in Alerts",
+      "400 TEAM_NOT_FOR_MODULE",
+      String(res.status),
+      res.status !== 400 || !res.text.includes("TEAM_NOT_FOR_MODULE") ? `got ${res.status}: ${errorText(res.text)}` : (await ticketCount()) !== before ? "a ticket was created" : null
+    )
+    const helpdeskTicketTeam = async () => (await prisma.ticket.findUnique({ where: { id: ctx.b.ticketId }, select: { teamId: true } }))?.teamId
+    const teamBefore = await helpdeskTicketTeam()
+    res = await admin.request("PATCH", `/api/tickets/${ctx.b.ticketId}`, { json: { teamId: alertsTeamId, assigneeId: null } })
+    push(
+      "refuse moving a ticket to Alerts",
+      "400 TEAM_NOT_FOR_MODULE",
+      String(res.status),
+      res.status !== 400 || !res.text.includes("TEAM_NOT_FOR_MODULE") ? `got ${res.status}: ${errorText(res.text)}` : (await helpdeskTicketTeam()) !== teamBefore ? "the ticket moved" : null
+    )
+    res = await admin.request("PATCH", "/api/ticket-settings", { json: { defaultTeamId: alertsTeamId } })
+    const defaultNow = (await prisma.ticketSettings.findUnique({ where: { companyId }, select: { defaultTeamId: true } }))?.defaultTeamId
+    push("refuse Alerts as the default queue", "400", String(res.status), status(res, 400) ?? (defaultNow !== helpdeskId ? "the default queue changed" : null))
+
+    // Records already on the team stay
+    res = await admin.request("GET", `/api/tickets/${ctx.fx.alertsTicketId}`)
+    push("a ticket already in Alerts still opens with its queue", "200, its queue", String(res.status), status(res, 200) ?? (!res.text.includes(alertsTeamId) ? "its queue is missing" : null))
+    res = await admin.request("GET", "/api/tickets?view=all")
+    push("a ticket already in Alerts still lists under All tickets", "200, listed", String(res.status), status(res, 200) ?? (!res.text.includes(ctx.fx.alertsTicketId) ? "not listed" : null))
+    res = await admin.request("PATCH", `/api/tickets/${ctx.fx.alertsTicketId}`, { json: { teamId: alertsTeamId } })
+    push("a ticket already in Alerts still saves naming its own queue", "200", String(res.status), status(res, 200))
+
+    // The default ticket queue can't be turned off for tickets
+    res = await admin.request("PATCH", `/api/teams/${helpdeskId}`, { json: { usesTickets: false } })
+    const flags = await prisma.team.findUnique({ where: { id: helpdeskId }, select: { usesTickets: true } })
+    push(
+      "refuse turning tickets off for the default queue",
+      "409 DEFAULT_TICKET_QUEUE",
+      String(res.status),
+      res.status !== 409 || !res.text.includes("DEFAULT_TICKET_QUEUE") ? `got ${res.status}: ${errorText(res.text)}` : flags?.usesTickets !== true ? "the queue was turned off" : null
+    )
+
+    // ── Opportunities off for Sales ──
+    const oppBefore = await counts("/api/opportunities/sidebar-counts")
+    res = await admin.request("PATCH", `/api/teams/${salesId}`, { json: { usesOpportunities: false } })
+    push(
+      "turn opportunities off for Sales",
+      "200, the open count still returned",
+      String(res.status),
+      status(res, 200) ?? (!res.text.includes('"usesOpportunities":false') ? "the team still uses opportunities" : !res.text.includes('"openOpportunityCount":') ? "no open opportunity count" : null)
+    )
+    const oppAfter = await counts("/api/opportunities/sidebar-counts")
+    push(
+      "the Opportunities folder leaves Sales out, the total keeps its opportunities",
+      "200, no Sales, same total",
+      String(oppAfter.res.status),
+      status(oppAfter.res, 200) ??
+        (oppAfter.json?.teams.some((t) => t.id === salesId)
+          ? "Sales is still in the folder"
+          : oppAfter.json?.total !== oppBefore.json?.total
+            ? `the total changed from ${oppBefore.json?.total} to ${oppAfter.json?.total}`
+            : null)
+    )
+    before = await opportunityCount()
+    res = await admin.request("POST", "/api/opportunities", {
+      json: { title: "Dev check, never saved", clientId: ctx.b.clientId, contactId: ctx.b.contactId, initialNote: OPP_NOTE, teamId: salesId },
+    })
+    push(
+      "refuse a new opportunity in Sales",
+      "400 TEAM_NOT_FOR_MODULE",
+      String(res.status),
+      res.status !== 400 || !res.text.includes("TEAM_NOT_FOR_MODULE") ? `got ${res.status}: ${errorText(res.text)}` : (await opportunityCount()) !== before ? "an opportunity was created" : null
+    )
+    const oppTeam = async () => (await prisma.opportunity.findUnique({ where: { id: ctx.b.opportunityId }, select: { teamId: true } }))?.teamId
+    const oppTeamBefore = await oppTeam()
+    res = await admin.request("PATCH", `/api/opportunities/${ctx.b.opportunityId}`, { json: { teamId: salesId, ownerId: null } })
+    push(
+      "refuse moving an opportunity to Sales",
+      "400 TEAM_NOT_FOR_MODULE",
+      String(res.status),
+      res.status !== 400 || !res.text.includes("TEAM_NOT_FOR_MODULE") ? `got ${res.status}: ${errorText(res.text)}` : (await oppTeam()) !== oppTeamBefore ? "the opportunity moved" : null
+    )
+    res = await admin.request("GET", `/api/opportunities/${ctx.fx.salesViewerOpportunityId}`)
+    push("an opportunity already in Sales still opens with its team", "200, its team", String(res.status), status(res, 200) ?? (!res.text.includes(salesId) ? "its team is missing" : null))
+    res = await admin.request("GET", "/api/opportunities")
+    push("an opportunity already in Sales still lists under All opportunities", "200, listed", String(res.status), status(res, 200) ?? (!res.text.includes(ctx.fx.salesViewerOpportunityId) ? "not listed" : null))
+
+    // The last team using opportunities can't be turned off for them
+    await prisma.team.updateMany({ where: { companyId, id: { not: ctx.b.generalTeamId } }, data: { usesOpportunities: false } })
+    res = await admin.request("PATCH", `/api/teams/${ctx.b.generalTeamId}`, { json: { usesOpportunities: false } })
+    const generalFlags = await prisma.team.findUnique({ where: { id: ctx.b.generalTeamId }, select: { usesOpportunities: true } })
+    push(
+      "refuse turning opportunities off for the last team using them",
+      "409 LAST_TEAM_FOR_MODULE",
+      String(res.status),
+      res.status !== 409 || !res.text.includes("LAST_TEAM_FOR_MODULE")
+        ? `got ${res.status}: ${errorText(res.text)}`
+        : generalFlags?.usesOpportunities !== true
+          ? "the last team was turned off"
+          : null
+    )
+
+    // A bad value
+    res = await admin.request("PATCH", `/api/teams/${salesId}`, { json: { usesTickets: "no" } })
+    push("refuse a flag that isn't true or false", "400", String(res.status), status(res, 400))
+  } finally {
+    for (const t of savedFlags) {
+      await prisma.team.update({ where: { id: t.id }, data: { usesTickets: t.usesTickets, usesOpportunities: t.usesOpportunities } })
     }
   }
 }

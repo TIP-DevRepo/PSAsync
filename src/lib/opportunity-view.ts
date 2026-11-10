@@ -4,6 +4,7 @@
 // each rule can be checked on its own.
 
 import { userChoices } from "@/lib/user-picker"
+import { defaultOpportunityTeam, teamsForModule, teamUsesModule, type TeamModuleFlags } from "@/lib/team-modules"
 import { writeColumnFilters } from "@/lib/column-filters"
 import { opportunityDisplayValue, type OpportunityQuoteValue } from "@/lib/opportunity-value"
 
@@ -302,15 +303,19 @@ export function formatDate(value: string | null): string {
 }
 
 // The teams an opportunity may be put in by the current user (the server's
-// rule): the teams they are in, all of them with opportunities.viewAll, and
-// on create General (isDefault) always. keepId keeps the opportunity's
-// current team listed so the field shows it.
-export function teamChoices<T extends { id: string; isDefault: boolean; isMember: boolean }>(
+// rule): among the teams that use opportunities (src/lib/team-modules.ts),
+// the ones they are in, all of them with opportunities.viewAll, and on
+// create the default team (General, or the first team using opportunities
+// while General is off for them) always. keepId keeps the opportunity's
+// current team listed so the field shows it, even when it is off.
+export function teamChoices<T extends { id: string; isDefault: boolean; isMember: boolean } & TeamModuleFlags>(
   teams: readonly T[],
   canViewAll: boolean,
   opts: { includeDefault?: boolean; keepId?: string | null } = {}
 ): T[] {
-  return teams.filter((t) => canViewAll || t.isMember || (opts.includeDefault && t.isDefault) || t.id === opts.keepId)
+  const using = teamsForModule(teams, "opportunities")
+  const defaultId = opts.includeDefault ? (defaultOpportunityTeam(using)?.id ?? null) : null
+  return teams.filter((t) => t.id === opts.keepId || (teamUsesModule(t, "opportunities") && (canViewAll || t.isMember || t.id === defaultId)))
 }
 
 export function contactName(contact: { firstName: string; lastName: string }): string {

@@ -8,6 +8,7 @@ import { TEAM_DESCRIPTION_MAX, TEAM_NAME_MAX, TEAM_NAME_TAKEN_MESSAGE } from "@/
 import { checkDefaultRoles, membershipChangesRefusal, readIdList, setTeamDefaultRoles, setTeamMembers, toTeamResponse } from "@/lib/teams"
 import { INVALID_BODY_MESSAGE, isPrismaError, readJsonObject, readText } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
+import { readModuleFlags } from "@/lib/team-modules"
 
 // Every team of the company in order, with its member count and default
 // roles (toTeamResponse). Read by Settings > Teams, Manage Users, and the
@@ -47,6 +48,10 @@ export async function POST(req: NextRequest) {
   const description = readText(body.description, { label: "Description", max: TEAM_DESCRIPTION_MAX })
   if (description.error !== undefined) return apiError(400, description.error)
 
+  // Both on unless the body turns one off (src/lib/team-modules.ts)
+  const flags = readModuleFlags(body)
+  if (flags.error !== undefined) return apiError(400, flags.error)
+
   const memberIds = body.memberIds === undefined ? [] : readIdList(body.memberIds)
   if (memberIds === null) return apiError(400, "Invalid user", "INVALID_REFERENCE")
   const roleIds = body.defaultRoleIds === undefined ? [] : readIdList(body.defaultRoleIds)
@@ -68,7 +73,7 @@ export async function POST(req: NextRequest) {
     const team = await prisma.$transaction(async (tx) => {
       const last = await tx.team.aggregate({ where: { companyId }, _max: { sortOrder: true } })
       const created = await tx.team.create({
-        data: { companyId, name: name.value as string, description: description.value, sortOrder: (last._max.sortOrder ?? -1) + 1 },
+        data: { companyId, name: name.value as string, description: description.value, sortOrder: (last._max.sortOrder ?? -1) + 1, ...flags.data },
         select: { id: true },
       })
       await setTeamMembers(tx, created.id, memberIds)

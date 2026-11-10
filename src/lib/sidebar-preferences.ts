@@ -36,5 +36,5 @@ export async function keepCompanyTeams(companyId: string, layout: SidebarLayout)
 
 // The company's teams for the Settings > Sidebar editor, in their own order
 export function loadCompanyTeamsForSidebar(companyId: string) {
-  return prisma.team.findMany({ where: { companyId }, select: { id: true, name: true }, orderBy: TEAM_ORDER })
+  return prisma.team.findMany({ where: { companyId }, select: { id: true, name: true, usesTickets: true, usesOpportunities: true }, orderBy: TEAM_ORDER })
 }

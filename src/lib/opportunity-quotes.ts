@@ -3,7 +3,8 @@ import { prisma } from "@/lib/prisma"
 import type { AccessContext } from "@/lib/api-access"
 import { loadClientMainLocationId, opportunityListWhere, opportunityWhere } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
-import { ensureTeamDefaults, loadDefaultTeamId } from "@/lib/team-defaults"
+import { ensureTeamDefaults } from "@/lib/team-defaults"
+import { loadDefaultOpportunityTeamId } from "@/lib/team-module-checks"
 import { createOpportunityInTransaction, type NewOpportunity } from "@/lib/opportunity-create"
 import { recordTimelineActions } from "@/lib/timeline"
 import { recordAudit, type AuditEntryInput } from "@/lib/audit-log"
@@ -289,11 +290,12 @@ export async function planAutoOpportunity(companyId: string, quoteId: string, ho
     prisma.opportunitySettings.findUnique({ where: { companyId }, select: { quoteSentStage: { select: stageSelect } } }),
     prisma.opportunityStage.findFirst({ where: { companyId, category: "OPEN" }, orderBy: STAGE_ORDER, select: stageSelect }),
     prisma.teamMember.findMany({
-      where: { userId: quote.user.id, team: { companyId } },
+      // Only teams that use opportunities
+      where: { userId: quote.user.id, team: { companyId, usesOpportunities: true } },
       orderBy: [{ team: { sortOrder: "asc" } }, { team: { createdAt: "asc" } }],
       select: { teamId: true },
     }),
-    loadDefaultTeamId(companyId),
+    loadDefaultOpportunityTeamId(companyId),
     loadClientMainLocationId({ companyId }, quote.clientId),
   ])
   const stage = settings?.quoteSentStage?.category === "OPEN" ? settings.quoteSentStage : firstOpen
