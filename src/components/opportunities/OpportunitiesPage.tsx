@@ -10,6 +10,7 @@ import { TopbarAction } from "@/components/layout/TopbarSlots"
 import { LIST_PAGE, PageHeader, StatRow, StatTile } from "@/components/ui/blocks"
 import { ViewTabs, type ViewTabItem } from "@/components/ui/view-tabs"
 import { useAccess } from "@/components/AccessProvider"
+import { useDefaultViews } from "@/components/DefaultViewsProvider"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
 import { newSalesOrderHref, offersSalesOrderAfterMove, WON_SALES_ORDER_PROMPT } from "@/lib/opportunity-quote-rules"
@@ -51,8 +52,10 @@ export function OpportunitiesPage() {
   const canEdit = can("opportunities.edit")
 
   // The view and filters are read from the URL on every render, so a
-  // refresh or a shared link opens exactly the same page
-  const { view, filters } = useMemo(() => readOpportunityUrl(searchParams), [searchParams])
+  // refresh or a shared link opens exactly the same page. Without a view in
+  // the URL, the sidebar layout's default view applies.
+  const defaultView = useDefaultViews().opportunities
+  const { view, filters } = useMemo(() => readOpportunityUrl(searchParams, defaultView), [searchParams, defaultView])
   const apiQuery = opportunityApiQuery(filters)
 
   const [stages, setStages] = useState<StageOption[]>([])
@@ -69,9 +72,9 @@ export function OpportunitiesPage() {
 
   const setUrl = useCallback(
     (nextView: OpportunityView, nextFilters: OpportunityFilters) => {
-      router.replace(`${pathname}${opportunityUrlQuery(nextView, nextFilters)}`, { scroll: false })
+      router.replace(`${pathname}${opportunityUrlQuery(nextView, nextFilters, defaultView)}`, { scroll: false })
     },
-    [router, pathname]
+    [router, pathname, defaultView]
   )
   // The search, team, and owner keep the list's column filters (f_<column>) in the URL
   const setFilters = useCallback(

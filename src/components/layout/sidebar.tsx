@@ -7,6 +7,15 @@ import { OPPORTUNITIES_FOLDER, TeamFolder, TICKETS_FOLDER, type TeamFolderConfig
 import { cn } from "@/lib/utils"
 import { PsasyncMark } from "@/components/ui/blocks"
 import { UserMenu } from "./UserMenu"
+import {
+  isSidebarFolderKey,
+  PSASYNC_SIDEBAR_LAYOUT,
+  visibleSidebarSections,
+  type ResolvedSidebarLayout,
+  type SidebarFolderKey,
+  type SidebarIconName,
+  type SidebarItemDef,
+} from "@/lib/sidebar-layout"
 
 export interface PagePermissions {
   clients?: boolean
@@ -23,7 +32,7 @@ export interface PagePermissions {
 
 // The design's icons (docs/design/ui-refresh-mockup.html), one stroked path
 // each, drawn at 18px like the rest of the sidebar
-export const NAV_ICON_PATHS = {
+export const NAV_ICON_PATHS: Record<SidebarIconName, string> = {
   home: "M3 11 12 4l9 7M5 10v10h14V10",
   opp: "M3 17l6-6 4 4 8-8M15 7h6v6",
   ticket: "M3 8a2 2 0 0 0 0 4v4h18v-4a2 2 0 0 1 0-4V4H3v4ZM14 4v16",
@@ -36,9 +45,9 @@ export const NAV_ICON_PATHS = {
   inv: "M3 8l9-5 9 5v8l-9 5-9-5zM3 8l9 5 9-5M12 13v8",
   settings: "M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0M14 4v4M8 10v4M16 16v4",
   updates: "M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M5.6 18.4l2.1-2.1M16.3 7.7l2.1-2.1",
-} as const
+}
 
-export type NavIconName = keyof typeof NAV_ICON_PATHS
+export type NavIconName = SidebarIconName
 
 export function NavIcon({ name, size = 18 }: { name: NavIconName; size?: number }) {
   return (
@@ -48,55 +57,12 @@ export function NavIcon({ name, size = 18 }: { name: NavIconName; size?: number 
   )
 }
 
-interface NavItem {
-  label: string
-  href: string
-  icon: NavIconName
-  // null: every signed in user
-  permissionKey: keyof PagePermissions | null
-}
+type NavItem = SidebarItemDef
 
-// Every page, in the design's sections. Each entry keeps the page gate it
-// always had; a section shows only when one of its entries does.
-export const NAV_SECTIONS: { label: string; items: NavItem[] }[] = [
-  {
-    label: "Work",
-    items: [
-      { label: "Dashboard", href: "/dashboard", icon: "home", permissionKey: null },
-      { label: "Tickets", href: "/dashboard/tickets", icon: "ticket", permissionKey: "tickets" },
-      { label: "Opportunities", href: "/dashboard/opportunities", icon: "opp", permissionKey: "opportunities" },
-    ],
-  },
-  {
-    label: "Sales",
-    items: [
-      { label: "Quotes", href: "/dashboard/quotes", icon: "quote", permissionKey: "quotes" },
-      { label: "Sales Orders", href: "/dashboard/sales-orders", icon: "so", permissionKey: "salesOrders" },
-      { label: "Purchase Orders", href: "/dashboard/purchase-orders", icon: "po", permissionKey: "purchaseOrders" },
-    ],
-  },
-  {
-    label: "Records",
-    items: [
-      { label: "Clients", href: "/dashboard/clients", icon: "client", permissionKey: "clients" },
-      { label: "Vendors", href: "/dashboard/vendors", icon: "vendor", permissionKey: "vendors" },
-      { label: "Catalog", href: "/dashboard/catalog", icon: "catalog", permissionKey: "catalog" },
-      { label: "Inventory", href: "/dashboard/inventory", icon: "inv", permissionKey: "inventory" },
-    ],
-  },
-  {
-    label: "Admin",
-    items: [
-      { label: "Settings", href: "/dashboard/settings", icon: "settings", permissionKey: "settings" },
-      { label: "Features & Updates", href: "/dashboard/updates", icon: "updates", permissionKey: null },
-    ],
-  },
-]
-
-// The entries that are folders of teams with counts (TeamFolder)
-const FOLDERS: Record<string, TeamFolderConfig> = {
-  "/dashboard/tickets": TICKETS_FOLDER,
-  "/dashboard/opportunities": OPPORTUNITIES_FOLDER,
+// The entries that are folders of teams with counts (TeamFolder), by page key
+const FOLDERS: Record<SidebarFolderKey, TeamFolderConfig> = {
+  tickets: TICKETS_FOLDER,
+  opportunities: OPPORTUNITIES_FOLDER,
 }
 
 // One sidebar row's look, shared with the team folders
@@ -116,6 +82,10 @@ export function isNavActive(href: string, pathname: string): boolean {
 
 export interface SidebarProps {
   pagePermissions?: PagePermissions
+  // The signed in user's layout (src/lib/sidebar-layout.ts), resolved by the
+  // dashboard layout: the page order, each folder's team order and open
+  // state. Pages the user can't open are left out here, whatever it says.
+  layout?: ResolvedSidebarLayout
   companyName: string
   logoUrl: string | null
   userName: string
@@ -123,15 +93,13 @@ export interface SidebarProps {
 
 // The app's sidebar (the design's dark, light, or tinted style, from the
 // theme's --ps-sb-* colors): the company's logo and name, the pages in
-// their sections, the Opportunities folder with its teams and counts, and
+// their sections in the layout's order, the Tickets and Opportunities
+// folders with their teams and counts, and
 // the signed in user's button opening a menu with My settings and Log out. The same sidebar shows
 // in the phone menu.
-export function Sidebar({ pagePermissions = {}, companyName, logoUrl, userName }: SidebarProps) {
+export function Sidebar({ pagePermissions = {}, layout = PSASYNC_SIDEBAR_LAYOUT, companyName, logoUrl, userName }: SidebarProps) {
   const pathname = usePathname()
-  const sections = NAV_SECTIONS.map((section) => ({
-    ...section,
-    items: section.items.filter((item) => item.permissionKey === null || pagePermissions[item.permissionKey] === true),
-  })).filter((section) => section.items.length > 0)
+  const sections = visibleSidebarSections(layout, pagePermissions)
 
   return (
     <nav aria-label="Main" className="flex h-full flex-col gap-1 overflow-y-auto border-r border-sb-border bg-sb-bg px-3 py-4 text-sb-text">
@@ -156,11 +124,11 @@ export function Sidebar({ pagePermissions = {}, companyName, logoUrl, userName }
             // counts. Each reads its list's team and person from the URL, so
             // it sits in its own Suspense boundary, falling back to the
             // plain entry.
-            const folder = FOLDERS[item.href]
-            if (folder) {
+            if (isSidebarFolderKey(item.key)) {
+              const { teamOrder, openByDefault } = layout.folders[item.key]
               return (
                 <Suspense key={item.href} fallback={<NavLink item={item} active={active} />}>
-                  <TeamFolder config={folder} isActive={active} />
+                  <TeamFolder config={FOLDERS[item.key]} isActive={active} teamOrder={teamOrder} openByDefault={openByDefault} />
                 </Suspense>
               )
             }

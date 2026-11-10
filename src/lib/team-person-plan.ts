@@ -2,13 +2,17 @@ import type { NextResponse } from "next/server"
 import { apiError, type AccessContext } from "@/lib/api-access"
 import { assertRefs, loadTeamMemberIds } from "@/lib/scoped-loaders"
 import { readOptionalId } from "@/lib/opportunity-rules"
+import { teamModuleRefusal } from "@/lib/team-module-checks"
+import type { TeamModule } from "@/lib/team-modules"
 
 // The team and person rules a record's PATCH shares, for opportunities (the
 // owner) and tickets (the assignee): a new team must be the company's and
 // one the user may use, a named person follows the record's assign rule
 // and must be a member of the team (new or kept), and a team change whose
 // person isn't in the new team needs a new person or unassigned in the
-// same request. Only a team or person change is checked against the team,
+// same request. A new team must also use the record's module (tickets or
+// opportunities, src/lib/team-modules.ts); a record already on a team that
+// is off keeps it. Only a team or person change is checked against the team,
 // so an older record whose person isn't in its team keeps saving its
 // other fields.
 
@@ -17,6 +21,8 @@ const isBlank = (value: unknown) => value === undefined || value === null || val
 export interface TeamPersonRules {
   // The body key of the person: ownerId or assigneeId
   personKey: "ownerId" | "assigneeId"
+  // The module a new team must be used for
+  module: TeamModule
   mayUseTeam: (actorInTeam: boolean) => boolean
   mayAssign: (personId: string | null, actorInTeam: boolean) => boolean
   messages: {
@@ -60,6 +66,10 @@ export async function planTeamPerson(
     const invalidTeam = await assertRefs(ctx, { teamId: body.teamId })
     if (invalidTeam) return { response: invalidTeam }
     if (body.teamId !== existing.teamId) teamChange = body.teamId
+  }
+  if (teamChange) {
+    const offTeam = await teamModuleRefusal(ctx, teamChange, rules.module)
+    if (offTeam) return { response: offTeam }
   }
 
   // Null or blank unassigns

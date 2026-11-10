@@ -4,6 +4,7 @@
 
 import { sortUsersByName } from "@/lib/user-picker"
 import { deletedOpportunitiesNote } from "@/lib/opportunity-rules"
+import { defaultOpportunityTeam, teamsForModule, type TeamModuleFlags } from "@/lib/team-modules"
 
 export const TEAM_NAME_MAX = 100
 export const TEAM_DESCRIPTION_MAX = 500
@@ -117,6 +118,9 @@ export interface TeamSummary {
   isDefault: boolean
   sortOrder: number
   roundRobinEnabled: boolean
+  // Whether tickets and opportunities use this team (src/lib/team-modules.ts)
+  usesTickets: boolean
+  usesOpportunities: boolean
   memberCount: number
   defaultRoles: TeamRole[]
   // Whether the signed in user is in it
@@ -129,6 +133,10 @@ export interface TeamSummary {
   assignableAssigneeIds: string[]
   // Only for users who manage teams
   members?: { id: string; name: string; active: boolean }[]
+  // Only for users who manage teams: the open tickets and open opportunities
+  // still on the team, shown before a module is turned off for it
+  openTicketCount?: number
+  openOpportunityCount?: number
   // Only for users who manage teams: why they can't add members (one of its
   // default roles fails the grant rule), or null
   memberGrantRefusal?: string | null
@@ -184,15 +192,18 @@ export function canSeeOpportunity(
 export const INVISIBLE_AFTER_SAVE_MESSAGE =
   "You won't be able to see this opportunity after saving because you're not in this team. Assign it to yourself or choose one of your teams."
 
-// The New opportunity dialog's starting team: General when the user is in
-// it or sees every team (opportunities.viewAll), otherwise the first team
-// they are in (by sortOrder), otherwise General. "" until the teams load.
+// The New opportunity dialog's starting team, among the teams that use
+// opportunities: the default opportunity team (General, unless it is off
+// for opportunities, defaultOpportunityTeam) when the user is in it or sees
+// every team (opportunities.viewAll), otherwise the first team they are in
+// (by sortOrder), otherwise the default team. "" until the teams load.
 export function defaultNewOpportunityTeamId(
-  teams: readonly { id: string; isDefault: boolean; isMember: boolean; sortOrder: number }[],
+  teams: readonly ({ id: string; isDefault: boolean; isMember: boolean; sortOrder: number } & TeamModuleFlags)[],
   canViewAll: boolean
 ): string {
-  const general = teams.find((t) => t.isDefault)
-  if (general && (general.isMember || canViewAll)) return general.id
-  const own = [...teams].filter((t) => t.isMember).sort((a, b) => a.sortOrder - b.sortOrder)[0]
-  return own?.id ?? general?.id ?? ""
+  const ordered = [...teamsForModule(teams, "opportunities")].sort((a, b) => a.sortOrder - b.sortOrder)
+  const fallback = defaultOpportunityTeam(ordered)
+  if (fallback && (fallback.isMember || canViewAll)) return fallback.id
+  const own = ordered.find((t) => t.isMember)
+  return own?.id ?? fallback?.id ?? ""
 }

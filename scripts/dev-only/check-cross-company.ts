@@ -36,7 +36,7 @@
 // button (a 400 before anything is sent). The test companies have no
 // Microsoft credentials either, so nothing could go out.
 
-import type { PrismaClient } from "@/generated/prisma"
+import { Prisma, type PrismaClient } from "@/generated/prisma"
 import { enforceDevGuard, findExternalServices } from "./lib/guard"
 import type { SampleIds, TestLetter, TestNames } from "./lib/test-data"
 import { ATTACHMENT_KINDS } from "@/lib/attachment-paths"
@@ -389,6 +389,7 @@ const ATTEMPTS: Attempt[] = [
   { name: "Ticket list view filtered by other company's assignee", directions: "both", method: "GET", path: (c) => `/api/tickets?view=mine&assigneeId=${c.other.adminId}&page=1`, expect: 400, expectError: "Invalid user" },
   // The client page's Tickets tab
   { name: "Tickets of other company's client", directions: "both", method: "GET", path: (c) => `/api/clients/${c.other.clientId}/tickets`, expect: 404 },
+  { name: "Opportunities of other company's client", directions: "both", method: "GET", path: (c) => `/api/clients/${c.other.clientId}/opportunities`, expect: 404 },
   { name: "Action button POST fixedTicketStatusId", directions: "both", method: "POST", path: () => "/api/action-buttons", body: (c) => ({ label: "Should Not Exist", icon: "note", color: "#1B3A5C", kind: "NOTE", forOpportunities: false, forTickets: true, stageMode: "FIXED", fixedTicketStatusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
 
   // ── Permission escalation inside one company ──
@@ -903,6 +904,7 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       { path: `/api/tickets/${own.ticketId}/audit`, mustHold: own.ticketAuditEntryId, foreign: [other.ticketAuditEntryId, other.ticketId] },
       { path: "/api/ticket-statuses", mustHold: own.ticketStatusId, foreign: [other.ticketStatusId] },
       { path: `/api/clients/${own.clientId}/tickets?status=all`, mustHold: own.ticketId, foreign: [other.ticketId] },
+      { path: `/api/clients/${own.clientId}/opportunities?status=all`, mustHold: own.opportunityId, foreign: [other.opportunityId] },
       { path: "/api/tickets?view=all&sort=queue", mustHold: own.ticketId, foreign: [other.ticketId] },
     ]
     for (const list of lists) {
@@ -1031,6 +1033,94 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
         await prisma.companySettings.updateMany({
           where: { companyId: ids[letter].companyId },
           data: { themeAccent: co?.themeAccent ?? null, themeSidebar: co?.themeSidebar ?? null, themeMode: co?.themeMode ?? null, allowUserTheme: co?.allowUserTheme ?? true },
+        })
+      }
+    }
+  }
+
+  // Sidebar layouts: the company layout and a user's own layout are always
+  // the caller's own. Each admin saves both naming the other company's
+  // teams, admin, and company in the body: the other company's team ids
+  // must be dropped from what is stored, the other side untouched, and each
+  // read must hold only its own teams. Everything is put back.
+  {
+    type Stored = { folders?: Record<string, { teamOrder?: string[] }> }
+    const layoutSelect = { sidebarLayout: true, allowUserSidebar: true } as const
+    const companyOf = (companyId: string) => prisma.companySettings.findUnique({ where: { companyId }, select: layoutSelect })
+    const prefsOf = (userId: string) => prisma.userPreferences.findUnique({ where: { userId }, select: { sidebarLayout: true } })
+    const teamOrder = (value: unknown, folder: string) => (value && typeof value === "object" ? ((value as Stored).folders?.[folder]?.teamOrder ?? null) : null)
+    const saved = {
+      prefs: { B: await prefsOf(ids.B.adminId), C: await prefsOf(ids.C.adminId) },
+      company: { B: await companyOf(ids.B.companyId), C: await companyOf(ids.C.companyId) },
+    }
+    try {
+      for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+        const own = ids[ownLetter]
+        const other = ids[otherLetter]
+        const otherCompanyBefore = JSON.stringify(await companyOf(other.companyId))
+        const otherPrefsBefore = JSON.stringify(await prefsOf(other.adminId))
+
+        let res = await admins[ownLetter].request("PATCH", "/api/company-settings/sidebar", {
+          json: {
+            allowUserSidebar: true,
+            layout: { folders: { tickets: { teamOrder: [other.generalTeamId, own.salesTeamId, other.salesTeamId, own.generalTeamId] } } },
+            companyId: other.companyId,
+          },
+        })
+        let stored = teamOrder((await companyOf(own.companyId))?.sidebarLayout, "tickets")
+        let problem =
+          res.status !== 200
+            ? `got ${res.status}: ${errorText(res.text)}`
+            : JSON.stringify(stored) !== JSON.stringify([own.salesTeamId, own.generalTeamId])
+              ? `stored team order is ${JSON.stringify(stored)}`
+              : JSON.stringify(await companyOf(other.companyId)) !== otherCompanyBefore
+                ? "the other company's sidebar changed"
+                : null
+        rows.push({ attempt: `${ownLetter} PATCH own company sidebar naming ${otherLetter}'s teams`, expected: "200, own teams only, own company only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+
+        res = await admins[ownLetter].request("PATCH", "/api/account/sidebar", {
+          json: { layout: { folders: { opportunities: { teamOrder: [other.salesTeamId, own.generalTeamId] } } }, userId: other.adminId, companyId: other.companyId },
+        })
+        stored = teamOrder((await prefsOf(own.adminId))?.sidebarLayout, "opportunities")
+        problem =
+          res.status !== 200
+            ? `got ${res.status}: ${errorText(res.text)}`
+            : JSON.stringify(stored) !== JSON.stringify([own.generalTeamId])
+              ? `stored team order is ${JSON.stringify(stored)}`
+              : JSON.stringify(await prefsOf(other.adminId)) !== otherPrefsBefore
+                ? "the other company's admin layout changed"
+                : null
+        rows.push({ attempt: `${ownLetter} PATCH own sidebar naming ${otherLetter}'s admin and teams`, expected: "200, own row, own teams only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+      }
+      // Reads, once both sides hold their own layouts
+      for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+        for (const path of ["/api/account/sidebar", "/api/company-settings/sidebar"]) {
+          const res = await admins[ownLetter].request("GET", path)
+          const other = ids[otherLetter]
+          const leaked = [other.generalTeamId, other.salesTeamId, other.companyId, other.adminId].filter((m) => res.text.includes(m))
+          const problem =
+            res.status !== 200
+              ? `got ${res.status}: ${errorText(res.text)}`
+              : !res.text.includes(ids[ownLetter].generalTeamId)
+                ? "its own teams are missing"
+                : leaked.length > 0
+                  ? `response holds the other company's values (${leaked.join(", ")})`
+                  : null
+          rows.push({ attempt: `${ownLetter} GET ${path} holds only its own teams`, expected: "200, own values only", actual: String(res.status), result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+        }
+      }
+    } finally {
+      for (const letter of ["B", "C"] as const) {
+        const p = saved.prefs[letter]
+        if (p) {
+          await prisma.userPreferences.update({ where: { userId: ids[letter].adminId }, data: { sidebarLayout: p.sidebarLayout == null ? Prisma.DbNull : (p.sidebarLayout as Prisma.InputJsonValue) } })
+        } else {
+          await prisma.userPreferences.deleteMany({ where: { userId: ids[letter].adminId } })
+        }
+        const co = saved.company[letter]
+        await prisma.companySettings.updateMany({
+          where: { companyId: ids[letter].companyId },
+          data: { sidebarLayout: co?.sidebarLayout == null ? Prisma.DbNull : (co.sidebarLayout as Prisma.InputJsonValue), allowUserSidebar: co?.allowUserSidebar ?? true },
         })
       }
     }

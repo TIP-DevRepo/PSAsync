@@ -9,11 +9,15 @@ import { toTeamResponse } from "@/lib/teams"
 import { INVALID_BODY_MESSAGE, isPrismaError, readJsonObject, readText } from "@/lib/opportunity-rules"
 import { DEFAULT_TICKET_TEAM_DELETE_MESSAGE, teamTicketsMessage } from "@/lib/ticket-rules"
 import { userFacingError } from "@/lib/user-error"
+import { moduleOffRefusal, modulesTurnedOff, readModuleFlags } from "@/lib/team-modules"
 
-// Renames a team, changes its description (General too), or turns round
+// Renames a team, changes its description (General too), turns round
 // robin on or off (roundRobinEnabled: new tickets created unassigned in the
-// team go to its next active member). Members and default roles have their
-// own routes.
+// team go to its next active member), or chooses whether tickets and
+// opportunities use it (usesTickets, usesOpportunities; src/lib/team-modules.ts).
+// Turning a module off is refused (409) for the last team using it, and for
+// tickets on the default ticket queue; records already on the team keep it.
+// Members and default roles have their own routes.
 export async function PATCH(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -33,7 +37,9 @@ export async function PATCH(
   const body = await readJsonObject(req)
   if (!body) return apiError(400, INVALID_BODY_MESSAGE)
 
-  const data: { name?: string; description?: string | null; roundRobinEnabled?: boolean } = {}
+  const flags = readModuleFlags(body)
+  if (flags.error !== undefined) return apiError(400, flags.error)
+  const data: { name?: string; description?: string | null; roundRobinEnabled?: boolean; usesTickets?: boolean; usesOpportunities?: boolean } = { ...flags.data }
   if ("name" in body) {
     const name = readText(body.name, { label: "Team name", max: TEAM_NAME_MAX, required: true })
     if (name.error !== undefined) return apiError(400, name.error)
@@ -55,8 +61,25 @@ export async function PATCH(
   }
 
   try {
-    const team = await prisma.team.update({ where: teamWhere(ctx, existing.id), data, select: teamSelect })
-    return NextResponse.json(toTeamResponse(team, ctx))
+    const companyId = ctx.companyId
+    const result = await prisma.$transaction(async (tx) => {
+      // Turning a module off: the company row lock makes two such changes
+      // run one after the other, so they can't both turn off the last team
+      const current = await tx.team.findFirst({ where: teamWhere(ctx, existing.id), select: { usesTickets: true, usesOpportunities: true } })
+      const turnedOff = current ? modulesTurnedOff(current, flags.data) : []
+      if (turnedOff.length > 0) {
+        await tx.$queryRaw`SELECT "id" FROM "Company" WHERE "id" = ${companyId} FOR NO KEY UPDATE`
+        const teams = await tx.team.findMany({ where: { companyId }, select: { id: true, usesTickets: true, usesOpportunities: true } })
+        const settings = await tx.ticketSettings.findUnique({ where: { companyId }, select: { defaultTeamId: true } })
+        for (const teamModule of turnedOff) {
+          const refusal = moduleOffRefusal(existing.id, teamModule, teams, settings?.defaultTeamId ?? null)
+          if (refusal) return { refusal }
+        }
+      }
+      return { team: await tx.team.update({ where: teamWhere(ctx, existing.id), data, select: teamSelect }) }
+    })
+    if (result.refusal) return apiError(409, result.refusal.message, result.refusal.code)
+    return NextResponse.json(toTeamResponse(result.team, ctx))
   } catch (err) {
     if (isPrismaError(err, "P2002")) return apiError(400, TEAM_NAME_TAKEN_MESSAGE)
     const { message, status } = userFacingError(err, "Editing a team")

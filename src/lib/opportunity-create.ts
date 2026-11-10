@@ -4,7 +4,7 @@ import { opportunityDetailSelect } from "@/lib/opportunity-selects"
 import { closedAtFor, OPPORTUNITY_TITLE_MAX } from "@/lib/opportunity-rules"
 import { initialNoteAuthorId, initialNoteHtml, recordTimelineActions, writeInitialNote, type InitialNote } from "@/lib/timeline"
 import { opportunityCreatedAction } from "@/lib/opportunity-timeline"
-import { loadDefaultTeamId } from "@/lib/team-defaults"
+import { loadDefaultOpportunityTeamId } from "@/lib/team-module-checks"
 import { recordAudit } from "@/lib/audit-log"
 import { opportunityCreatedAudit } from "@/lib/opportunity-audit"
 import { checkPrefixedTitle, fitPrefixedTitle } from "@/lib/record-title"
@@ -65,7 +65,7 @@ export async function createOpportunityInTransaction(tx: Prisma.TransactionClien
 
 async function createOpportunityIn(tx: Prisma.TransactionClient, input: NewOpportunity, noteHtml: string, now: Date) {
   const authorId = initialNoteAuthorId(input.initialNote)
-  const teamId = input.teamId ?? (await loadDefaultTeamId(input.companyId, tx))
+  const teamId = input.teamId ?? (await loadDefaultOpportunityTeamId(input.companyId, tx))
   if (!teamId) throw new Error("The company has no General team; run ensureTeamDefaults first")
   const number = await takeOpportunityNumber(tx, input.companyId, now)
   // The client's prefix goes in front of the title (src/lib/record-title.ts)

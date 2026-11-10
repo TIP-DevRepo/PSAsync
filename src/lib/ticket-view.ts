@@ -1,5 +1,6 @@
 import type { TicketStatusCategory } from "@/generated/prisma"
 import { userChoices, type UserChoice } from "@/lib/user-picker"
+import { teamUsesModule, type TeamModuleFlags } from "@/lib/team-modules"
 
 // The display rules the ticket screens share: status and priority tones,
 // the tickets changed event, the shapes the list and detail routes return,
@@ -95,21 +96,24 @@ export const SOURCE_LABELS: Record<TicketRow["source"], string> = {
 
 // ─── New tickets ────────────────────────────────────────────────────────────
 
-export interface TicketTeamChoice {
+export interface TicketTeamChoice extends TeamModuleFlags {
   id: string
   isMember: boolean
   sortOrder: number
 }
 
 // The queues a user may put a ticket in (the server's mayUseTicketTeam):
-// their own teams, every team with tickets.assign or tickets.viewAll, and
-// on create the default ticket team always. keepId keeps the ticket's
-// current queue listed so the field shows it.
+// among the teams that use tickets (src/lib/team-modules.ts), their own
+// teams, every team with tickets.assign or tickets.viewAll, and on create
+// the default ticket team always. keepId keeps the ticket's current queue
+// listed so the field shows it, even when it is off for tickets.
 export function ticketTeamChoices<T extends TicketTeamChoice>(
   teams: readonly T[],
   opts: { canAssign: boolean; canViewAll: boolean; defaultTeamId?: string | null; keepId?: string | null }
 ): T[] {
-  return teams.filter((t) => opts.canAssign || opts.canViewAll || t.isMember || t.id === opts.defaultTeamId || t.id === opts.keepId)
+  return teams.filter(
+    (t) => t.id === opts.keepId || (teamUsesModule(t, "tickets") && (opts.canAssign || opts.canViewAll || t.isMember || t.id === opts.defaultTeamId))
+  )
 }
 
 // The New ticket dialog's starting queue: the default ticket team when the
@@ -122,7 +126,7 @@ export function defaultNewTicketTeamId(
 ): string {
   const choices = ticketTeamChoices(teams, { ...opts, defaultTeamId })
   if (defaultTeamId && choices.some((t) => t.id === defaultTeamId)) return defaultTeamId
-  const own = [...teams].filter((t) => t.isMember).sort((a, b) => a.sortOrder - b.sortOrder)[0]
+  const own = [...teams].filter((t) => t.isMember && teamUsesModule(t, "tickets")).sort((a, b) => a.sortOrder - b.sortOrder)[0]
   return own?.id ?? choices[0]?.id ?? ""
 }
 

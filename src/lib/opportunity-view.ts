@@ -4,6 +4,7 @@
 // each rule can be checked on its own.
 
 import { userChoices } from "@/lib/user-picker"
+import { defaultOpportunityTeam, teamsForModule, teamUsesModule, type TeamModuleFlags } from "@/lib/team-modules"
 import { writeColumnFilters } from "@/lib/column-filters"
 import { opportunityDisplayValue, type OpportunityQuoteValue } from "@/lib/opportunity-value"
 
@@ -77,11 +78,16 @@ const readUrlId = (value: string | null) => (value && URL_ID.test(value) ? value
 // The same limit the list route has on its search text
 export const FILTER_SEARCH_MAX = 200
 
-// Reads the view, search, team, and owner from the URL. An unknown view
-// falls back to the board, overlong search text is cut to the API's limit,
-// and a team or owner that isn't an id is ignored.
-export function readOpportunityUrl(params: { get(name: string): string | null }): { view: OpportunityView; filters: OpportunityFilters } {
-  const view: OpportunityView = params.get("view") === "list" ? "list" : "board"
+// Reads the view, search, team, and owner from the URL. A missing or
+// unknown view falls back to the default view (the board, or the sidebar
+// layout's choice, src/lib/sidebar-layout.ts), overlong search text is cut
+// to the API's limit, and a team or owner that isn't an id is ignored.
+export function readOpportunityUrl(
+  params: { get(name: string): string | null },
+  defaultView: OpportunityView = "board"
+): { view: OpportunityView; filters: OpportunityFilters } {
+  const urlView = params.get("view")
+  const view: OpportunityView = urlView === "list" || urlView === "board" ? urlView : defaultView
   const q = (params.get("q") ?? "").trim()
   return {
     view,
@@ -89,12 +95,14 @@ export function readOpportunityUrl(params: { get(name: string): string | null })
   }
 }
 
-// The page's query string for a view and its filters ("" for the board with
-// none), the inverse of readOpportunityUrl. Column filters are left out, so
+// The page's query string for a view and its filters ("" for the default
+// view with none), the inverse of readOpportunityUrl. The view is written
+// whenever it isn't the default, so the board is written as view=board for
+// a user whose default is the list. Column filters are left out, so
 // changing view starts the list without them.
-export function opportunityUrlQuery(view: OpportunityView, filters: OpportunityFilters): string {
+export function opportunityUrlQuery(view: OpportunityView, filters: OpportunityFilters, defaultView: OpportunityView = "board"): string {
   const params = new URLSearchParams()
-  if (view === "list") params.set("view", "list")
+  if (view !== defaultView) params.set("view", view)
   if (filters.team) params.set("team", filters.team)
   if (filters.owner) params.set("owner", filters.owner)
   if (filters.q.trim()) params.set("q", filters.q.trim())
@@ -295,15 +303,19 @@ export function formatDate(value: string | null): string {
 }
 
 // The teams an opportunity may be put in by the current user (the server's
-// rule): the teams they are in, all of them with opportunities.viewAll, and
-// on create General (isDefault) always. keepId keeps the opportunity's
-// current team listed so the field shows it.
-export function teamChoices<T extends { id: string; isDefault: boolean; isMember: boolean }>(
+// rule): among the teams that use opportunities (src/lib/team-modules.ts),
+// the ones they are in, all of them with opportunities.viewAll, and on
+// create the default team (General, or the first team using opportunities
+// while General is off for them) always. keepId keeps the opportunity's
+// current team listed so the field shows it, even when it is off.
+export function teamChoices<T extends { id: string; isDefault: boolean; isMember: boolean } & TeamModuleFlags>(
   teams: readonly T[],
   canViewAll: boolean,
   opts: { includeDefault?: boolean; keepId?: string | null } = {}
 ): T[] {
-  return teams.filter((t) => canViewAll || t.isMember || (opts.includeDefault && t.isDefault) || t.id === opts.keepId)
+  const using = teamsForModule(teams, "opportunities")
+  const defaultId = opts.includeDefault ? (defaultOpportunityTeam(using)?.id ?? null) : null
+  return teams.filter((t) => t.id === opts.keepId || (teamUsesModule(t, "opportunities") && (canViewAll || t.isMember || t.id === defaultId)))
 }
 
 export function contactName(contact: { firstName: string; lastName: string }): string {
@@ -363,4 +375,28 @@ export function opportunityStats(rows: readonly OpportunityRow[], now: Date): Op
     }
   }
   return stats
+}
+
+// ─── The client page's Opportunities tab ────────────────────────────────────
+
+// GET /api/clients/[id]/opportunities pages this many at a time (Load more)
+export const CLIENT_OPPORTUNITY_PAGE_SIZE = 50
+
+// Open (an OPEN stage, the default), Won, Lost, or All
+export const CLIENT_OPPORTUNITY_FILTERS = ["open", "won", "lost", "all"] as const
+export type ClientOpportunityFilter = (typeof CLIENT_OPPORTUNITY_FILTERS)[number]
+
+export const CLIENT_OPPORTUNITY_FILTER_LABELS: Record<ClientOpportunityFilter, string> = { open: "Open", won: "Won", lost: "Lost", all: "All" }
+
+export function isClientOpportunityFilter(value: unknown): value is ClientOpportunityFilter {
+  return typeof value === "string" && (CLIENT_OPPORTUNITY_FILTERS as readonly string[]).includes(value)
+}
+
+// The stage category a filter keeps, or null for every one
+export function clientOpportunityCategory(filter: ClientOpportunityFilter): StageCategory | null {
+  return filter === "open" ? "OPEN" : filter === "won" ? "WON" : filter === "lost" ? "LOST" : null
+}
+
+export function opportunityHref(id: string): string {
+  return `/dashboard/opportunities/${id}`
 }

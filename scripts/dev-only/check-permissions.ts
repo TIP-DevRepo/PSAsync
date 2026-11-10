@@ -572,6 +572,9 @@ const SETTINGS_GUARDED: Guarded[] = [
   { name: "Remove the secondary company logo", method: "DELETE", path: () => "/api/company-settings/logo?slot=secondary", expectError: "change the company logo" },
   { name: "Company appearance", method: "GET", path: () => "/api/company-settings/appearance", expectError: "edit company settings" },
   { name: "Save company appearance", method: "PATCH", path: () => "/api/company-settings/appearance", body: () => ({ themeAccent: "#DC2626", allowUserTheme: false }), expectError: "edit company settings" },
+  { name: "Company sidebar", method: "GET", path: () => "/api/company-settings/sidebar", expectError: "edit company settings" },
+  { name: "Save company sidebar", method: "PATCH", path: () => "/api/company-settings/sidebar", body: () => ({ allowUserSidebar: false, layout: { defaultViews: { tickets: "all" } } }), expectError: "edit company settings" },
+  { name: "Reset company sidebar", method: "DELETE", path: () => "/api/company-settings/sidebar", expectError: "edit company settings" },
   { name: "Change Microsoft settings", method: "PATCH", path: () => "/api/microsoft-settings", body: () => ({ microsoftTenantId: "00000000-0000-0000-0000-000000000000" }), expectError: "configure Microsoft integration" },
   { name: "Edit quote settings", method: "PATCH", path: () => "/api/quote-settings", body: () => ({ quotePrefix: "NOPE" }), expectError: "edit quote settings" },
   { name: "Invite a user", method: "POST", path: () => "/api/users", body: () => ({ name: "Should Not Exist", email: "should-not-exist@example.test", tempPassword: "ShouldNotExist123" }), expectError: "invite users" },
@@ -956,6 +959,15 @@ const TICKET_ATTEMPTS: Attempt[] = [
   { name: "Client tickets tab with a made up filter", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets?status=nope`, expect: 400, expectError: "Invalid status filter" },
   { name: "Client tickets tab", actor: "everyone", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets`, expect: 403, expectError: "view tickets" },
   { name: "Client tickets tab", actor: "clerk", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets`, expect: 403, expectError: "view tickets" },
+  // The client page's Opportunities tab: the Opportunities list's visibility
+  { name: "Client opportunities tab", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?status=all`, expect: 200, contains: (c) => [c.b.opportunityId, c.fx.repOpportunityId, c.fx.unassignedOpportunityId] },
+  { name: "Client opportunities tab: the team's unassigned, never others' own", actor: "oppViewer", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?status=all`, expect: 200, contains: (c) => [c.fx.unassignedOpportunityId], notContains: (c) => [c.b.opportunityId, c.fx.repOpportunityId] },
+  { name: "Client opportunities tab: won ones only", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?status=won`, expect: 200, notContains: (c) => [c.b.opportunityId, c.fx.repOpportunityId, c.fx.unassignedOpportunityId] },
+  { name: "Client opportunities tab for a made up client", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.fakeId}/opportunities`, expect: 404, expectError: "Not found" },
+  { name: "Client opportunities tab with a made up filter", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?status=nope`, expect: 400, expectError: "Invalid status filter" },
+  { name: "Client opportunities tab with a bad page", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?page=0`, expect: 400, expectError: "Invalid page" },
+  { name: "Client opportunities tab", actor: "everyone", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities`, expect: 403, expectError: "view opportunities" },
+  { name: "Client opportunities tab", actor: "clerk", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities`, expect: 403, expectError: "view opportunities" },
 
   // Assignment and team rules
   { name: "Create for a teammate", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.b.helpdeskTeamId, assigneeId: c.fx.ticketViewerUserId }), expect: 403, expectError: "yourself or leave them unassigned" },
@@ -4472,6 +4484,11 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // defaults need the company settings permission
     await checkAppearancePreferences(prisma, sessions, ctx, rows)
 
+    // Sidebar layouts: the company layout needs the company settings
+    // permission, each user saves and resets only their own, bad values are
+    // refused, and personal layouts can be turned off
+    await checkSidebarPreferences(prisma, sessions, ctx, rows)
+
     // Company logos: removing one needs the upload permission, clears it,
     // and the portal and quote PDFs still render without it
     await checkLogoRemoval(prisma, sessions, ctx, rows)
@@ -4492,6 +4509,11 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // assignment sends
     await checkTicketPages(sessions, ACTOR_LABEL, ctx, rows)
     await checkTicketAssignmentNotifications(prisma, sessions, ctx, rows)
+
+    // Teams off for tickets or opportunities: hidden from the folders,
+    // refused for new and moved records, existing records kept, and the
+    // default queue and the last team can't be turned off
+    await checkTeamModules(prisma, sessions.admin, ctx, rows)
 
     // Attachment downloads: the parent's view check, the redirect, and no
     // bucket link in any attachment response
@@ -4843,6 +4865,382 @@ async function checkAppearancePreferences(prisma: PrismaClient, sessions: Record
       await prisma.userPreferences.update({ where: { userId: everyoneId }, data: { themeAccent, themeSidebar, themeMode, rowDensity } })
     } else {
       await prisma.userPreferences.deleteMany({ where: { userId: everyoneId } })
+    }
+  }
+}
+
+// Sidebar layouts (/api/company-settings/sidebar and /api/account/sidebar).
+// Test Admin B saves the company layout (unknown pages and a made up or
+// foreign team dropped) and resets it; Test Manager B (no company settings
+// permission) is refused; bad values are refused with 400; Test Everyone B
+// saves, reads, and resets its own layout (never anyone else's), and is
+// refused with 403 SIDEBAR_LOCKED while the company switch is off, when it
+// sees the company layout but may still reset its own. Everything is put
+// back.
+async function checkSidebarPreferences(prisma: PrismaClient, sessions: Record<Actor, Session>, ctx: AttemptContext, rows: Row[]) {
+  const push = (who: string, name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[${who}] Sidebar: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const everyoneId = ctx.fx.everyoneUserId
+  const adminId = ctx.b.adminId
+  const companySelect = { sidebarLayout: true, allowUserSidebar: true } as const
+  const companyNow = () => prisma.companySettings.findUnique({ where: { companyId: ctx.b.companyId }, select: companySelect })
+  const prefsOf = (userId: string) => prisma.userPreferences.findUnique({ where: { userId }, select: { sidebarLayout: true } })
+  const savedCompany = await companyNow()
+  const savedEveryone = await prefsOf(everyoneId)
+  const savedAdmin = JSON.stringify(await prefsOf(adminId))
+  const everyone = sessions.everyone
+  const admin = sessions.admin
+  // The stored layout as plain data
+  type Stored = { sections?: Record<string, string[]>; folders?: Record<string, { teamOrder?: string[]; openByDefault?: boolean }>; defaultViews?: Record<string, string> }
+  const stored = (value: unknown) => (value && typeof value === "object" ? (value as Stored) : null)
+  const status = (res: { status: number; text: string }, want: number) => (res.status !== want ? `got ${res.status}: ${errorText(res.text)}` : null)
+
+  try {
+    // ── Company layout ──
+    let res = await admin.request("PATCH", "/api/company-settings/sidebar", {
+      json: {
+        allowUserSidebar: true,
+        layout: {
+          sections: { work: ["opportunities", "made-up-page", "dashboard", "tickets"], notASection: ["dashboard"] },
+          folders: { tickets: { teamOrder: [ctx.b.salesTeamId, ctx.fakeId, ctx.c.generalTeamId, ctx.b.generalTeamId], openByDefault: true } },
+          defaultViews: { tickets: "mine", opportunities: "list" },
+        },
+        companyId: ctx.c.companyId,
+      },
+    })
+    let company = await companyNow()
+    let layout = stored(company?.sidebarLayout)
+    push(
+      "Admin B",
+      "save the company layout",
+      "200, unknown keys and foreign teams dropped",
+      String(res.status),
+      status(res, 200) ??
+        (JSON.stringify(layout?.sections) !== JSON.stringify({ work: ["opportunities", "dashboard", "tickets"] })
+          ? `stored sections are ${JSON.stringify(layout?.sections)}`
+          : JSON.stringify(layout?.folders?.tickets) !== JSON.stringify({ teamOrder: [ctx.b.salesTeamId, ctx.b.generalTeamId], openByDefault: true })
+            ? `stored tickets folder is ${JSON.stringify(layout?.folders?.tickets)}`
+            : layout?.defaultViews?.tickets !== "mine" || layout?.defaultViews?.opportunities !== "list"
+              ? "default views not saved"
+              : null)
+    )
+    res = await admin.request("GET", "/api/company-settings/sidebar")
+    push(
+      "Admin B",
+      "read the company layout",
+      "200, saved order and own teams",
+      String(res.status),
+      status(res, 200) ??
+        (!res.text.includes('"work":["opportunities","dashboard","tickets"]')
+          ? "the saved order is not the effective one"
+          : !res.text.includes(ctx.b.generalTeamId)
+            ? "its own teams are missing"
+            : res.text.includes(ctx.c.generalTeamId)
+              ? "the response holds Test Company C's team"
+              : null)
+    )
+
+    // The company layout needs settingsSections.company
+    const beforeManager = JSON.stringify(await companyNow())
+    res = await sessions.manager.request("PATCH", "/api/company-settings/sidebar", { json: { allowUserSidebar: false } })
+    push("Manager B", "refuse saving the company layout", "403", String(res.status), status(res, 403) ?? (JSON.stringify(await companyNow()) !== beforeManager ? "the company layout changed" : null))
+    res = await sessions.manager.request("DELETE", "/api/company-settings/sidebar")
+    push("Manager B", "refuse resetting the company layout", "403", String(res.status), status(res, 403) ?? (JSON.stringify(await companyNow()) !== beforeManager ? "the company layout changed" : null))
+
+    // Bad company values: 400 and nothing written
+    const badCompany: [string, Record<string, unknown>][] = [
+      ["an unknown ticket view", { layout: { defaultViews: { tickets: "everything" } } }],
+      ["an unknown opportunity view", { layout: { defaultViews: { opportunities: "calendar" } } }],
+      ["a switch that isn't true or false", { allowUserSidebar: "no" }],
+      ["a section that isn't a list", { layout: { sections: { work: "tickets" } } }],
+      ["a team id that isn't an id", { layout: { folders: { tickets: { teamOrder: ["not an id!"] } } } }],
+      ["a layout that isn't an object", { layout: "board" }],
+    ]
+    for (const [name, body] of badCompany) {
+      const before = JSON.stringify(await companyNow())
+      res = await admin.request("PATCH", "/api/company-settings/sidebar", { json: body })
+      push("Admin B", `refuse ${name}`, "400", String(res.status), status(res, 400) ?? (JSON.stringify(await companyNow()) !== before ? "data changed" : null))
+    }
+
+    // ── A user's own layout ──
+    res = await everyone.request("PATCH", "/api/account/sidebar", {
+      json: { layout: { defaultViews: { tickets: "waiting" }, folders: { opportunities: { openByDefault: true } } }, userId: adminId },
+    })
+    let own = stored((await prefsOf(everyoneId))?.sidebarLayout)
+    push(
+      "Everyone B",
+      "save own layout",
+      "200, saved on own row",
+      String(res.status),
+      status(res, 200) ??
+        (own?.defaultViews?.tickets !== "waiting" || own?.folders?.opportunities?.openByDefault !== true
+          ? `stored layout is ${JSON.stringify(own)}`
+          : JSON.stringify(await prefsOf(adminId)) !== savedAdmin
+            ? "Test Admin B's layout changed"
+            : null)
+    )
+    res = await everyone.request("GET", "/api/account/sidebar")
+    push(
+      "Everyone B",
+      "read own layout over the company's",
+      "200, own view and the company order",
+      String(res.status),
+      status(res, 200) ??
+        (!res.text.includes('"effective":{"sections":{"work":["opportunities","dashboard","tickets"]')
+          ? "the company order is not in effect"
+          : !/"effective":.*"tickets":"waiting"/.test(res.text)
+            ? "its own ticket view is not in effect"
+            : null)
+    )
+
+    // Bad user values: 400 and nothing written
+    const badUser: [string, unknown][] = [
+      ["no layout", { defaultViews: { tickets: "mine" } }],
+      ["an unknown ticket view", { layout: { defaultViews: { tickets: "everything" } } }],
+      ["an open switch that isn't true or false", { layout: { folders: { tickets: { openByDefault: "yes" } } } }],
+      ["a body that isn't an object", ["layout"]],
+    ]
+    for (const [name, body] of badUser) {
+      const before = JSON.stringify(await prefsOf(everyoneId))
+      res = await everyone.request("PATCH", "/api/account/sidebar", { json: body })
+      push("Everyone B", `refuse ${name}`, "400", String(res.status), status(res, 400) ?? (JSON.stringify(await prefsOf(everyoneId)) !== before ? "data changed" : null))
+    }
+
+    // ── Company switch off ──
+    res = await admin.request("PATCH", "/api/company-settings/sidebar", { json: { allowUserSidebar: false } })
+    company = await companyNow()
+    push(
+      "Admin B",
+      "turn personal layouts off",
+      "200, layout kept",
+      String(res.status),
+      status(res, 200) ?? (company?.allowUserSidebar !== false ? "the switch is still on" : stored(company?.sidebarLayout)?.defaultViews?.tickets !== "mine" ? "the company layout changed" : null)
+    )
+    const lockedBefore = JSON.stringify(await prefsOf(everyoneId))
+    res = await everyone.request("PATCH", "/api/account/sidebar", { json: { layout: { defaultViews: { tickets: "all" } } } })
+    push(
+      "Everyone B",
+      "saving refused while turned off",
+      "403 SIDEBAR_LOCKED",
+      String(res.status),
+      res.status !== 403 || !res.text.includes("SIDEBAR_LOCKED")
+        ? `got ${res.status}: ${errorText(res.text)}`
+        : JSON.stringify(await prefsOf(everyoneId)) !== lockedBefore
+          ? "data changed"
+          : null
+    )
+    res = await everyone.request("GET", "/api/account/sidebar")
+    push(
+      "Everyone B",
+      "sees the company layout while turned off",
+      "200, company views",
+      String(res.status),
+      status(res, 200) ?? (!res.text.includes('"allowUserSidebar":false') ? "the switch is not reported off" : !/"effective":.*"tickets":"mine"/.test(res.text) ? "its own layout is still in effect" : null)
+    )
+    res = await everyone.request("DELETE", "/api/account/sidebar")
+    own = stored((await prefsOf(everyoneId))?.sidebarLayout)
+    push("Everyone B", "reset own layout, allowed while turned off", "200, own layout cleared", String(res.status), status(res, 200) ?? (own !== null ? "its own layout is still stored" : null))
+
+    // ── Company reset ──
+    res = await admin.request("DELETE", "/api/company-settings/sidebar")
+    company = await companyNow()
+    layout = stored(company?.sidebarLayout)
+    push(
+      "Admin B",
+      "reset the company layout to the PSAsync default",
+      "200, layout cleared, switch kept",
+      String(res.status),
+      status(res, 200) ??
+        (layout !== null
+          ? "the company layout is still stored"
+          : company?.allowUserSidebar !== false
+            ? "the switch changed"
+            : !res.text.includes('"work":["dashboard","tickets","opportunities"]')
+              ? "the effective layout is not the PSAsync default"
+              : null)
+    )
+  } finally {
+    await prisma.companySettings.updateMany({
+      where: { companyId: ctx.b.companyId },
+      data: {
+        sidebarLayout: savedCompany?.sidebarLayout == null ? Prisma.DbNull : (savedCompany.sidebarLayout as Prisma.InputJsonValue),
+        allowUserSidebar: savedCompany?.allowUserSidebar ?? true,
+      },
+    })
+    if (savedEveryone) {
+      await prisma.userPreferences.update({
+        where: { userId: everyoneId },
+        data: { sidebarLayout: savedEveryone.sidebarLayout == null ? Prisma.DbNull : (savedEveryone.sidebarLayout as Prisma.InputJsonValue) },
+      })
+    } else {
+      await prisma.userPreferences.deleteMany({ where: { userId: everyoneId } })
+    }
+  }
+}
+
+// Teams that tickets and opportunities use (Team.usesTickets and
+// Team.usesOpportunities). Test Admin B turns tickets off for the Alerts
+// queue and opportunities off for Sales, then checks: the sidebar folders
+// leave them out (their open records still count in the total); new and
+// moved tickets and opportunities are refused on them with 400 and nothing
+// is written; records already on them still open with their team and still
+// list under All; the default ticket queue and the last team using
+// opportunities can't be turned off (409); a bad value is 400. Every flag
+// is put back.
+async function checkTeamModules(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `[Admin B] Team modules: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const status = (res: { status: number; text: string }, want: number) => (res.status !== want ? `got ${res.status}: ${errorText(res.text)}` : null)
+  const companyId = ctx.b.companyId
+  const savedFlags = await prisma.team.findMany({ where: { companyId }, select: { id: true, usesTickets: true, usesOpportunities: true } })
+  const alertsTicket = await prisma.ticket.findUnique({ where: { id: ctx.fx.alertsTicketId }, select: { teamId: true } })
+  const settings = await prisma.ticketSettings.findUnique({ where: { companyId }, select: { defaultTeamId: true } })
+  const alertsTeamId = alertsTicket?.teamId
+  const helpdeskId = settings?.defaultTeamId
+  if (!alertsTeamId || !helpdeskId) {
+    push("fixtures", "Alerts and Helpdesk queues", "missing", "the Alerts ticket or the default ticket queue is missing")
+    return
+  }
+  const salesId = ctx.b.salesTeamId
+  const counts = (path: string) => admin.request("GET", path).then((res) => ({ res, json: res.status === 200 ? (JSON.parse(res.text) as { total: number; teams: { id: string }[] }) : null }))
+  const ticketCount = () => prisma.ticket.count({ where: { companyId } })
+  const opportunityCount = () => prisma.opportunity.count({ where: { companyId } })
+
+  try {
+    // ── Tickets off for Alerts ──
+    const ticketsBefore = await counts("/api/tickets/sidebar-counts")
+    let res = await admin.request("PATCH", `/api/teams/${alertsTeamId}`, { json: { usesTickets: false } })
+    push(
+      "turn tickets off for Alerts",
+      "200, the open count still returned",
+      String(res.status),
+      status(res, 200) ?? (!res.text.includes('"usesTickets":false') ? "the team still uses tickets" : !res.text.includes('"openTicketCount":') ? "no open ticket count" : null)
+    )
+    const ticketsAfter = await counts("/api/tickets/sidebar-counts")
+    push(
+      "the Tickets folder leaves Alerts out, the total keeps its tickets",
+      "200, no Alerts, same total",
+      String(ticketsAfter.res.status),
+      status(ticketsAfter.res, 200) ??
+        (ticketsAfter.json?.teams.some((t) => t.id === alertsTeamId)
+          ? "Alerts is still in the folder"
+          : ticketsAfter.json?.total !== ticketsBefore.json?.total
+            ? `the total changed from ${ticketsBefore.json?.total} to ${ticketsAfter.json?.total}`
+            : null)
+    )
+    res = await admin.request("GET", "/api/company-settings/sidebar")
+    push(
+      "Settings > Sidebar gets the flag to leave Alerts out of the Tickets folder",
+      "200, Alerts marked off",
+      String(res.status),
+      status(res, 200) ?? (!new RegExp(`"id":"${alertsTeamId}"[^}]*"usesTickets":false`).test(res.text) ? "Alerts is not marked off for tickets" : null)
+    )
+
+    let before = await ticketCount()
+    res = await admin.request("POST", "/api/tickets", { json: { title: "Dev check, never saved", initialNote: OPP_NOTE, teamId: alertsTeamId } })
+    push(
+      "refuse a new ticket in Alerts",
+      "400 TEAM_NOT_FOR_MODULE",
+      String(res.status),
+      res.status !== 400 || !res.text.includes("TEAM_NOT_FOR_MODULE") ? `got ${res.status}: ${errorText(res.text)}` : (await ticketCount()) !== before ? "a ticket was created" : null
+    )
+    const helpdeskTicketTeam = async () => (await prisma.ticket.findUnique({ where: { id: ctx.b.ticketId }, select: { teamId: true } }))?.teamId
+    const teamBefore = await helpdeskTicketTeam()
+    res = await admin.request("PATCH", `/api/tickets/${ctx.b.ticketId}`, { json: { teamId: alertsTeamId, assigneeId: null } })
+    push(
+      "refuse moving a ticket to Alerts",
+      "400 TEAM_NOT_FOR_MODULE",
+      String(res.status),
+      res.status !== 400 || !res.text.includes("TEAM_NOT_FOR_MODULE") ? `got ${res.status}: ${errorText(res.text)}` : (await helpdeskTicketTeam()) !== teamBefore ? "the ticket moved" : null
+    )
+    res = await admin.request("PATCH", "/api/ticket-settings", { json: { defaultTeamId: alertsTeamId } })
+    const defaultNow = (await prisma.ticketSettings.findUnique({ where: { companyId }, select: { defaultTeamId: true } }))?.defaultTeamId
+    push("refuse Alerts as the default queue", "400", String(res.status), status(res, 400) ?? (defaultNow !== helpdeskId ? "the default queue changed" : null))
+
+    // Records already on the team stay
+    res = await admin.request("GET", `/api/tickets/${ctx.fx.alertsTicketId}`)
+    push("a ticket already in Alerts still opens with its queue", "200, its queue", String(res.status), status(res, 200) ?? (!res.text.includes(alertsTeamId) ? "its queue is missing" : null))
+    res = await admin.request("GET", "/api/tickets?view=all")
+    push("a ticket already in Alerts still lists under All tickets", "200, listed", String(res.status), status(res, 200) ?? (!res.text.includes(ctx.fx.alertsTicketId) ? "not listed" : null))
+    res = await admin.request("PATCH", `/api/tickets/${ctx.fx.alertsTicketId}`, { json: { teamId: alertsTeamId } })
+    push("a ticket already in Alerts still saves naming its own queue", "200", String(res.status), status(res, 200))
+
+    // The default ticket queue can't be turned off for tickets
+    res = await admin.request("PATCH", `/api/teams/${helpdeskId}`, { json: { usesTickets: false } })
+    const flags = await prisma.team.findUnique({ where: { id: helpdeskId }, select: { usesTickets: true } })
+    push(
+      "refuse turning tickets off for the default queue",
+      "409 DEFAULT_TICKET_QUEUE",
+      String(res.status),
+      res.status !== 409 || !res.text.includes("DEFAULT_TICKET_QUEUE") ? `got ${res.status}: ${errorText(res.text)}` : flags?.usesTickets !== true ? "the queue was turned off" : null
+    )
+
+    // ── Opportunities off for Sales ──
+    const oppBefore = await counts("/api/opportunities/sidebar-counts")
+    res = await admin.request("PATCH", `/api/teams/${salesId}`, { json: { usesOpportunities: false } })
+    push(
+      "turn opportunities off for Sales",
+      "200, the open count still returned",
+      String(res.status),
+      status(res, 200) ?? (!res.text.includes('"usesOpportunities":false') ? "the team still uses opportunities" : !res.text.includes('"openOpportunityCount":') ? "no open opportunity count" : null)
+    )
+    const oppAfter = await counts("/api/opportunities/sidebar-counts")
+    push(
+      "the Opportunities folder leaves Sales out, the total keeps its opportunities",
+      "200, no Sales, same total",
+      String(oppAfter.res.status),
+      status(oppAfter.res, 200) ??
+        (oppAfter.json?.teams.some((t) => t.id === salesId)
+          ? "Sales is still in the folder"
+          : oppAfter.json?.total !== oppBefore.json?.total
+            ? `the total changed from ${oppBefore.json?.total} to ${oppAfter.json?.total}`
+            : null)
+    )
+    before = await opportunityCount()
+    res = await admin.request("POST", "/api/opportunities", {
+      json: { title: "Dev check, never saved", clientId: ctx.b.clientId, contactId: ctx.b.contactId, initialNote: OPP_NOTE, teamId: salesId },
+    })
+    push(
+      "refuse a new opportunity in Sales",
+      "400 TEAM_NOT_FOR_MODULE",
+      String(res.status),
+      res.status !== 400 || !res.text.includes("TEAM_NOT_FOR_MODULE") ? `got ${res.status}: ${errorText(res.text)}` : (await opportunityCount()) !== before ? "an opportunity was created" : null
+    )
+    const oppTeam = async () => (await prisma.opportunity.findUnique({ where: { id: ctx.b.opportunityId }, select: { teamId: true } }))?.teamId
+    const oppTeamBefore = await oppTeam()
+    res = await admin.request("PATCH", `/api/opportunities/${ctx.b.opportunityId}`, { json: { teamId: salesId, ownerId: null } })
+    push(
+      "refuse moving an opportunity to Sales",
+      "400 TEAM_NOT_FOR_MODULE",
+      String(res.status),
+      res.status !== 400 || !res.text.includes("TEAM_NOT_FOR_MODULE") ? `got ${res.status}: ${errorText(res.text)}` : (await oppTeam()) !== oppTeamBefore ? "the opportunity moved" : null
+    )
+    res = await admin.request("GET", `/api/opportunities/${ctx.fx.salesViewerOpportunityId}`)
+    push("an opportunity already in Sales still opens with its team", "200, its team", String(res.status), status(res, 200) ?? (!res.text.includes(salesId) ? "its team is missing" : null))
+    res = await admin.request("GET", "/api/opportunities")
+    push("an opportunity already in Sales still lists under All opportunities", "200, listed", String(res.status), status(res, 200) ?? (!res.text.includes(ctx.fx.salesViewerOpportunityId) ? "not listed" : null))
+
+    // The last team using opportunities can't be turned off for them
+    await prisma.team.updateMany({ where: { companyId, id: { not: ctx.b.generalTeamId } }, data: { usesOpportunities: false } })
+    res = await admin.request("PATCH", `/api/teams/${ctx.b.generalTeamId}`, { json: { usesOpportunities: false } })
+    const generalFlags = await prisma.team.findUnique({ where: { id: ctx.b.generalTeamId }, select: { usesOpportunities: true } })
+    push(
+      "refuse turning opportunities off for the last team using them",
+      "409 LAST_TEAM_FOR_MODULE",
+      String(res.status),
+      res.status !== 409 || !res.text.includes("LAST_TEAM_FOR_MODULE")
+        ? `got ${res.status}: ${errorText(res.text)}`
+        : generalFlags?.usesOpportunities !== true
+          ? "the last team was turned off"
+          : null
+    )
+
+    // A bad value
+    res = await admin.request("PATCH", `/api/teams/${salesId}`, { json: { usesTickets: "no" } })
+    push("refuse a flag that isn't true or false", "400", String(res.status), status(res, 400))
+  } finally {
+    for (const t of savedFlags) {
+      await prisma.team.update({ where: { id: t.id }, data: { usesTickets: t.usesTickets, usesOpportunities: t.usesOpportunities } })
     }
   }
 }

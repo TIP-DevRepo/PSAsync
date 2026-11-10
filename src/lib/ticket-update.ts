@@ -64,6 +64,7 @@ export type TicketUpdatePlan = { data: Prisma.TicketUncheckedUpdateInput; respon
 function ticketTeamAssigneeRules(ctx: AccessContext): TeamPersonRules {
   return {
     personKey: "assigneeId",
+    module: "tickets",
     mayUseTeam: (actorInTeam) => mayUseTicketTeam(ctx, actorInTeam),
     mayAssign: (assigneeId) => mayAssignTicketTo(ctx, assigneeId),
     messages: {

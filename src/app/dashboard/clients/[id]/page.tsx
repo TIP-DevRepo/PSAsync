@@ -10,9 +10,10 @@ import { TabsBar } from "@/components/ui/tabs-bar"
 import { Combobox } from "@/components/ui/combobox"
 import { Modal } from "@/components/Modal"
 import { ContainersModal } from "@/components/inventory/ContainersModal"
-import { Ticket, Target, Package, FileText, KeyRound, FolderOpen, Radar, Settings2, Boxes, Phone, Wrench, CheckCircle2 } from "lucide-react"
+import { Ticket, Package, FileText, KeyRound, FolderOpen, Radar, Settings2, Boxes, Phone, Wrench, CheckCircle2 } from "lucide-react"
 import { ClientAssetsPanel } from "@/components/clients/ClientAssetsPanel"
 import { ClientTicketsPanel } from "@/components/clients/ClientTicketsPanel"
+import { ClientOpportunitiesPanel } from "@/components/clients/ClientOpportunitiesPanel"
 import { formatPhoneInput, formatPhoneDisplay } from "@/lib/phone"
 import { useAccess } from "@/components/AccessProvider"
 import { NoAccess } from "@/components/NoAccess"
@@ -108,31 +109,6 @@ const CLIENT_TABS: { key: ClientTabKey; label: string }[] = [
   { key: "clientSettings", label: "Client Settings" },
 ]
 
-type StatusFilter = "OPEN" | "CLOSED" | "ALL"
-
-function FilterPills({ value, onChange }: { value: StatusFilter; onChange: (v: StatusFilter) => void }) {
-  const options: { key: StatusFilter; label: string }[] = [
-    { key: "OPEN", label: "Open" },
-    { key: "CLOSED", label: "Closed" },
-    { key: "ALL", label: "All" },
-  ]
-  return (
-    <div className="inline-flex items-center gap-0.5 rounded-full border border-border bg-muted p-0.5">
-      {options.map((o) => (
-        <button
-          key={o.key}
-          onClick={() => onChange(o.key)}
-          className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-            value === o.key ? "bg-card text-foreground shadow-card" : "text-muted-foreground hover:text-foreground"
-          }`}
-        >
-          {o.label}
-        </button>
-      ))}
-    </div>
-  )
-}
-
 function PlaceholderPanel({
   icon: Icon,
   title,
@@ -182,10 +158,14 @@ function ClientDetailPageContent() {
   const canEdit = can("clients.edit")
   const canUseInventory = can("pages.inventory")
   const canUseTickets = can("pages.tickets")
+  const canUseOpportunities = can("pages.opportunities")
   // Same any-of rule as POST /api/industries
   const canCreateIndustry = can("settingsSections.company") || can("clients.create") || canEdit
-  // Assets need the Inventory page and Tickets the Tickets page
-  const tabs = CLIENT_TABS.filter((t) => (t.key !== "assets" || canUseInventory) && (t.key !== "tickets" || canUseTickets))
+  // Assets need the Inventory page, Tickets the Tickets page, and
+  // Opportunities the Opportunities page
+  const tabs = CLIENT_TABS.filter(
+    (t) => (t.key !== "assets" || canUseInventory) && (t.key !== "tickets" || canUseTickets) && (t.key !== "opportunities" || canUseOpportunities)
+  )
 
   const [client, setClient] = useState<ClientDetail | null>(null)
   const [loading, setLoading] = useState(true)
@@ -209,7 +189,6 @@ function ClientDetailPageContent() {
     // A row to highlight only means something when a link lands
     router.replace(tabHref(pathname, searchParams.toString(), key, "details", [CLIENT_CONTACT_PARAM, CLIENT_LOCATION_PARAM]), { scroll: false })
   }
-  const [oppFilter, setOppFilter] = useState<StatusFilter>("OPEN")
 
   const [editingDetails, setEditingDetails] = useState(false)
   const [detailsDraft, setDetailsDraft] = useState({
@@ -1059,18 +1038,7 @@ function ClientDetailPageContent() {
 
         {activeTab === "tickets" && canUseTickets && <ClientTicketsPanel client={{ id, name: client.name }} />}
 
-        {activeTab === "opportunities" && (
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <FilterPills value={oppFilter} onChange={setOppFilter} />
-            </div>
-            <PlaceholderPanel
-              icon={Target}
-              title="Opportunities coming soon"
-              description={`This will show ${oppFilter === "ALL" ? "all" : oppFilter.toLowerCase()} opportunities for this client once the pipeline/opportunities system is built.`}
-            />
-          </div>
-        )}
+        {activeTab === "opportunities" && canUseOpportunities && <ClientOpportunitiesPanel client={{ id, name: client.name }} />}
 
         {activeTab === "assets" && canUseInventory && <ClientAssetsPanel clientId={id} />}
 

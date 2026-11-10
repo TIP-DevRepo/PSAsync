@@ -49,6 +49,7 @@ export type OpportunityUpdateExisting = Prisma.OpportunityGetPayload<{ select: t
 function opportunityTeamOwnerRules(ctx: AccessContext): TeamPersonRules {
   return {
     personKey: "ownerId",
+    module: "opportunities",
     mayUseTeam: (actorInTeam) => mayUseOpportunityTeam(ctx, actorInTeam),
     mayAssign: (ownerId, actorInTeam) => mayAssignOpportunityTo(ctx, ownerId, actorInTeam),
     messages: {

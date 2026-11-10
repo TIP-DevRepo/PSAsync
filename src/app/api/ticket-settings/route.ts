@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { teamModuleRefusal } from "@/lib/team-module-checks"
 import { apiError, requireAccess } from "@/lib/api-access"
 import { assertRefs, teamWhere } from "@/lib/scoped-loaders"
 import { ensureTicketDefaults, withTicketSettingsLock } from "@/lib/ticket-defaults"
@@ -45,6 +46,9 @@ export async function PATCH(req: NextRequest) {
     if (typeof body.defaultTeamId !== "string") return apiError(400, "Invalid team", "INVALID_REFERENCE")
     const invalid = await assertRefs(ctx, { teamId: body.defaultTeamId })
     if (invalid) return invalid
+    // The default queue must use tickets (src/lib/team-modules.ts)
+    const offTeam = await teamModuleRefusal(ctx, body.defaultTeamId, "tickets")
+    if (offTeam) return offTeam
     data.defaultTeamId = body.defaultTeamId
   }
   if ("autoCloseResolvedDays" in body) {

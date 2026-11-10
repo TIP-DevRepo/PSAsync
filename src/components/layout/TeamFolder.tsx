@@ -10,6 +10,7 @@ import { OPPORTUNITIES_CHANGED_EVENT, opportunityFolderHref, OWNER_UNASSIGNED } 
 import { ASSIGNEE_UNASSIGNED, ticketFolderHref } from "@/lib/ticket-list"
 import { TICKETS_CHANGED_EVENT } from "@/lib/ticket-view"
 import type { SidebarCounts } from "@/lib/team-rules"
+import { orderTeams } from "@/lib/sidebar-layout"
 
 // One record type's folder: where it lives, where its counts come from,
 // the event that reloads them, and the URL parameter that holds the person
@@ -63,18 +64,22 @@ export const TICKETS_FOLDER: TeamFolderConfig = {
   href: ticketFolderHref,
 }
 
-// Whether a folder is open, kept per browser. Storage can be missing or
-// refuse access (a private window, blocked site data), so every read and
-// write is wrapped and the folder simply starts closed. The opportunities
-// key is the one it always used.
+// Whether a folder is open, kept per browser once the user opens or closes
+// it. Until then (or when storage is missing or refuses access: a private
+// window, blocked site data) the sidebar layout's "Open by default" decides.
+// Every read and write is wrapped. The opportunities key is the one it
+// always used.
 const openKey = (key: TeamFolderConfig["key"]) => `psasync.sidebar.${key}Open`
 const OPEN_CHANGED = "psasync:sidebar-folder-open"
 
-function readOpen(key: TeamFolderConfig["key"]): boolean {
+function readOpen(key: TeamFolderConfig["key"], openByDefault: boolean): boolean {
   try {
-    return window.localStorage.getItem(openKey(key)) === "1"
+    const stored = window.localStorage.getItem(openKey(key))
+    if (stored === "1") return true
+    if (stored === "0") return false
+    return openByDefault
   } catch {
-    return false
+    return openByDefault
   }
 }
 
@@ -117,7 +122,8 @@ function Count({ value, noun }: { value: number | undefined; noun: string }) {
 // A sidebar entry as an expandable folder of teams (HaloPSA style), shared
 // by Opportunities and Tickets (whose teams are its queues): the entry
 // itself opens the list, and its chevron shows the "All" row, then each
-// team in order, each expanding to Unassigned and its members, every row
+// team in order (the sidebar layout's team order, then the rest in their
+// own order), each expanding to Unassigned and its members, every row
 // with its count of open records the user can see (one request for the
 // whole folder). A team opens the list filtered to it, a member to that
 // team and person, Unassigned to that team's unassigned ones. Counts reload
@@ -126,13 +132,23 @@ function Count({ value, noun }: { value: number | undefined; noun: string }) {
 // total from the same request, so the counts also load (once) while the
 // folder is closed. The mobile menu shows the same folder; the sidebar has
 // no collapsed mode.
-export function TeamFolder({ config, isActive }: { config: TeamFolderConfig; isActive: boolean }) {
+export function TeamFolder({
+  config,
+  isActive,
+  teamOrder = [],
+  openByDefault = false,
+}: {
+  config: TeamFolderConfig
+  isActive: boolean
+  teamOrder?: readonly string[]
+  openByDefault?: boolean
+}) {
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const open = useSyncExternalStore(
     subscribeOpen,
-    () => readOpen(config.key),
-    () => false
+    () => readOpen(config.key, openByDefault),
+    () => openByDefault
   )
   const [counts, setCounts] = useState<SidebarCounts | null>(null)
   // Teams opened or closed in this page view; the team the list is
@@ -214,7 +230,7 @@ export function TeamFolder({ config, isActive }: { config: TeamFolderConfig; isA
             </Link>
           </li>
           {counts === null && <li className="px-2.5 py-1.5 text-xs text-sb-muted">Loading...</li>}
-          {counts?.teams.map((team) => {
+          {counts && orderTeams(counts.teams, teamOrder).map((team) => {
             const teamOpen = isExpanded(team.id)
             const groupId = `sidebar-${config.key}-team-${team.id}`
             return (

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server"
 import { prisma } from "@/lib/prisma"
+import { teamModuleRefusal } from "@/lib/team-module-checks"
 import { apiError, requireAccess } from "@/lib/api-access"
 import {
   assertRefs,
@@ -146,7 +147,7 @@ export async function GET(req: NextRequest) {
 //   teamId: left out, null, or blank is the default ticket team (Ticket
 //     Settings, Helpdesk to start), open to every creator; any other team
 //     must be one the creator is in, or any with tickets.assign or
-//     tickets.viewAll
+//     tickets.viewAll; the team must use tickets (src/lib/team-modules.ts)
 //   assigneeId: left out, null, or blank is unassigned (round robin may
 //     then assign it); a named one follows mayAssignTicketTo and must be a
 //     member of the team
@@ -194,6 +195,8 @@ export async function POST(req: NextRequest) {
   const defaultTeamId = await loadDefaultTicketTeamId(ctx.companyId)
   const teamId = team.value ?? defaultTeamId
   if (!teamId) return apiError(400, "Invalid team", "INVALID_REFERENCE")
+  const offTeam = await teamModuleRefusal(ctx, teamId, "tickets")
+  if (offTeam) return offTeam
 
   const assignee = readOptionalId(body.assigneeId)
   if (assignee.error !== undefined) return apiError(400, "Invalid user", "INVALID_REFERENCE")

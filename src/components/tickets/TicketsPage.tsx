@@ -10,6 +10,7 @@ import { LIST_PAGE, PageHeader, StatRow, StatTile, TABLE } from "@/components/ui
 import { ViewTabs, type ViewTabItem } from "@/components/ui/view-tabs"
 import { FilterChip } from "@/components/ui/filter-chip"
 import { useAccess } from "@/components/AccessProvider"
+import { useDefaultViews } from "@/components/DefaultViewsProvider"
 import { useColumnFilters } from "@/components/table/ColumnFilters"
 import { OpportunityFilterBar } from "@/components/opportunities/OpportunityFilterBar"
 import { hasColumnFilters } from "@/lib/column-filters"
@@ -63,7 +64,9 @@ export function TicketsPage() {
   const { can } = useAccess()
   const canCreate = can("tickets.create")
 
-  const query = useMemo(() => readTicketPageUrl(searchParams), [searchParams])
+  // Without a view in the URL, the sidebar layout's default view applies
+  const defaultView = useDefaultViews().tickets
+  const query = useMemo(() => readTicketPageUrl(searchParams, defaultView), [searchParams, defaultView])
   const apiQuery = ticketApiQuery(query)
   const options = useTicketOptions()
   const columnFilters = useColumnFilters(TICKET_FILTER_KEYS)
@@ -76,9 +79,9 @@ export function TicketsPage() {
 
   const setQuery = useCallback(
     (next: TicketListQuery) => {
-      router.replace(`${pathname}${ticketPageQuery(next)}`, { scroll: false })
+      router.replace(`${pathname}${ticketPageQuery(next, defaultView)}`, { scroll: false })
     },
-    [router, pathname]
+    [router, pathname, defaultView]
   )
   // Every change but paging goes back to the first page
   const change = useCallback((patch: Partial<TicketListQuery>) => setQuery({ ...query, page: 1, ...patch }), [setQuery, query])

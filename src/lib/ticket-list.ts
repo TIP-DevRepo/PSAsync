@@ -113,12 +113,13 @@ type Params = { get(name: string): string | null }
 
 // The page's URL (?view=&q=&team=&assignee=&sort=&dir=&page=&f_<column>=).
 // Lenient: anything it doesn't understand falls back to its default, so an
-// old or edited link still opens the list.
-export function readTicketPageUrl(params: Params): TicketListQuery {
+// old or edited link still opens the list. A missing view is the default
+// view: All open, or the sidebar layout's choice (src/lib/sidebar-layout.ts).
+export function readTicketPageUrl(params: Params, defaultView: TicketView = DEFAULT_TICKET_VIEW): TicketListQuery {
   const view = params.get("view")
   const sort = params.get("sort")
   return {
-    view: isTicketView(view) ? view : DEFAULT_TICKET_VIEW,
+    view: isTicketView(view) ? view : defaultView,
     q: (params.get("q") ?? "").slice(0, TICKET_SEARCH_MAX),
     team: params.get("team") ?? "",
     assignee: params.get("assignee") ?? "",
@@ -129,10 +130,11 @@ export function readTicketPageUrl(params: Params): TicketListQuery {
   }
 }
 
-// The page's query string ("" or "?..."), leaving every default out
-export function ticketPageQuery(query: TicketListQuery): string {
+// The page's query string ("" or "?..."), leaving every default out (the
+// view is left out only when it is the default view the page reads with)
+export function ticketPageQuery(query: TicketListQuery, defaultView: TicketView = DEFAULT_TICKET_VIEW): string {
   const params = new URLSearchParams()
-  if (query.view !== DEFAULT_TICKET_VIEW) params.set("view", query.view)
+  if (query.view !== defaultView) params.set("view", query.view)
   if (query.q.trim()) params.set("q", query.q.trim())
   if (query.team) params.set("team", query.team)
   if (query.assignee) params.set("assignee", query.assignee)

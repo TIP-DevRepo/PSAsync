@@ -14,6 +14,17 @@ export const teamSelect = {
   isDefault: true,
   sortOrder: true,
   roundRobinEnabled: true,
+  usesTickets: true,
+  usesOpportunities: true,
+  // The open records still on the team (open tickets: OPEN and WAITING;
+  // open opportunities: an OPEN stage), never deleted ones. Settings > Teams
+  // shows them before a module is turned off for the team.
+  _count: {
+    select: {
+      tickets: { where: { deletedAt: null, status: { category: { in: ["OPEN", "WAITING"] } } } },
+      opportunities: { where: { deletedAt: null, stage: { category: "OPEN" } } },
+    },
+  },
   members: {
     select: { user: { select: { id: true, name: true, active: true } } },
     orderBy: { user: { name: "asc" } },

@@ -12,7 +12,8 @@ import {
   OPPORTUNITY_SELF_ASSIGN_ONLY_MESSAGE,
 } from "@/lib/scoped-loaders"
 import { ensureOpportunityDefaults } from "@/lib/opportunity-defaults"
-import { ensureTeamDefaults, loadDefaultTeamId } from "@/lib/team-defaults"
+import { ensureTeamDefaults } from "@/lib/team-defaults"
+import { loadDefaultOpportunityTeamId, teamModuleRefusal } from "@/lib/team-module-checks"
 import { OWNER_NOT_IN_TEAM_MESSAGE, TEAM_NOT_MEMBER_MESSAGE } from "@/lib/team-rules"
 import { opportunityListSelect, STAGE_ORDER } from "@/lib/opportunity-selects"
 import {
@@ -144,17 +145,21 @@ export async function POST(req: NextRequest) {
     return apiError(400, "A contact is required")
   }
 
-  // The team: left out, null, or blank is the General team. General is open
-  // to every creator (it is where new opportunities go unless another team
-  // is chosen); any other team must be one the creator belongs to (any team
-  // with opportunities.viewAll).
+  // The team: left out, null, or blank is the default opportunity team
+  // (General, or the first team using opportunities while General is off
+  // for them). The default is open to every creator (it is where new
+  // opportunities go unless another team is chosen); any other team must be
+  // one the creator belongs to (any team with opportunities.viewAll), and a
+  // chosen team must use opportunities.
   const team = readOptionalId(body.teamId)
   if (team.error !== undefined) return apiError(400, "Invalid team", "INVALID_REFERENCE")
   if (team.value) {
     const invalidTeam = await assertRefs(ctx, { teamId: team.value })
     if (invalidTeam) return invalidTeam
+    const offTeam = await teamModuleRefusal(ctx, team.value, "opportunities")
+    if (offTeam) return offTeam
   }
-  const defaultTeamId = await loadDefaultTeamId(ctx.companyId)
+  const defaultTeamId = await loadDefaultOpportunityTeamId(ctx.companyId)
   const teamId = team.value ?? defaultTeamId
   if (!teamId) return apiError(400, "Invalid team", "INVALID_REFERENCE")
 

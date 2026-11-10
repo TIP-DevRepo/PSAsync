@@ -9,6 +9,8 @@ import { DEFAULT_DENSITY, resolveTheme } from "@/lib/theme"
 import { StaffTheme } from "@/components/StaffTheme"
 import { AccessProvider } from "@/components/AccessProvider"
 import { AppearanceProvider } from "@/components/AppearanceProvider"
+import { DefaultViewsProvider } from "@/components/DefaultViewsProvider"
+import { PSASYNC_SIDEBAR_LAYOUT } from "@/lib/sidebar-layout"
 import { SessionKeepAlive } from "@/components/SessionKeepAlive"
 
 export default async function DashboardLayout({
@@ -31,7 +33,9 @@ export default async function DashboardLayout({
   const pagePermissions: PagePermissions = resolvePagePermissions(session.user.access)
   // The theme, company name and logo, and row density in one lookup
   const appearance = session.user.id ? await loadAppearance(session.user.id) : null
+  const layout = appearance?.sidebarLayout ?? PSASYNC_SIDEBAR_LAYOUT
   const sidebar = {
+    layout,
     pagePermissions,
     companyName: appearance?.companyName ?? "PSAsync",
     logoUrl: appearance?.logoUrl ?? null,
@@ -56,7 +60,9 @@ export default async function DashboardLayout({
           <Topbar {...sidebar} />
           <main className="flex-1 overflow-y-auto px-4 py-6 sm:px-7">
             <AccessProvider access={session.user.access ?? null}>
-              <AppearanceProvider rowDensity={appearance?.rowDensity ?? DEFAULT_DENSITY}>{children}</AppearanceProvider>
+              <AppearanceProvider rowDensity={appearance?.rowDensity ?? DEFAULT_DENSITY}>
+                <DefaultViewsProvider defaultViews={layout.defaultViews}>{children}</DefaultViewsProvider>
+              </AppearanceProvider>
             </AccessProvider>
           </main>
         </div>
