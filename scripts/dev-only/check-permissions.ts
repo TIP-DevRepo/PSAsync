@@ -959,6 +959,15 @@ const TICKET_ATTEMPTS: Attempt[] = [
   { name: "Client tickets tab with a made up filter", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets?status=nope`, expect: 400, expectError: "Invalid status filter" },
   { name: "Client tickets tab", actor: "everyone", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets`, expect: 403, expectError: "view tickets" },
   { name: "Client tickets tab", actor: "clerk", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets`, expect: 403, expectError: "view tickets" },
+  // The client page's Opportunities tab: the Opportunities list's visibility
+  { name: "Client opportunities tab", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?status=all`, expect: 200, contains: (c) => [c.b.opportunityId, c.fx.repOpportunityId, c.fx.unassignedOpportunityId] },
+  { name: "Client opportunities tab: the team's unassigned, never others' own", actor: "oppViewer", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?status=all`, expect: 200, contains: (c) => [c.fx.unassignedOpportunityId], notContains: (c) => [c.b.opportunityId, c.fx.repOpportunityId] },
+  { name: "Client opportunities tab: won ones only", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?status=won`, expect: 200, notContains: (c) => [c.b.opportunityId, c.fx.repOpportunityId, c.fx.unassignedOpportunityId] },
+  { name: "Client opportunities tab for a made up client", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.fakeId}/opportunities`, expect: 404, expectError: "Not found" },
+  { name: "Client opportunities tab with a made up filter", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?status=nope`, expect: 400, expectError: "Invalid status filter" },
+  { name: "Client opportunities tab with a bad page", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities?page=0`, expect: 400, expectError: "Invalid page" },
+  { name: "Client opportunities tab", actor: "everyone", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities`, expect: 403, expectError: "view opportunities" },
+  { name: "Client opportunities tab", actor: "clerk", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/opportunities`, expect: 403, expectError: "view opportunities" },
 
   // Assignment and team rules
   { name: "Create for a teammate", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.b.helpdeskTeamId, assigneeId: c.fx.ticketViewerUserId }), expect: 403, expectError: "yourself or leave them unassigned" },

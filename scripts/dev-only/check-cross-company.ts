@@ -389,6 +389,7 @@ const ATTEMPTS: Attempt[] = [
   { name: "Ticket list view filtered by other company's assignee", directions: "both", method: "GET", path: (c) => `/api/tickets?view=mine&assigneeId=${c.other.adminId}&page=1`, expect: 400, expectError: "Invalid user" },
   // The client page's Tickets tab
   { name: "Tickets of other company's client", directions: "both", method: "GET", path: (c) => `/api/clients/${c.other.clientId}/tickets`, expect: 404 },
+  { name: "Opportunities of other company's client", directions: "both", method: "GET", path: (c) => `/api/clients/${c.other.clientId}/opportunities`, expect: 404 },
   { name: "Action button POST fixedTicketStatusId", directions: "both", method: "POST", path: () => "/api/action-buttons", body: (c) => ({ label: "Should Not Exist", icon: "note", color: "#1B3A5C", kind: "NOTE", forOpportunities: false, forTickets: true, stageMode: "FIXED", fixedTicketStatusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
 
   // ── Permission escalation inside one company ──
@@ -903,6 +904,7 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       { path: `/api/tickets/${own.ticketId}/audit`, mustHold: own.ticketAuditEntryId, foreign: [other.ticketAuditEntryId, other.ticketId] },
       { path: "/api/ticket-statuses", mustHold: own.ticketStatusId, foreign: [other.ticketStatusId] },
       { path: `/api/clients/${own.clientId}/tickets?status=all`, mustHold: own.ticketId, foreign: [other.ticketId] },
+      { path: `/api/clients/${own.clientId}/opportunities?status=all`, mustHold: own.opportunityId, foreign: [other.opportunityId] },
       { path: "/api/tickets?view=all&sort=queue", mustHold: own.ticketId, foreign: [other.ticketId] },
     ]
     for (const list of lists) {

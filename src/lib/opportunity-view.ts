@@ -371,3 +371,27 @@ export function opportunityStats(rows: readonly OpportunityRow[], now: Date): Op
   }
   return stats
 }
+
+// ─── The client page's Opportunities tab ────────────────────────────────────
+
+// GET /api/clients/[id]/opportunities pages this many at a time (Load more)
+export const CLIENT_OPPORTUNITY_PAGE_SIZE = 50
+
+// Open (an OPEN stage, the default), Won, Lost, or All
+export const CLIENT_OPPORTUNITY_FILTERS = ["open", "won", "lost", "all"] as const
+export type ClientOpportunityFilter = (typeof CLIENT_OPPORTUNITY_FILTERS)[number]
+
+export const CLIENT_OPPORTUNITY_FILTER_LABELS: Record<ClientOpportunityFilter, string> = { open: "Open", won: "Won", lost: "Lost", all: "All" }
+
+export function isClientOpportunityFilter(value: unknown): value is ClientOpportunityFilter {
+  return typeof value === "string" && (CLIENT_OPPORTUNITY_FILTERS as readonly string[]).includes(value)
+}
+
+// The stage category a filter keeps, or null for every one
+export function clientOpportunityCategory(filter: ClientOpportunityFilter): StageCategory | null {
+  return filter === "open" ? "OPEN" : filter === "won" ? "WON" : filter === "lost" ? "LOST" : null
+}
+
+export function opportunityHref(id: string): string {
+  return `/dashboard/opportunities/${id}`
+}
