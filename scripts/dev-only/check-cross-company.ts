@@ -384,6 +384,11 @@ const ATTEMPTS: Attempt[] = [
   { name: "Note on own ticket with other company's statusId", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.own.ticketId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", statusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
   { name: "Note on own ticket with other company's actionButtonId", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.own.ticketId}/timeline`, body: (c) => ({ body: "<p>Should not exist</p>", actionButtonId: c.other.actionButtonId }), expect: 400, expectError: "Invalid action button" },
   { name: "Email from own ticket with other company's attachment", directions: "both", method: "POST", path: (c) => `/api/tickets/${c.own.ticketId}/email`, body: (c) => ({ to: ["nobody@example.test"], subject: "Dev only check, never sent", body: "<p>Dev only check, never sent</p>", attachmentIds: [c.other.ticketAttachmentId] }), expect: 400, expectError: "Invalid attachment" },
+  // The paged ticket list's scope with the other company's ids
+  { name: "Ticket list view filtered by other company's team", directions: "both", method: "GET", path: (c) => `/api/tickets?view=all&teamId=${c.other.helpdeskTeamId}&sort=priority`, expect: 400, expectError: "Invalid team" },
+  { name: "Ticket list view filtered by other company's assignee", directions: "both", method: "GET", path: (c) => `/api/tickets?view=mine&assigneeId=${c.other.adminId}&page=1`, expect: 400, expectError: "Invalid user" },
+  // The client page's Tickets tab
+  { name: "Tickets of other company's client", directions: "both", method: "GET", path: (c) => `/api/clients/${c.other.clientId}/tickets`, expect: 404 },
   { name: "Action button POST fixedTicketStatusId", directions: "both", method: "POST", path: () => "/api/action-buttons", body: (c) => ({ label: "Should Not Exist", icon: "note", color: "#1B3A5C", kind: "NOTE", forOpportunities: false, forTickets: true, stageMode: "FIXED", fixedTicketStatusId: c.other.ticketStatusId }), expect: 400, expectError: "Invalid status" },
 
   // ── Permission escalation inside one company ──
@@ -838,6 +843,51 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
     }
   }
 
+  // Company logos: each admin removing its own logos (both slots) clears
+  // only its own company's; the other company's logos stay exactly as they
+  // were. Both companies get dummy links outside the uploads bucket for the
+  // step (the route's file delete skips them, so nothing reaches S3) and
+  // their logos are put back after.
+  {
+    const dummy = (letter: TestLetter) => ({
+      logoUrl: `https://example.test/logos/dev-check-${letter}.png`,
+      secondaryLogoUrl: `https://example.test/logos/dev-check-${letter}-secondary.png`,
+    })
+    const original = {
+      B: await prisma.company.findUniqueOrThrow({ where: { id: ids.B.companyId }, select: { logoUrl: true, secondaryLogoUrl: true } }),
+      C: await prisma.company.findUniqueOrThrow({ where: { id: ids.C.companyId }, select: { logoUrl: true, secondaryLogoUrl: true } }),
+    }
+    try {
+      for (const [ownLetter, otherLetter] of [["B", "C"], ["C", "B"]] as const) {
+        await prisma.company.update({ where: { id: ids.B.companyId }, data: dummy("B") })
+        await prisma.company.update({ where: { id: ids.C.companyId }, data: dummy("C") })
+        const statuses: number[] = []
+        for (const slot of ["primary", "secondary"]) {
+          statuses.push((await admins[ownLetter].request("DELETE", `/api/company-settings/logo?slot=${slot}`)).status)
+        }
+        const own = await prisma.company.findUniqueOrThrow({ where: { id: ids[ownLetter].companyId }, select: { logoUrl: true, secondaryLogoUrl: true } })
+        const other = await prisma.company.findUniqueOrThrow({ where: { id: ids[otherLetter].companyId }, select: { logoUrl: true, secondaryLogoUrl: true } })
+        const problem = statuses.some((s) => s !== 200)
+          ? `removing its own logos answered ${statuses.join(", ")}`
+          : own.logoUrl !== null || own.secondaryLogoUrl !== null
+            ? "its own logos were not removed"
+            : JSON.stringify(other) !== JSON.stringify(dummy(otherLetter))
+              ? "the other company's logos changed"
+              : null
+        rows.push({
+          attempt: `${ownLetter} removes its own logos, ${otherLetter}'s untouched`,
+          expected: "200, own cleared, other unchanged",
+          actual: statuses.join(", "),
+          result: problem ? "FAIL" : "PASS",
+          note: problem ?? undefined,
+        })
+      }
+    } finally {
+      await prisma.company.update({ where: { id: ids.B.companyId }, data: original.B })
+      await prisma.company.update({ where: { id: ids.C.companyId }, data: original.C })
+    }
+  }
+
   // The ticket lists: each admin's ticket list, ticket action buttons, and
   // ticket audit entries hold its own records and nothing of the other
   // company's
@@ -852,6 +902,8 @@ export async function checkCrossCompany(prisma: PrismaClient, run: RunData, base
       { path: "/api/audit-log?recordType=TICKET", mustHold: own.ticketAuditEntryId, foreign: [other.ticketAuditEntryId, other.ticketId] },
       { path: `/api/tickets/${own.ticketId}/audit`, mustHold: own.ticketAuditEntryId, foreign: [other.ticketAuditEntryId, other.ticketId] },
       { path: "/api/ticket-statuses", mustHold: own.ticketStatusId, foreign: [other.ticketStatusId] },
+      { path: `/api/clients/${own.clientId}/tickets?status=all`, mustHold: own.ticketId, foreign: [other.ticketId] },
+      { path: "/api/tickets?view=all&sort=queue", mustHold: own.ticketId, foreign: [other.ticketId] },
     ]
     for (const list of lists) {
       const res = await admins[ownLetter].request("GET", list.path)

@@ -4,7 +4,7 @@ import { apiError, notFound, requireAccess } from "@/lib/api-access"
 import { assertRefs } from "@/lib/scoped-loaders"
 import { isPrismaError, readJsonObject, INVALID_BODY_MESSAGE } from "@/lib/opportunity-rules"
 import { userFacingError } from "@/lib/user-error"
-import { ACTION_BUTTON_MESSAGES, checkActionButton, mergeButtonPatch, type ActionButtonFields } from "@/lib/action-button-rules"
+import { ACTION_BUTTON_MESSAGES, checkActionButton, mergeButtonPatch, ticketStatusRequiredProblem, type ActionButtonFields } from "@/lib/action-button-rules"
 import { actionButtonSelect, ensureActionButtonDefaults, LAST_BUTTON_MESSAGE, withActionButtonsLock } from "@/lib/action-buttons"
 import { isRefusal, refuse } from "@/lib/opportunity-defaults"
 import { isAvailableActionKind } from "@/lib/timeline-buttons"
@@ -57,6 +57,8 @@ export async function PATCH(
   if (givenStatus !== undefined && givenStatus !== null && givenStatus !== "" && checked.value.stageMode !== "FIXED") {
     return apiError(400, ACTION_BUTTON_MESSAGES.fixedTicketStatusOnlyWhenFixed)
   }
+  const statusRequired = ticketStatusRequiredProblem(body, checked.value)
+  if (statusRequired) return apiError(400, statusRequired)
   const invalid = await assertRefs(ctx, { opportunityStageId: checked.value.fixedStageId, ticketStatusId: checked.value.fixedTicketStatusId })
   if (invalid) return invalid
 

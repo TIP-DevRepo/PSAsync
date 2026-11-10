@@ -338,7 +338,8 @@ export async function createLinkedOpportunity(
     select: { quoteNumber: true, opportunityId: true },
   })
   if (!quote || quote.opportunityId) return null
-  const created = await createOpportunityInTransaction(tx, { ...opts.plan.input, createdById: opts.actorId ?? opts.plan.quoteOwnerId })
+  // The title comes from the quote, so it is fitted to the limit, never refused
+  const created = await createOpportunityInTransaction(tx, { ...opts.plan.input, createdById: opts.actorId ?? opts.plan.quoteOwnerId, fitTitle: true })
   await setQuoteFamilyOpportunity(tx, { companyId: opts.companyId, actorId: opts.actorId, quoteNumber: quote.quoteNumber, from: null, to: created.id })
   return { id: created.id, number: created.number }
 }

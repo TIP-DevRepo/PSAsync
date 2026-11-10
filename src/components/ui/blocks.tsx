@@ -31,6 +31,61 @@ export const TONE_TINT: Record<Tone, string> = {
   neutral: "bg-neu-tint text-muted-foreground",
 }
 
+// The solid form of each tone, for small marks (a priority's square)
+export const TONE_SOLID: Record<Tone, string> = {
+  accent: "bg-acc",
+  ok: "bg-ok",
+  warn: "bg-warn",
+  bad: "bg-bad",
+  neutral: "bg-muted-foreground",
+}
+
+// ─── PriorityMarker ─────────────────────────────────────────────────────────
+// A priority: a small square in its tone, then its name. The tone comes
+// from the priority's place in the company's order (priorityTone in
+// src/lib/ticket-view.ts), never its name.
+export function PriorityMarker({ tone, children, className }: { tone: Tone; children: ReactNode; className?: string }) {
+  return (
+    <span className={cn("inline-flex min-w-0 items-center gap-1.5 text-[13px] text-foreground", className)}>
+      <span aria-hidden="true" className={cn("h-2 w-2 shrink-0 rounded-[2px]", TONE_SOLID[tone])} />
+      <span className="truncate">{children}</span>
+    </span>
+  )
+}
+
+// ─── PsasyncMark ────────────────────────────────────────────────────────────
+// The PSAsync mark as the favicon (src/app/icon.png) draws it: a rounded
+// tile filled with the accent (--ps-acc), so it follows the company or user
+// accent in both modes, and the white artwork (public/brand/psasync-mark.png,
+// white with partly transparent squares) on top as a normal image, so the
+// accent shows through its faint squares. Proportions match icon.png: the
+// corners are 20% of the tile, and the artwork spans about 53% of it,
+// centred (the PNG's artwork fills 252 of its 288 pixels, so the image is
+// drawn at 60% of the tile). The image has fixed width and height, so
+// nothing shifts while it loads. Shown in the sidebar header and the phone
+// menu when a company has no logo, and in the empty logo slot in Settings;
+// never to customers (they see the company name instead).
+export const PSASYNC_MARK_SRC = "/brand/psasync-mark.png"
+const MARK_RADIUS = 0.2
+const MARK_IMAGE = 0.6
+
+export function PsasyncMark({ size = 34, className }: { size?: number; className?: string }) {
+  const image = Math.round(size * MARK_IMAGE)
+  return (
+    <span
+      role="img"
+      aria-label="PSAsync"
+      className={cn("flex shrink-0 items-center justify-center bg-acc", className)}
+      style={{ width: size, height: size, borderRadius: Math.round(size * MARK_RADIUS) }}
+    >
+      {/* A small static file; a plain img with its size set, like the
+          sidebar's logo, so it needs no image optimizer entry */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={PSASYNC_MARK_SRC} alt="" aria-hidden="true" width={image} height={image} draggable={false} className="block" />
+    </span>
+  )
+}
+
 // ─── PageHeader ─────────────────────────────────────────────────────────────
 // A page's title, a line under it, and its own actions. The breadcrumb goes
 // to the top bar (Breadcrumbs does that by itself).

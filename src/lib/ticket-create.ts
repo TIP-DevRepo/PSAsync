@@ -8,6 +8,10 @@ import { recordAudit, type AuditEntryInput } from "@/lib/audit-log"
 import { ticketAssigneeAudit, ticketCreatedAudit } from "@/lib/ticket-audit"
 import { nextRoundRobinAssignee } from "@/lib/round-robin"
 import type { TimelineAction } from "@/lib/timeline-actions"
+import { notifyTicketAssignee } from "@/lib/ticket-notifications"
+import { checkPrefixedTitle, fitPrefixedTitle } from "@/lib/record-title"
+import { TICKET_TITLE_MAX } from "@/lib/ticket-rules"
+import { UserError } from "@/lib/user-error"
 
 // Creating a ticket, shared by POST /api/tickets (a person) and the later
 // mailbox and NinjaOne phases (the system). Every ticket starts with a
@@ -31,6 +35,10 @@ export interface NewTicket {
   priorityId: string
   status: StatusRef
   source: TicketSource
+  // True for a title nobody typed (a later system path): one that is too
+  // long once the client's prefix goes in front is cut to fit instead of
+  // refused
+  fitTitle?: boolean
   initialNote: InitialNote
 }
 
@@ -81,13 +89,18 @@ async function createTicketIn(tx: Prisma.TransactionClient, input: NewTicket, no
   const number = await takeRecordNumber(tx, input.companyId, "ticket", settings.prefix, now)
 
   const roundRobin = input.assigneeId === null ? await takeRoundRobinAssignee(tx, input.companyId, input.teamId) : null
+  // The client's prefix goes in front of the title (src/lib/record-title.ts)
+  const client = input.clientId ? await tx.client.findFirst({ where: { id: input.clientId, companyId: input.companyId }, select: { prefix: true } }) : null
+  // The limit counts the saved title, prefix included
+  const title = input.fitTitle ? { value: fitPrefixedTitle(input.title, client?.prefix, TICKET_TITLE_MAX) } : checkPrefixedTitle(input.title, client?.prefix, TICKET_TITLE_MAX)
+  if (title.error !== undefined) throw new UserError(title.error)
   const timestamps = statusTimestamps(null, input.status.category, { resolvedAt: null, closedAt: null }, now)
 
   const created = await tx.ticket.create({
     data: {
       companyId: input.companyId,
       number,
-      title: input.title,
+      title: title.value,
       clientId: input.clientId,
       contactId: input.contactId,
       clientLocationId: input.clientLocationId,
@@ -117,5 +130,14 @@ async function createTicketIn(tx: Prisma.TransactionClient, input: NewTicket, no
     await recordAudit(tx, { companyId: input.companyId, actorId: null, entries: audit, at: now })
   }
   await writeInitialNote(tx, { companyId: input.companyId, subject, authorId, html: noteHtml, createdAt: now })
+  // The assignee hears about it, unless they made the ticket themselves
+  await notifyTicketAssignee(tx, {
+    companyId: input.companyId,
+    ticket: created,
+    from: null,
+    to: created.assignee?.id ?? null,
+    actorId: input.createdById,
+    roundRobin: !!roundRobin,
+  })
   return created
 }

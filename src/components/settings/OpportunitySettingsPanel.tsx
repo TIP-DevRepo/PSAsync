@@ -115,13 +115,23 @@ export function OpportunitySettingsPanel() {
   return (
     <div className="space-y-10">
       <StagesSection stages={stages} setStages={setStages} />
-      <TypesSection types={types} setTypes={setTypes} />
+      <NameListSection
+        items={types}
+        setItems={setTypes}
+        listUrl="/api/opportunity-types"
+        reorderKey="typeIds"
+        noun="type"
+        title="Types"
+        description="The kinds of deal an opportunity can be, in the order the type lists show them."
+        placeholder="For example: Managed Services"
+        maxLength={OPPORTUNITY_NAME_MAX}
+      />
       <GeneralSection stages={stages} />
     </div>
   )
 }
 
-function SectionHeading({ title, children }: { title: string; children: ReactNode }) {
+export function SectionHeading({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="space-y-1">
       <h3 className="text-base font-semibold text-foreground">{title}</h3>
@@ -466,18 +476,46 @@ function StageRow({
   )
 }
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Named lists ────────────────────────────────────────────────────────────
 
-function TypesSection({ types, setTypes }: { types: TypeOption[]; setTypes: (types: TypeOption[]) => void }) {
+// A sortable list of named items (opportunity types, ticket types and
+// priorities): drag by the handle to reorder (listUrl/reorder with every id
+// under reorderKey), add, rename, and delete, with a refused change shown
+// as the API's own message. listUrl/<id> is one item's route.
+export function NameListSection<T extends { id: string; name: string }>({
+  items: types,
+  setItems: setTypes,
+  listUrl,
+  reorderKey,
+  noun,
+  title,
+  description,
+  placeholder,
+  maxLength,
+  plural = `${noun}s`,
+}: {
+  items: T[]
+  setItems: (items: T[]) => void
+  listUrl: string
+  reorderKey: string
+  noun: string
+  title: string
+  description: ReactNode
+  placeholder: string
+  maxLength: number
+  plural?: string
+}) {
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [newName, setNewName] = useState("")
   const sensors = useReorderSensors()
+  const Noun = noun.charAt(0).toUpperCase() + noun.slice(1)
+  const idBase = `${listUrl.replace(/[^a-z]+/gi, "-")}`
 
-  const typeName = (id: UniqueIdentifier) => types.find((t) => t.id === String(id))?.name ?? "type"
+  const typeName = (id: UniqueIdentifier) => types.find((t) => t.id === String(id))?.name ?? noun
 
   async function reload() {
-    const res = await fetch("/api/opportunity-types")
+    const res = await fetch(listUrl)
     if (res.ok) setTypes(await res.json())
   }
 
@@ -492,15 +530,15 @@ function TypesSection({ types, setTypes }: { types: TypeOption[]; setTypes: (typ
     setTypes(next)
     setBusy(true)
     setError(null)
-    const { ok, data } = await send("/api/opportunity-types/reorder", "POST", { typeIds: next.map((t) => t.id) })
+    const { ok, data } = await send(`${listUrl}/reorder`, "POST", { [reorderKey]: next.map((t) => t.id) })
     setBusy(false)
     if (!ok) {
       setTypes(previous)
-      setError(errorOf(data, "Couldn't save the new type order."))
+      setError(errorOf(data, `Couldn't save the new ${noun} order.`))
       return
     }
-    setTypes(data as TypeOption[])
-    toast.success("Type order saved")
+    setTypes(data as T[])
+    toast.success(`${Noun} order saved`)
   }
 
   async function handleAdd() {
@@ -508,35 +546,35 @@ function TypesSection({ types, setTypes }: { types: TypeOption[]; setTypes: (typ
     if (!name) return
     setBusy(true)
     setError(null)
-    const { ok, data } = await send("/api/opportunity-types", "POST", { name })
+    const { ok, data } = await send(listUrl, "POST", { name })
     setBusy(false)
     if (!ok) {
-      setError(errorOf(data, "Couldn't add the type."))
+      setError(errorOf(data, `Couldn't add the ${noun}.`))
       return
     }
     setNewName("")
-    toast.success(`Type ${name} added`)
+    toast.success(`${Noun} ${name} added`)
     reload()
   }
 
-  async function handleRename(type: TypeOption) {
+  async function handleRename(type: T) {
     const name = await promptDialog({ title: `Rename ${type.name}`, defaultValue: type.name, confirmLabel: "Save" })
     if (name === null || name === type.name) return
     setBusy(true)
     setError(null)
-    const { ok, data } = await send(`/api/opportunity-types/${type.id}`, "PATCH", { name })
+    const { ok, data } = await send(`${listUrl}/${type.id}`, "PATCH", { name })
     setBusy(false)
     if (!ok) {
-      setError(errorOf(data, "Couldn't rename the type."))
+      setError(errorOf(data, `Couldn't rename the ${noun}.`))
       return
     }
-    toast.success("Type renamed")
+    toast.success(`${Noun} renamed`)
     reload()
   }
 
-  async function handleDelete(type: TypeOption) {
+  async function handleDelete(type: T) {
     const confirmed = await confirmDialog({
-      title: `Delete the ${type.name} type?`,
+      title: `Delete the ${type.name} ${noun}?`,
       description: "This can't be undone.",
       confirmLabel: "Delete",
       variant: "danger",
@@ -544,24 +582,24 @@ function TypesSection({ types, setTypes }: { types: TypeOption[]; setTypes: (typ
     if (!confirmed) return
     setBusy(true)
     setError(null)
-    const { ok, data } = await send(`/api/opportunity-types/${type.id}`, "DELETE")
+    const { ok, data } = await send(`${listUrl}/${type.id}`, "DELETE")
     setBusy(false)
     if (!ok) {
-      setError(errorOf(data, "Couldn't delete the type."))
+      setError(errorOf(data, `Couldn't delete the ${noun}.`))
       return
     }
-    toast.success(`Type ${type.name} deleted`)
+    toast.success(`${Noun} ${type.name} deleted`)
     reload()
   }
 
   return (
-    <section className="space-y-4" aria-labelledby="opportunity-types-heading">
-      <div id="opportunity-types-heading">
-        <SectionHeading title="Types">The kinds of deal an opportunity can be, in the order the type lists show them.</SectionHeading>
+    <section className="space-y-4" aria-labelledby={`${idBase}-heading`}>
+      <div id={`${idBase}-heading`}>
+        <SectionHeading title={title}>{description}</SectionHeading>
       </div>
       <SectionError message={error} onDismiss={() => setError(null)} />
 
-      <DndContext id="opportunity-types-order" sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} accessibility={{ announcements: announcementsFor(typeName) }}>
+      <DndContext id={`${idBase}-order`} sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd} accessibility={{ announcements: announcementsFor(typeName) }}>
         <SortableContext items={types.map((t) => t.id)} strategy={verticalListSortingStrategy}>
           <ul className="space-y-1">
             {types.map((type) => (
@@ -570,7 +608,7 @@ function TypesSection({ types, setTypes }: { types: TypeOption[]; setTypes: (typ
           </ul>
         </SortableContext>
       </DndContext>
-      {types.length === 0 && <p className="text-sm text-muted-foreground">No types yet. Add one below.</p>}
+      {types.length === 0 && <p className="text-sm text-muted-foreground">No {plural} yet. Add one below.</p>}
 
       <form
         className="flex flex-wrap gap-2"
@@ -579,26 +617,26 @@ function TypesSection({ types, setTypes }: { types: TypeOption[]; setTypes: (typ
           handleAdd()
         }}
       >
-        <label htmlFor="new-type-name" className="sr-only">
-          New type
+        <label htmlFor={`${idBase}-new`} className="sr-only">
+          New {noun}
         </label>
         <input
-          id="new-type-name"
+          id={`${idBase}-new`}
           value={newName}
-          maxLength={OPPORTUNITY_NAME_MAX}
+          maxLength={maxLength}
           onChange={(e) => setNewName(e.target.value)}
-          placeholder="For example: Managed Services"
+          placeholder={placeholder}
           className={`${FIELD} min-w-0 flex-1 sm:max-w-sm`}
         />
         <Button type="submit" disabled={busy || !newName.trim()}>
-          Add type
+          Add {noun}
         </Button>
       </form>
     </section>
   )
 }
 
-function TypeRow({ type, busy, onRename, onDelete }: { type: TypeOption; busy: boolean; onRename: () => void; onDelete: () => void }) {
+function TypeRow({ type, busy, onRename, onDelete }: { type: { id: string; name: string }; busy: boolean; onRename: () => void; onDelete: () => void }) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: type.id, disabled: busy })
   return (
     <li

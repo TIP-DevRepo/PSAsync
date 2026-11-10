@@ -29,15 +29,32 @@ import { INITIAL_NOTE_REQUIRED_MESSAGE, initialNoteHtml } from "@/lib/timeline"
 import { createTicket } from "@/lib/ticket-create"
 import { isNumberCollision, NUMBER_TAKEN_MESSAGE } from "@/lib/record-number"
 import { userFacingError } from "@/lib/user-error"
+import {
+  ACTIVE_CATEGORIES,
+  pageCount,
+  pageWindow,
+  readTicketApiOptions,
+  TICKET_PAGE_SIZE,
+  ticketColumnFilterWhere,
+  ticketListOrderBy,
+  ticketSearchWhere,
+  ticketStats,
+  ticketViewWhere,
+} from "@/lib/ticket-list"
 import type { Prisma } from "@/generated/prisma"
 
-// Every ticket the user may open (ticketVisibilityWhere: their own, the
-// unassigned ones in their teams, every one in their teams with
+// One page of the tickets the user may open (ticketVisibilityWhere: their
+// own, the unassigned ones in their teams, every one in their teams with
 // tickets.viewTeam, or everyone's with tickets.viewAll; never deleted
-// ones), newest first. Filters: teamId, assigneeId (a user id or
-// "unassigned"), statusId, statusCategory (OPEN, WAITING, RESOLVED, or
-// CLOSED), priorityId, typeId, clientId, and q (title, number, or client
-// name). Query ids go through assertRefs.
+// ones), TICKET_PAGE_SIZE at a time, newest first unless sorted. Filters:
+// teamId, assigneeId (a user id or "unassigned"), statusId, statusCategory
+// (OPEN, WAITING, RESOLVED, or CLOSED), priorityId, typeId, clientId, and q
+// (title, number, or client name); view (a built in view, src/lib/ticket-
+// list.ts; left out, every ticket), the column filters f_<column>, sort and
+// dir, and page. Query ids go through assertRefs, and anything else it
+// doesn't understand is a 400. Answers { tickets, total, page, pageSize,
+// pageCount, stats }: stats are the stat tiles and view counts, for the
+// tickets the user can see in the chosen queue, assignee, and client.
 export async function GET(req: NextRequest) {
   const { ctx, response } = await requireAccess({
     permission: "pages.tickets",
@@ -74,31 +91,51 @@ export async function GET(req: NextRequest) {
   const q = params.get("q")?.trim() ?? ""
   if (q.length > TICKET_SEARCH_MAX) return apiError(400, `Search text must be ${TICKET_SEARCH_MAX} characters or fewer`)
 
-  const filters: Prisma.TicketWhereInput[] = []
-  if (teamId) filters.push({ teamId })
-  if (unassigned) filters.push({ assigneeId: null })
-  else if (assigneeId) filters.push({ assigneeId })
+  const options = readTicketApiOptions(params)
+  if (options.error !== undefined) return apiError(400, options.error)
+  const { view, sort, dir, page, filters: columnFilters } = options.value
+
+  // The scope the stat tiles and view counts are worked out in: what the
+  // user can see in the chosen queue, assignee, and client
+  const scope: Prisma.TicketWhereInput[] = [ticketListWhere(ctx)]
+  if (teamId) scope.push({ teamId })
+  if (unassigned) scope.push({ assigneeId: null })
+  else if (assigneeId) scope.push({ assigneeId })
+  if (clientId) scope.push({ clientId })
+
+  const filters: Prisma.TicketWhereInput[] = [...scope]
   if (statusId) filters.push({ statusId })
   if (category) filters.push({ status: { category } })
   if (priorityId) filters.push({ priorityId })
   if (typeId) filters.push({ typeId })
-  if (clientId) filters.push({ clientId })
-  if (q) {
-    filters.push({
-      OR: [
-        { title: { contains: q, mode: "insensitive" } },
-        { number: { contains: q, mode: "insensitive" } },
-        { client: { name: { contains: q, mode: "insensitive" } } },
-      ],
-    })
-  }
+  const search = ticketSearchWhere(q)
+  if (search) filters.push(search)
+  const viewWhere = view ? ticketViewWhere(view, ctx.userId) : null
+  if (viewWhere) filters.push(viewWhere)
+  filters.push(...ticketColumnFilterWhere(columnFilters))
 
-  const tickets = await prisma.ticket.findMany({
-    where: { AND: [ticketListWhere(ctx), ...filters] },
-    select: ticketListSelect,
-    orderBy: { createdAt: "desc" },
-  })
-  return NextResponse.json(tickets)
+  // Reads only, outside any transaction, so they run side by side
+  const where = { AND: filters }
+  const [tickets, total, groups, statuses, topPriority] = await Promise.all([
+    prisma.ticket.findMany({ where, select: ticketListSelect, orderBy: ticketListOrderBy(sort, dir), ...pageWindow(page) }),
+    prisma.ticket.count({ where }),
+    prisma.ticket.groupBy({
+      by: ["statusId", "priorityId", "assigneeId"],
+      where: { AND: [...scope, { status: { category: { in: [...ACTIVE_CATEGORIES] } } }] },
+      _count: { _all: true },
+    }),
+    prisma.ticketStatus.findMany({ where: { companyId: ctx.companyId }, select: { id: true, category: true } }),
+    // The top priority is the last in the company's order
+    prisma.ticketPriority.findFirst({ where: { companyId: ctx.companyId }, orderBy: [{ sortOrder: "desc" }, { createdAt: "desc" }], select: { id: true, name: true } }),
+  ])
+
+  const stats = ticketStats(
+    groups.map((g) => ({ statusId: g.statusId, priorityId: g.priorityId, assigneeId: g.assigneeId, count: g._count._all })),
+    new Map(statuses.map((s) => [s.id, s.category])),
+    topPriority,
+    ctx.userId
+  )
+  return NextResponse.json({ tickets, total, page, pageSize: TICKET_PAGE_SIZE, pageCount: pageCount(total), stats })
 }
 
 // Creates a ticket. Required: title and the person's own initialNote

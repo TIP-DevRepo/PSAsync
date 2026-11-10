@@ -13,6 +13,8 @@ import { isBlankHtml } from "@/lib/timeline-actions"
 import { ClientContactPicker } from "@/components/ClientContactPicker"
 import { useClientLocations } from "./useClientLocations"
 import type { ClientContactValue } from "@/lib/client-contact-choice"
+import { TitlePrefixPreview } from "@/components/TitlePrefixPreview"
+import { checkPrefixedTitle } from "@/lib/record-title"
 
 // The design's form fields: 8px corners, the light surface fill, a 36px
 // minimum height, and the label small and muted above
@@ -31,7 +33,8 @@ export function NewOpportunityModal({
 }: {
   stages: StageOption[]
   types: TypeOption[]
-  clients: { id: string; name: string }[]
+  // With each client's prefix (GET /api/clients), for the title preview
+  clients: { id: string; name: string; prefix?: string | null }[]
   // GET /api/teams and GET /api/users, loaded by the page
   teams: TeamSummary[]
   users: { id: string; name: string; active: boolean }[]
@@ -65,6 +68,7 @@ export function NewOpportunityModal({
   // leaves it out, so the server saves the main location.
   const [locationPick, setLocationPick] = useState<{ clientId: string; value: string } | null>(null)
   const { locations, mainId, loading: locationsLoading } = useClientLocations(party.client?.id ?? null)
+  const clientPrefix = clients.find((c) => c.id === party.client?.id)?.prefix ?? null
   const locationTouched = !!party.client && locationPick?.clientId === party.client.id
   const locationValue = locationTouched ? locationPick!.value : (mainId ?? "")
 
@@ -93,6 +97,11 @@ export function NewOpportunityModal({
   function validate() {
     const next: typeof errors = {}
     if (!form.title.trim()) next.title = "Title is required"
+    // The limit counts the client's prefix, as the server checks it
+    else {
+      const saved = checkPrefixedTitle(form.title, clientPrefix, OPPORTUNITY_TITLE_MAX)
+      if (saved.error !== undefined) next.title = saved.error
+    }
     if (!party.client) next.clientId = "Choose a client"
     if (!party.contact) next.contactId = "Choose a contact"
     // Required, judged on its text, not its markup (the editor sends <p></p> when empty)
@@ -189,6 +198,7 @@ export function NewOpportunityModal({
             autoFocus
           />
           {fieldError("title")}
+          <TitlePrefixPreview title={form.title} prefix={clientPrefix} max={OPPORTUNITY_TITLE_MAX} />
         </div>
 
         <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">

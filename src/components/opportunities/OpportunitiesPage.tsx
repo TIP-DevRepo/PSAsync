@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
-import { CalendarClock, Columns3, List, Plus, Target, Trophy, UserRound, X } from "lucide-react"
+import { CalendarClock, Columns3, List, Plus, Target, Trophy, UserRound } from "lucide-react"
+import { FilterChip } from "@/components/ui/filter-chip"
 import { Button } from "@/components/ui/button"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { TopbarAction } from "@/components/layout/TopbarSlots"
@@ -56,7 +57,7 @@ export function OpportunitiesPage() {
 
   const [stages, setStages] = useState<StageOption[]>([])
   const [types, setTypes] = useState<TypeOption[]>([])
-  const [clients, setClients] = useState<{ id: string; name: string }[]>([])
+  const [clients, setClients] = useState<{ id: string; name: string; prefix?: string | null }[]>([])
   const [teams, setTeams] = useState<TeamSummary[]>([])
   const [users, setUsers] = useState<{ id: string; name: string; active: boolean }[]>([])
   const [opportunities, setOpportunities] = useState<OpportunityRow[]>([])
@@ -147,7 +148,8 @@ export function OpportunitiesPage() {
   }
 
   const filtered = hasActiveFilters(filters)
-  // Names for the team and owner chips (the id itself until the lists load)
+  // Names for the breadcrumb, the page line, and the owner chip (a stand in
+  // until the lists load)
   const teamChipName = filters.team ? (teams.find((t) => t.id === filters.team)?.name ?? "Team") : null
   const ownerChipName = !filters.owner
     ? null
@@ -186,7 +188,7 @@ export function OpportunitiesPage() {
       )}
 
       {/* The design's toolbar: the view switch, then the search and the
-          team and owner chips on the right */}
+          owner chip on the right */}
       <div className="flex flex-wrap items-center gap-2 rounded-panel border border-border bg-card px-3.5 py-3">
         <ViewTabs
           ariaLabel="View"
@@ -197,9 +199,6 @@ export function OpportunitiesPage() {
           onChange={(key) => setUrl(key, filters)}
         />
         <span className="flex-1" />
-        {teamChipName && (
-          <FilterChip label={`Team: ${teamChipName}`} onRemove={() => setFilters({ ...filters, team: "", owner: "" })} />
-        )}
         {ownerChipName && <FilterChip label={`Owner: ${ownerChipName}`} onRemove={() => setFilters({ ...filters, owner: "" })} />}
         <OpportunityFilterBar q={filters.q} onChange={setSearch} />
       </div>
@@ -245,25 +244,6 @@ export function OpportunitiesPage() {
         />
       )}
     </div>
-  )
-}
-
-// An active team or owner filter next to Search, removed with its X
-function FilterChip({ label, onRemove }: { label: string; onRemove: () => void }) {
-  return (
-    <span className="inline-flex max-w-full items-center gap-1 rounded-full bg-acc-tint py-1 pl-3 pr-1 text-[13px] font-semibold text-acc-ink">
-      <span className="truncate" title={label}>
-        {label}
-      </span>
-      <button
-        type="button"
-        onClick={onRemove}
-        aria-label={`Remove ${label}`}
-        className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full hover:bg-acc-ink/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      >
-        <X size={14} aria-hidden="true" />
-      </button>
-    </span>
   )
 }
 

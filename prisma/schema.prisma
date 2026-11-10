@@ -1327,6 +1327,7 @@ enum NotificationType {
   SO_READY_TO_INVOICE
   SO_READY_TO_ORDER
   SO_READY_TO_CLOSEOUT
+  TICKET_ASSIGNED
 }
 
 // ─── ROLE ────────────────────────────────────────────────────────────────

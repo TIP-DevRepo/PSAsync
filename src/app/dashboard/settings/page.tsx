@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
-import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound, MousePointerClick, History, Palette } from "lucide-react"
+import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound, MousePointerClick, History, Palette, Ticket } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
@@ -20,6 +20,7 @@ import { MicrosoftSettingsPanel } from "@/components/settings/MicrosoftSettingsP
 import { SalesOrderSettingsPanel } from "@/components/settings/SalesOrderSettingsPanel"
 import { OpportunitySettingsPanel } from "@/components/settings/OpportunitySettingsPanel"
 import { TeamsSettingsPanel } from "@/components/settings/TeamsSettingsPanel"
+import { TicketSettingsPanel } from "@/components/settings/TicketSettingsPanel"
 import { ActionButtonsSettingsPanel } from "@/components/settings/ActionButtonsSettingsPanel"
 import { AuditLogSettingsPanel } from "@/components/settings/AuditLogSettingsPanel"
 import { SettingsNoAccess } from "@/components/settings/SettingsNoAccess"
@@ -37,6 +38,7 @@ type PanelKey =
   | "categories"
   | "salesOrders"
   | "opportunities"
+  | "tickets"
   | "actionButtons"
   | "quotes"
   | "approval-workflows"
@@ -91,6 +93,10 @@ const settingsCategories: SettingsCategory[] = [
     ],
   },
   {
+    label: "Tickets",
+    items: [{ key: "tickets", label: "Ticket Settings", icon: Ticket }],
+  },
+  {
     label: "Opportunities",
     items: [
       { key: "opportunities", label: "Opportunity Settings", icon: Target },
@@ -133,6 +139,7 @@ const PANEL_PERMISSION: Record<PanelKey, string | null> = {
   categories: "settingsSections.company",
   salesOrders: "settingsSections.salesOrders",
   opportunities: "settingsSections.opportunities",
+  tickets: "settingsSections.tickets",
   actionButtons: "settingsSections.actionButtons",
   quotes: "settingsSections.quotes",
   "approval-workflows": "settingsSections.approvalWorkflows",
@@ -175,6 +182,8 @@ function renderPanel(key: PanelKey | null) {
       return <SalesOrderSettingsPanel />
     case "opportunities":
       return <OpportunitySettingsPanel />
+    case "tickets":
+      return <TicketSettingsPanel />
     case "actionButtons":
       return <ActionButtonsSettingsPanel />
     case "quotes":

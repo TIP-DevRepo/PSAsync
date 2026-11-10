@@ -56,6 +56,22 @@ export function orderContactMatches<T extends { id: string; client: { id: string
   return [...unique.filter((m) => m.client.id === preferredClientId), ...unique.filter((m) => m.client.id !== preferredClientId)]
 }
 
+// Both searches list nothing until this many letters are typed, and wait
+// this long after the last keystroke, so a focused field never opens on a
+// list of every client
+export const PICKER_SEARCH_MIN = 2
+export const PICKER_SEARCH_DEBOUNCE_MS = 300
+export const PICKER_SEARCH_HINT = "Type at least 2 letters to search."
+
+// The clients whose name contains the typed text (ignoring case), or null
+// while fewer than PICKER_SEARCH_MIN letters are typed (the field shows the
+// hint instead of a list)
+export function matchClients<T extends { name: string }>(clients: readonly T[], query: string): T[] | null {
+  const q = query.trim().toLowerCase()
+  if (q.length < PICKER_SEARCH_MIN) return null
+  return clients.filter((c) => c.name.toLowerCase().includes(q))
+}
+
 // The chosen client's contacts that match typed text by name, email, or
 // title, the way the contact search route matches
 export function matchesContactQuery(c: { firstName: string; lastName: string; email?: string | null; title?: string | null }, query: string): boolean {

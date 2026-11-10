@@ -345,10 +345,11 @@ export function fieldKeysMatching(text: string): string[] {
 }
 
 // Where a record's page is, for the Record column's link (opened in a new
-// tab), or null for record types that have no page yet (tickets get theirs
-// with the ticket screens)
+// tab), or null for record types that have no page yet
 export function auditRecordHref(recordType: string, recordId: string): string | null {
-  return recordType === "OPPORTUNITY" ? `/dashboard/opportunities/${recordId}` : null
+  if (recordType === "OPPORTUNITY") return `/dashboard/opportunities/${recordId}`
+  if (recordType === "TICKET") return `/dashboard/tickets/${recordId}`
+  return null
 }
 
 // The restore route for a deleted record, with the words its messages use,

@@ -568,6 +568,8 @@ const SETTINGS_GUARDED: Guarded[] = [
   { name: "Change distributor settings", method: "PATCH", path: () => "/api/distributor-settings/INGRAM_MICRO", body: () => ({ enabled: true }), expectError: "change distributor settings" },
   { name: "Edit company settings", method: "PATCH", path: () => "/api/company-settings", body: () => ({ name: "Changed" }), expectError: "edit company settings" },
   { name: "Upload a company logo", method: "POST", path: () => "/api/company-settings/logo", expectError: "change the company logo" },
+  { name: "Remove the company logo", method: "DELETE", path: () => "/api/company-settings/logo?slot=primary", expectError: "change the company logo" },
+  { name: "Remove the secondary company logo", method: "DELETE", path: () => "/api/company-settings/logo?slot=secondary", expectError: "change the company logo" },
   { name: "Company appearance", method: "GET", path: () => "/api/company-settings/appearance", expectError: "edit company settings" },
   { name: "Save company appearance", method: "PATCH", path: () => "/api/company-settings/appearance", body: () => ({ themeAccent: "#DC2626", allowUserTheme: false }), expectError: "edit company settings" },
   { name: "Change Microsoft settings", method: "PATCH", path: () => "/api/microsoft-settings", body: () => ({ microsoftTenantId: "00000000-0000-0000-0000-000000000000" }), expectError: "configure Microsoft integration" },
@@ -931,6 +933,30 @@ const TICKET_ATTEMPTS: Attempt[] = [
   { name: "List tickets", actor: "oppViewer", kind: "refused", method: "GET", path: () => "/api/tickets", expect: 403, expectError: "view tickets" },
   { name: "List tickets", actor: "ticketSettings", kind: "refused", method: "GET", path: () => "/api/tickets", expect: 403, expectError: "view tickets" },
 
+  // The paged list: views, column filters, sort, and paging, always under
+  // the visibility rule (src/lib/ticket-list.ts)
+  { name: "List tickets: paged with stats", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/tickets?view=all", expect: 200, contains: (c) => ['"pageSize":50', '"stats"', '"total"', c.fx.basicTicketId] },
+  { name: "List tickets: My tickets view", actor: "ticketBasic", kind: "allowed", method: "GET", path: () => "/api/tickets?view=mine", expect: 200, contains: (c) => [c.fx.basicTicketId], notContains: (c) => [c.b.ticketId, c.fx.viewerTicketId] },
+  { name: "List tickets: Unassigned view", actor: "ticketViewer", kind: "allowed", method: "GET", path: () => "/api/tickets?view=unassigned", expect: 200, contains: (c) => [c.b.ticketId], notContains: (c) => [c.fx.basicTicketId, c.fx.viewerTicketId, c.fx.alertsTicketId] },
+  { name: "List tickets: Queue column filter", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/tickets?view=all&f_queue=Alerts", expect: 200, contains: (c) => [c.fx.alertsTicketId], notContains: (c) => [c.fx.basicTicketId, c.b.ticketId] },
+  { name: "List tickets: Queue column filter keeps visibility", actor: "ticketViewer", kind: "allowed", method: "GET", path: () => "/api/tickets?view=all&f_queue=Alerts", expect: 200, contains: () => ['"total":0'], notContains: (c) => [c.fx.alertsTicketId] },
+  { name: "List tickets: Assignee column filter for Unassigned", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/tickets?view=all&f_assignee=unassig", expect: 200, contains: (c) => [c.b.ticketId, c.fx.alertsTicketId], notContains: (c) => [c.fx.basicTicketId, c.fx.viewerTicketId] },
+  { name: "List tickets: sorted by priority", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/tickets?view=all&sort=priority&dir=desc", expect: 200, contains: (c) => [c.fx.basicTicketId] },
+  { name: "List tickets: a page past the end", actor: "admin", kind: "allowed", method: "GET", path: () => "/api/tickets?view=all&page=2", expect: 200, contains: () => ['"tickets":[]', '"page":2'], notContains: (c) => [c.fx.basicTicketId] },
+  { name: "List tickets with a made up view", actor: "admin", kind: "refused", method: "GET", path: () => "/api/tickets?view=nope", expect: 400, expectError: "Invalid view" },
+  { name: "List tickets with a made up sort", actor: "admin", kind: "refused", method: "GET", path: () => "/api/tickets?sort=nope", expect: 400, expectError: "Invalid sort" },
+  { name: "List tickets with page 0", actor: "admin", kind: "refused", method: "GET", path: () => "/api/tickets?page=0", expect: 400, expectError: "Invalid page" },
+  { name: "List tickets with a made up sort direction", actor: "admin", kind: "refused", method: "GET", path: () => "/api/tickets?sort=number&dir=up", expect: 400, expectError: "Invalid sort direction" },
+
+  // The client page's Tickets tab: the client's tickets the user may open
+  { name: "Client tickets tab", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets?status=all`, expect: 200, contains: (c) => [c.fx.basicTicketId, c.fx.viewerTicketId, c.b.ticketId, c.fx.alertsTicketId] },
+  { name: "Client tickets tab: own and the team's unassigned", actor: "ticketBasic", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets`, expect: 200, contains: (c) => [c.fx.basicTicketId, c.b.ticketId], notContains: (c) => [c.fx.viewerTicketId, c.fx.alertsTicketId] },
+  { name: "Client tickets tab: closed ones", actor: "admin", kind: "allowed", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets?status=closed`, expect: 200, notContains: (c) => [c.fx.basicTicketId, c.b.ticketId] },
+  { name: "Client tickets tab for a made up client", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.fakeId}/tickets`, expect: 404, expectError: "Not found" },
+  { name: "Client tickets tab with a made up filter", actor: "admin", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets?status=nope`, expect: 400, expectError: "Invalid status filter" },
+  { name: "Client tickets tab", actor: "everyone", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets`, expect: 403, expectError: "view tickets" },
+  { name: "Client tickets tab", actor: "clerk", kind: "refused", method: "GET", path: (c) => `/api/clients/${c.b.clientId}/tickets`, expect: 403, expectError: "view tickets" },
+
   // Assignment and team rules
   { name: "Create for a teammate", actor: "ticketBasic", kind: "refused", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.b.helpdeskTeamId, assigneeId: c.fx.ticketViewerUserId }), expect: 403, expectError: "yourself or leave them unassigned" },
   { name: "Create for itself in its team", actor: "ticketBasic", kind: "allowed", method: "POST", path: () => "/api/tickets", body: (c) => ticketBody(c, { teamId: c.b.helpdeskTeamId, assigneeId: c.fx.ticketBasicUserId }), expect: 200, check: createdTicketAssignedTo((c) => c.fx.ticketBasicUserId) },
@@ -988,6 +1014,10 @@ const TICKET_ATTEMPTS: Attempt[] = [
   { name: "Ticket action buttons", actor: "everyone", kind: "refused", method: "GET", path: () => "/api/action-buttons?for=ticket", expect: 403, expectError: "view tickets" },
   { name: "Action button fixing a ticket status without being fixed", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/action-buttons/${c.fx.noteButtonId}`, body: (c) => ({ fixedTicketStatusId: c.fx.ticketResolvedStatusId }), expect: 400, expectError: "only be set when the button always moves" },
   { name: "Delete a ticket status a button moves to", actor: "admin", kind: "refused", method: "DELETE", path: (c) => `/api/ticket-statuses/${c.fx.ticketResolvedStatusId}`, expect: 409, expectError: "action button moves to this status" },
+  { name: "Fixed ticket button with no ticket status", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: () => buttonBody({ forOpportunities: false, forTickets: true, stageMode: "FIXED", fixedTicketStatusId: "" }), expect: 400, expectError: "Choose the ticket status" },
+  { name: "Fixed ticket button with a made up ticket status", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: (c) => buttonBody({ forOpportunities: false, forTickets: true, stageMode: "FIXED", fixedTicketStatusId: c.fakeId }), expect: 400, expectError: "Invalid status" },
+  { name: "Ticket status on a button that doesn't change it", actor: "admin", kind: "refused", method: "POST", path: () => "/api/action-buttons", body: (c) => buttonBody({ forTickets: true, fixedTicketStatusId: c.fx.ticketResolvedStatusId }), expect: 400, expectError: "only be set when the button always moves" },
+  { name: "Make the Resolve button forget its ticket status", actor: "admin", kind: "refused", method: "PATCH", path: (c) => `/api/action-buttons/${c.fx.ticketButtonId}`, body: () => ({ fixedTicketStatusId: null }), expect: 400, expectError: "Choose the ticket status" },
 
   // Notes
   { name: "Note on a teammate's ticket", actor: "ticketBasic", kind: "refused", method: "POST", path: (c) => `/api/tickets/${c.fx.viewerTicketId}/timeline`, body: () => ({ body: TICKET_NOTE }), expect: 404, expectError: "Not found" },
@@ -3337,7 +3367,12 @@ async function checkAuditRecording(prisma: PrismaClient, admin: Session, ctx: At
   const create = await admin.request("POST", "/api/opportunities", {
     json: { initialNote: OPP_NOTE, title: "Dev check audit opportunity", clientId: ctx.b.clientId, contactId: ctx.b.contactId },
   })
-  const opportunityId = create.status === 200 ? ((JSON.parse(create.text) as { id?: string }).id ?? null) : null
+  const createdJson = create.status === 200 ? (JSON.parse(create.text) as { id?: string; title?: string }) : null
+  const opportunityId = createdJson?.id ?? null
+  // The title as saved: the sample client has a prefix (TCB), so the server
+  // saves "<PREFIX> - <title>" (src/lib/record-title.ts). The entries must
+  // hold exactly what was saved, whatever the prefix.
+  const createdTitle = createdJson?.title ?? ""
   if (!opportunityId) {
     push("create an opportunity for the audit steps", "200", String(create.status), `got ${create.status}: ${errorText(create.text)}`)
     return null
@@ -3353,7 +3388,8 @@ async function checkAuditRecording(prisma: PrismaClient, admin: Session, ctx: At
   push("a title change records one field_changed entry with before and after", "field_changed:title", describe(title.rows),
     title.result.status !== 200 ? `got ${title.result.status}: ${errorText(title.result.text)}`
       : title.rows.length !== 1 || titleRow.field !== "title" ? `got ${describe(title.rows)}`
-        : titleRow.before !== "Dev check audit opportunity" || titleRow.after !== "Dev check audit renamed" ? "wrong before or after" : null)
+        : !createdTitle.endsWith("Dev check audit opportunity") ? `the create answered the title "${createdTitle}"`
+          : titleRow.before !== createdTitle || titleRow.after !== "Dev check audit renamed" ? "wrong before or after" : null)
 
   const same = await added(() => admin.request("PATCH", base, { json: { title: "Dev check audit renamed" } }))
   push("a PATCH that changes nothing records nothing", "none", describe(same.rows),
@@ -3656,6 +3692,204 @@ async function newTicket(admin: Session, ctx: AttemptContext, extra: Record<stri
   return json as TicketJson & { id: string }
 }
 
+// Client prefixes on new titles (src/lib/record-title.ts). The sample
+// client gets a prefix for the step (its own value is put back after).
+// Test Admin B creates a ticket and an opportunity on it, each saved as
+// "<PREFIX> - <title>"; a title that already starts with the prefix (in
+// another case) is kept as typed; a ticket with no client keeps its title;
+// and renaming the ticket afterwards saves the new title as typed.
+// Everything it made is removed.
+async function checkClientTitlePrefix(prisma: PrismaClient, admin: Session, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `Client prefix: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const PREFIX = "DEVCHK"
+  const client = await prisma.client.findUniqueOrThrow({ where: { id: ctx.b.clientId }, select: { prefix: true } })
+  const tickets: string[] = []
+  const opportunities: string[] = []
+  await prisma.client.update({ where: { id: ctx.b.clientId }, data: { prefix: PREFIX } })
+  try {
+    const title = (text: string) => (JSON.parse(text || "{}") as { id?: string; title?: string })
+    const ticket = await admin.request("POST", "/api/tickets", { json: ticketBody(ctx, { teamId: ctx.b.helpdeskTeamId, title: "Login Help" }) })
+    const t = title(ticket.text)
+    if (t.id) tickets.push(t.id)
+    push("a new ticket on a client with a prefix", `"${PREFIX} - Login Help"`, ticket.status === 200 ? `"${t.title}"` : String(ticket.status),
+      ticket.status !== 200 ? errorText(ticket.text) : t.title !== `${PREFIX} - Login Help` ? "the title isn't prefixed" : null)
+
+    const again = await admin.request("POST", "/api/tickets", { json: ticketBody(ctx, { teamId: ctx.b.helpdeskTeamId, title: "devchk - Already prefixed" }) })
+    const a = title(again.text)
+    if (a.id) tickets.push(a.id)
+    push("a title already starting with the prefix", '"devchk - Already prefixed"', again.status === 200 ? `"${a.title}"` : String(again.status),
+      again.status !== 200 ? errorText(again.text) : a.title !== "devchk - Already prefixed" ? "the prefix was added twice" : null)
+
+    const none = await admin.request("POST", "/api/tickets", { json: { initialNote: TICKET_NOTE, title: "No client here" } })
+    const n = title(none.text)
+    if (n.id) tickets.push(n.id)
+    push("a ticket with no client", '"No client here"', none.status === 200 ? `"${n.title}"` : String(none.status),
+      none.status !== 200 ? errorText(none.text) : n.title !== "No client here" ? "the title changed" : null)
+
+    if (t.id) {
+      const renamed = await admin.request("PATCH", `/api/tickets/${t.id}`, { json: { title: "Renamed later" } })
+      push("renaming keeps the title as typed", '"Renamed later"', renamed.status === 200 ? `"${title(renamed.text).title}"` : String(renamed.status),
+        renamed.status !== 200 ? errorText(renamed.text) : title(renamed.text).title !== "Renamed later" ? "the prefix was added on rename" : null)
+    }
+
+    const opp = await admin.request("POST", "/api/opportunities", {
+      json: { title: "Network refresh", clientId: ctx.b.clientId, contactId: ctx.b.contactId, initialNote: OPP_NOTE },
+    })
+    const o = title(opp.text)
+    if (o.id) opportunities.push(o.id)
+    push("a new opportunity on a client with a prefix", `"${PREFIX} - Network refresh"`, opp.status === 200 ? `"${o.title}"` : String(opp.status),
+      opp.status !== 200 ? errorText(opp.text) : o.title !== `${PREFIX} - Network refresh` ? "the title isn't prefixed" : null)
+  } finally {
+    await prisma.ticket.deleteMany({ where: { id: { in: tickets } } })
+    await prisma.opportunity.deleteMany({ where: { id: { in: opportunities } } })
+    await prisma.client.update({ where: { id: ctx.b.clientId }, data: { prefix: client.prefix } })
+  }
+}
+
+// Removing a company logo. Test Company B's logos are set to dummy links
+// outside the uploads bucket for the step (so the route's file delete
+// skips them and nothing reaches S3) and put back after. Test Manager B
+// (Users settings only) is refused and changes nothing; Test Admin B
+// removes the secondary logo, then the primary; company settings then
+// answer no logo; and the internal portal preview, its PDF, and the staff
+// quote PDF all still render.
+const DUMMY_LOGO = "https://example.test/logos/dev-check-logo.png"
+const DUMMY_SECONDARY_LOGO = "https://example.test/logos/dev-check-secondary-logo.png"
+
+async function checkLogoRemoval(prisma: PrismaClient, sessions: Record<Actor, Session>, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `Company logo: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const companyId = ctx.b.companyId
+  const original = await prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { logoUrl: true, secondaryLogoUrl: true } })
+  const logos = () => prisma.company.findUniqueOrThrow({ where: { id: companyId }, select: { logoUrl: true, secondaryLogoUrl: true } })
+  await prisma.company.update({ where: { id: companyId }, data: { logoUrl: DUMMY_LOGO, secondaryLogoUrl: DUMMY_SECONDARY_LOGO } })
+  try {
+    const refused = await sessions.manager.request("DELETE", "/api/company-settings/logo?slot=primary")
+    const afterRefused = await logos()
+    push("Test Manager B removes it", "403, logo kept", String(refused.status),
+      refused.status !== 403 ? errorText(refused.text) : afterRefused.logoUrl !== DUMMY_LOGO ? "the logo was removed" : null)
+
+    const badSlot = await sessions.admin.request("DELETE", "/api/company-settings/logo?slot=banner")
+    push("a made up slot", "400", String(badSlot.status), badSlot.status !== 400 || !errorText(badSlot.text).includes("Invalid logo slot") ? errorText(badSlot.text) : null)
+
+    const secondary = await sessions.admin.request("DELETE", "/api/company-settings/logo?slot=secondary")
+    const afterSecondary = await logos()
+    push("Test Admin B removes the secondary logo", "200, only the secondary cleared", String(secondary.status),
+      secondary.status !== 200 ? errorText(secondary.text) : afterSecondary.secondaryLogoUrl !== null || afterSecondary.logoUrl !== DUMMY_LOGO ? "the wrong slot changed" : null)
+
+    const primary = await sessions.admin.request("DELETE", "/api/company-settings/logo?slot=primary")
+    const afterPrimary = await logos()
+    push("Test Admin B removes the primary logo", "200, cleared", String(primary.status),
+      primary.status !== 200 ? errorText(primary.text) : afterPrimary.logoUrl !== null ? "the logo is still set" : null)
+
+    const settings = await sessions.everyone.request("GET", "/api/company-settings")
+    push("company settings answer no logo", '200, "logoUrl":null', String(settings.status),
+      settings.status !== 200 ? errorText(settings.text) : !settings.text.includes('"logoUrl":null') || !settings.text.includes('"secondaryLogoUrl":null') ? "a logo is still returned" : null)
+
+    const quote = await prisma.quote.findUniqueOrThrow({ where: { id: ctx.b.quoteId }, select: { internalAccessToken: true } })
+    const token = quote.internalAccessToken
+    for (const [name, path, pdf] of [
+      ["the internal portal preview", `/api/portal/${token}`, false],
+      ["the portal page", `/portal/${token}`, false],
+      ["the portal PDF", `/api/portal/${token}/pdf`, true],
+      ["the staff quote PDF", `/api/quotes/${ctx.b.quoteId}/pdf`, true],
+    ] as const) {
+      const res = await sessions.admin.request("GET", path)
+      push(`${name} renders with no logo`, pdf ? "200, a PDF" : "200", String(res.status),
+        res.status !== 200 ? errorText(res.text) : pdf && !res.text.includes("%PDF") ? "not a PDF" : null)
+    }
+  } finally {
+    await prisma.company.update({ where: { id: companyId }, data: original })
+  }
+}
+
+// Page guards for the ticket screens, read as HTML like the Opportunities
+// pages (checkOpportunityPages): the list, a ticket, and Settings > Tickets
+const TICKET_SETTINGS_ENTRY = "Ticket Settings"
+
+async function checkTicketPages(sessions: Record<Actor, Session>, labels: Record<Actor, string>, ctx: AttemptContext, rows: Row[]) {
+  const pages: { name: string; path: string; allowed: Actor[]; refused: Actor[]; settings?: string }[] = [
+    { name: "Tickets page", path: "/dashboard/tickets?view=all", allowed: ["admin", "ticketBasic", "ticketDispatcher"], refused: ["everyone", "ticketSettings", "oppViewer"] },
+    { name: "Ticket page", path: `/dashboard/tickets/${ctx.fx.basicTicketId}`, allowed: ["admin", "ticketBasic"], refused: ["everyone", "ticketSettings", "clerk"] },
+    { name: "Settings > Tickets", path: "/dashboard/settings?panel=tickets", allowed: ["admin", "ticketSettings"], refused: ["everyone", "manager", "oppSettings"], settings: TICKET_SETTINGS_ENTRY },
+  ]
+  for (const page of pages) {
+    for (const [actor, allowed] of [...page.allowed.map((a) => [a, true] as const), ...page.refused.map((a) => [a, false] as const)]) {
+      const res = await sessions[actor].request("GET", page.path)
+      const pageRefused = res.text.includes(NO_ACCESS_PAGE)
+      const opens = !pageRefused && (!page.settings || res.text.includes(page.settings))
+      const problem =
+        res.status !== 200
+          ? `got ${res.status}${res.location ? ` to ${res.location}` : ""}`
+          : allowed && !opens
+            ? pageRefused
+              ? "the page shows no access"
+              : "the section is not listed in Settings"
+            : !allowed && opens
+              ? "the page opened"
+              : null
+      rows.push({
+        attempt: `[${labels[actor]}] ${page.name}`,
+        expected: allowed ? "200, opens" : "200, no access",
+        actual: res.status === 200 ? (opens ? "200, opens" : "200, no access") : String(res.status),
+        result: problem ? "FAIL" : "PASS",
+        note: problem ?? undefined,
+      })
+    }
+  }
+}
+
+// Assignment notifications: Test Ticket Dispatcher B creating a ticket for
+// Test Ticket Viewer B, and Test Admin B reassigning it to Test Ticket
+// Basic B, each give the new assignee one TICKET_ASSIGNED notification
+// linking to the ticket; Test Ticket Basic B creating one for itself, and
+// taking one for itself, give none. Everything made here is removed.
+async function checkTicketAssignmentNotifications(prisma: PrismaClient, sessions: Record<Actor, Session>, ctx: AttemptContext, rows: Row[]) {
+  const push = (name: string, expected: string, actual: string, problem: string | null) =>
+    rows.push({ attempt: `Ticket assignment notification: ${name}`, expected, actual, result: problem ? "FAIL" : "PASS", note: problem ?? undefined })
+  const viewer = ctx.fx.ticketViewerUserId
+  const basic = ctx.fx.ticketBasicUserId
+  const since = new Date()
+  const created: string[] = []
+  const notes = (userId: string, ticketId: string) =>
+    prisma.notification.count({ where: { userId, type: "TICKET_ASSIGNED", link: `/dashboard/tickets/${ticketId}`, createdAt: { gte: since } } })
+  try {
+    const forViewer = await sessions.ticketDispatcher.request("POST", "/api/tickets", { json: ticketBody(ctx, { teamId: ctx.b.helpdeskTeamId, assigneeId: viewer }) })
+    const t1 = ticketJson(forViewer.text)
+    if (t1.id) created.push(t1.id)
+    const n1 = t1.id ? await notes(viewer, t1.id) : -1
+    push("a dispatcher creates one for a teammate", "1 for Test Ticket Viewer B", String(n1), forViewer.status !== 200 ? errorText(forViewer.text) : n1 !== 1 ? "expected exactly one" : null)
+
+    if (t1.id) {
+      const moved = await sessions.admin.request("PATCH", `/api/tickets/${t1.id}`, { json: { assigneeId: basic } })
+      const n2 = await notes(basic, t1.id)
+      push("an admin reassigns it", "1 for Test Ticket Basic B", String(n2), moved.status !== 200 ? errorText(moved.text) : n2 !== 1 ? "expected exactly one" : null)
+      const same = await sessions.admin.request("PATCH", `/api/tickets/${t1.id}`, { json: { assigneeId: basic, title: "Dev check ticket, renamed" } })
+      const n3 = await notes(basic, t1.id)
+      push("a save that keeps the assignee", "still 1", String(n3), same.status !== 200 ? errorText(same.text) : n3 !== 1 ? "a second notification was sent" : null)
+    }
+
+    const own = await sessions.ticketBasic.request("POST", "/api/tickets", { json: ticketBody(ctx, { teamId: ctx.b.helpdeskTeamId, assigneeId: basic }) })
+    const t2 = ticketJson(own.text)
+    if (t2.id) created.push(t2.id)
+    const n4 = t2.id ? await notes(basic, t2.id) : -1
+    push("creating one for itself", "0", String(n4), own.status !== 200 ? errorText(own.text) : n4 !== 0 ? "it notified itself" : null)
+
+    const unassigned = await sessions.ticketBasic.request("POST", "/api/tickets", { json: ticketBody(ctx, { teamId: ctx.b.helpdeskTeamId }) })
+    const t3 = ticketJson(unassigned.text)
+    if (t3.id) {
+      created.push(t3.id)
+      const take = await sessions.ticketBasic.request("PATCH", `/api/tickets/${t3.id}`, { json: { assigneeId: basic } })
+      const n5 = await notes(basic, t3.id)
+      push("taking one for itself", "0", String(n5), take.status !== 200 ? errorText(take.text) : n5 !== 0 ? "it notified itself" : null)
+    }
+  } finally {
+    await prisma.notification.deleteMany({ where: { type: "TICKET_ASSIGNED", link: { in: created.map((id) => `/dashboard/tickets/${id}`) } } })
+    await prisma.ticket.deleteMany({ where: { id: { in: created } } })
+  }
+}
+
 // Round robin: three unassigned tickets in the Round Robin team go to Test
 // Ticket Basic B, Test Ticket Viewer B, and Test Ticket Basic B again
 // (Test Ticket Inactive B, deactivated and sorting between them, is
@@ -3786,7 +4020,12 @@ async function checkTicketAuditFlow(prisma: PrismaClient, admin: Session, basic:
     if (rename.status !== 200 || !entry) throw new HarnessBroken(`couldn't rename the ticket: ${rename.status} ${errorText(rename.text)}`)
     const undo = await admin.request("POST", `/api/audit-log/${entry.id}/undo`)
     const back = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id }, select: { title: true } })
-    push("undo puts the title back", "200, the old title", String(undo.status), undo.status !== 200 ? errorText(undo.text) : back.title !== "Dev check ticket audit" ? "the title wasn't put back" : null)
+    // Exactly the title it was saved with, the sample client's prefix
+    // included (the create response's title)
+    push("undo puts the title back", "200, the old title", String(undo.status),
+      undo.status !== 200 ? errorText(undo.text)
+        : !t.title?.endsWith("Dev check ticket audit") ? `the create answered the title "${t.title}"`
+          : back.title !== t.title ? "the title wasn't put back" : null)
     const again = await admin.request("POST", `/api/audit-log/${entry.id}/undo`)
     push("undo twice is refused", "409", String(again.status), again.status !== 409 ? errorText(again.text) : null)
 
@@ -4233,6 +4472,14 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     // defaults need the company settings permission
     await checkAppearancePreferences(prisma, sessions, ctx, rows)
 
+    // Company logos: removing one needs the upload permission, clears it,
+    // and the portal and quote PDFs still render without it
+    await checkLogoRemoval(prisma, sessions, ctx, rows)
+
+    // Client prefixes: new ticket and opportunity titles start with the
+    // client's prefix
+    await checkClientTitlePrefix(prisma, sessions.admin, ctx, rows)
+
     // Tickets: round robin in rotation, status timestamps, the audit flow
     // (undo, delete, restore), and the daily auto close job on Test Company B only
     await checkTicketRoundRobin(prisma, sessions.admin, ctx, rows)
@@ -4240,6 +4487,11 @@ export async function checkPermissions(prisma: PrismaClient, run: RunData, baseU
     await checkTicketAuditFlow(prisma, sessions.admin, sessions.ticketBasic, ctx, rows)
     await checkTicketAutoClose(prisma, sessions.admin, ctx, rows, baseUrl)
     await checkClientWithTicketRestricted(prisma, ctx, rows)
+
+    // The ticket screens: page access and the in-app notification an
+    // assignment sends
+    await checkTicketPages(sessions, ACTOR_LABEL, ctx, rows)
+    await checkTicketAssignmentNotifications(prisma, sessions, ctx, rows)
 
     // Attachment downloads: the parent's view check, the redirect, and no
     // bucket link in any attachment response

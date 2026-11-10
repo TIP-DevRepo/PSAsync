@@ -6,6 +6,7 @@ import { AcceptFlowModal } from "./AcceptFlowModal"
 import { formatValidUntil } from "@/lib/quote-expiry"
 import { PORTAL_COMMENT_MAX, PORTAL_DECLINE_REASON_MAX, PORTAL_QUANTITY_MAX } from "@/lib/portal-input"
 import { downloadPdf } from "@/lib/download-pdf"
+import { customerBrandMark } from "@/lib/company-logo"
 
 const pdfButtonStyle = `
   .pdf-download-btn {
@@ -95,18 +96,29 @@ interface ExpiredBranding {
   accentColor: string | null
 }
 
+// The logo spot of a customer facing header: the customer logo next to
+// the company name, or the name alone as a wordmark (src/lib/company-logo.ts)
+function BrandMark({ company }: { company: { name: string; logoUrl: string | null; secondaryLogoUrl: string | null } }) {
+  const mark = customerBrandMark(company)
+  if (mark.kind === "name") {
+    return mark.name ? <span className="min-w-0 truncate text-2xl font-bold tracking-tight">{mark.name}</span> : null
+  }
+  return (
+    <>
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={mark.src} alt={mark.name} className="h-10 w-auto" />
+      {mark.name && <span className="text-lg font-semibold">{mark.name}</span>}
+    </>
+  )
+}
+
 function ExpiredQuote({ company }: { company: ExpiredBranding }) {
-  const logo = company.secondaryLogoUrl || company.logoUrl
   const who = company.name || "us"
   return (
     <div className="min-h-screen bg-zinc-50">
       <div style={{ backgroundColor: company.primaryColor ?? "#1B3A5C" }} className="text-white">
         <div className="max-w-3xl mx-auto px-6 py-8 flex items-center gap-3">
-          {logo && (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={logo} alt={company.name} className="h-10 w-auto" />
-          )}
-          {company.name && <span className="text-lg font-semibold">{company.name}</span>}
+          <BrandMark company={company} />
         </div>
       </div>
       <div className="max-w-3xl mx-auto px-6 py-10">
@@ -477,16 +489,8 @@ export default function PortalPage({
       {/* Branded header */}
       <div style={{ backgroundColor: primary }} className="text-white">
         <div className="max-w-3xl mx-auto px-6 py-8 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            {(quote.company.secondaryLogoUrl || quote.company.logoUrl) && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                src={quote.company.secondaryLogoUrl || quote.company.logoUrl || ""}
-                alt={quote.company.name}
-                className="h-10 w-auto"
-              />
-            )}
-            <span className="text-lg font-semibold">{quote.company.name}</span>
+          <div className="flex min-w-0 items-center gap-3">
+            <BrandMark company={quote.company} />
           </div>
           <span className={`rounded-full px-3 py-1 text-xs font-medium ${statusMeta.color}`}>
             {statusMeta.label}

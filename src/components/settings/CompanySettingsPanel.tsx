@@ -4,6 +4,9 @@ import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/lib/toast"
 import { acceptAttribute, checkUploadBasics } from "@/lib/upload-rules"
+import { confirmDialog } from "@/lib/confirm-dialog"
+import { PsasyncMark } from "@/components/ui/blocks"
+import type { LogoSlot } from "@/lib/company-logo"
 
 // Checked when a logo is picked, so a file the server would refuse is
 // never queued for Save
@@ -38,7 +41,36 @@ export function CompanySettingsPanel() {
   const [logoFile, setLogoFile] = useState<File | null>(null)
   const [secondaryLogoFile, setSecondaryLogoFile] = useState<File | null>(null)
   const [saving, setSaving] = useState(false)
+  const [removing, setRemoving] = useState<LogoSlot | null>(null)
   const [loading, setLoading] = useState(true)
+
+  // Removes one logo at once (DELETE /api/company-settings/logo, the same
+  // permission as uploading), after asking. The app then shows the PSAsync
+  // mark, and customers see the company name in its place.
+  async function removeLogo(slot: LogoSlot) {
+    const confirmed = await confirmDialog({
+      title: slot === "secondary" ? "Remove the secondary logo?" : "Remove the primary logo?",
+      description:
+        slot === "secondary"
+          ? "Customer facing quotes will use the primary logo instead, or the company name when there is none."
+          : "The app shows the PSAsync mark instead, and customers see the company name where the logo was.",
+      confirmLabel: "Remove",
+      variant: "danger",
+    })
+    if (!confirmed) return
+    setRemoving(slot)
+    const res = await fetch(`/api/company-settings/logo?slot=${slot}`, { method: "DELETE" }).catch(() => null)
+    setRemoving(null)
+    if (!res?.ok) {
+      const err = res ? await res.json().catch(() => ({})) : {}
+      toast.error("Couldn't remove the logo", err.error ?? "Try again.")
+      return
+    }
+    setData((prev) => (slot === "secondary" ? { ...prev, secondaryLogoUrl: null } : { ...prev, logoUrl: null }))
+    if (slot === "secondary") setSecondaryLogoFile(null)
+    else setLogoFile(null)
+    toast.success(slot === "secondary" ? "Secondary logo removed" : "Logo removed")
+  }
 
   useEffect(() => {
     fetch("/api/company-settings")
@@ -128,13 +160,7 @@ export function CompanySettingsPanel() {
         <p className="text-xs text-muted-foreground mb-2">
           Used across the app (sidebar, favicon-adjacent branding). Keep this on a neutral/transparent background.
         </p>
-        {data.logoUrl && (
-          <img
-            src={data.logoUrl}
-            alt="Company logo"
-            className="h-16 mb-2 rounded border"
-          />
-        )}
+        <LogoPreview url={data.logoUrl} alt="Company logo" onRemove={() => removeLogo("primary")} busy={removing === "primary" || saving} />
         <input
           type="file"
           accept={acceptAttribute("LOGO")}
@@ -149,13 +175,7 @@ export function CompanySettingsPanel() {
           Shown on client-facing quotes instead of the primary logo, useful if your primary logo
           is the same color as your brand's primary color and would blend into the quote header.
         </p>
-        {data.secondaryLogoUrl && (
-          <img
-            src={data.secondaryLogoUrl}
-            alt="Secondary company logo"
-            className="h-16 mb-2 rounded border"
-          />
-        )}
+        <LogoPreview url={data.secondaryLogoUrl} alt="Secondary company logo" onRemove={() => removeLogo("secondary")} busy={removing === "secondary" || saving} />
         <input
           type="file"
           accept={acceptAttribute("LOGO")}
@@ -186,6 +206,29 @@ export function CompanySettingsPanel() {
 
       <Button onClick={handleSave} disabled={saving}>
         {saving ? "Saving..." : "Save Changes"}
+      </Button>
+    </div>
+  )
+}
+
+// One logo slot's preview: the logo with a Remove button, or an empty state
+// with the PSAsync mark and "No logo uploaded"
+function LogoPreview({ url, alt, onRemove, busy }: { url: string | null; alt: string; onRemove: () => void; busy: boolean }) {
+  if (!url) {
+    return (
+      <div className="mb-2 flex items-center gap-3 rounded-card border border-dashed border-border bg-surface-2 px-3 py-3">
+        <PsasyncMark size={40} />
+        <span className="text-sm text-muted-foreground">No logo uploaded</span>
+      </div>
+    )
+  }
+  return (
+    <div className="mb-2 flex flex-wrap items-center gap-3">
+      {/* A public logo on the uploads bucket */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={url} alt={alt} className="h-16 rounded border" />
+      <Button type="button" variant="outline" size="sm" onClick={onRemove} disabled={busy}>
+        {busy ? "Removing..." : "Remove"}
       </Button>
     </div>
   )

@@ -10,6 +10,7 @@ import {
   ticketWhere,
   type BodyRefs,
 } from "@/lib/scoped-loaders"
+import { notifyTicketAssignee } from "@/lib/ticket-notifications"
 import { planTeamPerson, type TeamPersonRules } from "@/lib/team-person-plan"
 import { readOptionalId, readText } from "@/lib/opportunity-rules"
 import {
@@ -192,7 +193,7 @@ export async function moveTicketStatus(
   return { from: before.status, to }
 }
 
-type UpdateDb = Pick<Prisma.TransactionClient, "ticket" | "timelineEntry" | "auditLogEntry" | "user">
+type UpdateDb = Pick<Prisma.TransactionClient, "ticket" | "timelineEntry" | "auditLogEntry" | "user" | "notification">
 export type SavedTicket = Prisma.TicketGetPayload<{ select: typeof ticketDetailSelect }>
 
 // Saves a planned write inside the caller's transaction, the same steps as
@@ -213,5 +214,13 @@ export async function applyTicketUpdate(
   const at = new Date()
   await recordTimelineActions(tx, { companyId: ctx.companyId, authorId: ctx.userId, subject: { ticketId }, actions, at })
   await recordAudit(tx, { companyId: ctx.companyId, actorId: ctx.userId, entries: auditEntries(saved, actions), at })
+  // A new assignee hears about it, unless they made the change themselves
+  await notifyTicketAssignee(tx, {
+    companyId: ctx.companyId,
+    ticket: saved,
+    from: before.assignee?.id ?? null,
+    to: saved.assignee?.id ?? null,
+    actorId: ctx.userId,
+  })
   return { saved, actions }
 }

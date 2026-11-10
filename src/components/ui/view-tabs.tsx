@@ -4,7 +4,7 @@ import type { ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
 // ─── ViewTabs ───────────────────────────────────────────────────────────────
-// Saved view style switches (Board and List, My tickets and Unassigned):
+// View switches (Board and List, My tickets and Unassigned):
 // the chosen one tinted in the accent, each with an optional count. They
 // change what the list below shows, so they are pressed buttons, not tabs.
 // A client component (it handles clicks); the icon is a rendered element,

@@ -6,14 +6,12 @@ import { Button } from "@/components/ui/button"
 import { RichTextEditor } from "@/components/ui/rich-text-editor"
 import { toast } from "@/lib/toast"
 import { confirmDialog } from "@/lib/confirm-dialog"
-import { describeTimelineAction, emailOutDetails, entryActionButton, isBlankHtml, noteStageChange } from "@/lib/timeline-actions"
+import { describeTimelineAction, emailOutDetails, entryActionButton, isBlankHtml, noteStageChange, noteStatusChange } from "@/lib/timeline-actions"
 import { presetStageId, type ActionButtonDefinition } from "@/lib/timeline-buttons"
 import { CATEGORY_LABELS } from "@/lib/opportunity-rules"
-import type { StageCategory } from "@/lib/opportunity-view"
-import { StagePill } from "@/components/opportunities/StagePill"
 import { ActionButtonBar } from "./ActionButtonBar"
 import { EmailAttachmentPicker, EmailFields, type EmailDraft, type EmailOptions } from "./EmailComposer"
-import { InitialsAvatar, StatusPill } from "@/components/ui/blocks"
+import { InitialsAvatar, StatusPill, type Tone } from "@/components/ui/blocks"
 import { cn } from "@/lib/utils"
 
 // One entry as every timeline route returns it (timelineEntrySelect). A
@@ -53,10 +51,30 @@ export interface TimelineHandle {
 export interface TimelineStageOption {
   id: string
   name: string
-  category: StageCategory
+  category: string
 }
 
-const STAGE_GROUPS: StageCategory[] = ["OPEN", "WON", "LOST"]
+// What a note or email can move its record to: an opportunity's stage
+// (sent as stageId) or a ticket's status (statusId), the word the composer
+// uses, and the categories it groups the choices under, each with the tone
+// its pill is tinted in
+export interface TimelineMoveConfig {
+  field: "stageId" | "statusId"
+  noun: "stage" | "status"
+  groups: readonly { category: string; label: string; tone: Tone }[]
+}
+
+export const OPPORTUNITY_STAGE_MOVES: TimelineMoveConfig = {
+  field: "stageId",
+  noun: "stage",
+  groups: [
+    { category: "OPEN", label: CATEGORY_LABELS.OPEN, tone: "accent" },
+    { category: "WON", label: CATEGORY_LABELS.WON, tone: "ok" },
+    { category: "LOST", label: CATEGORY_LABELS.LOST, tone: "bad" },
+  ],
+}
+
+const toneFor = (moves: TimelineMoveConfig, category: string | undefined): Tone => moves.groups.find((g) => g.category === category)?.tone ?? "neutral"
 
 // What the Email action needs from the page: where to send, the record's
 // attachments, the From choices and contacts (null while loading), and the
@@ -69,7 +87,7 @@ export interface TimelineEmailContext {
   defaultTo: string[]
 }
 
-// The timeline of one record (an opportunity now, a ticket later): a row of
+// The timeline of one record (an opportunity or a ticket): a row of
 // action buttons that open the note composer, then every entry newest
 // first, with older pages on request. timelineUrl is the record's timeline
 // route; an entry's own route is timelineUrl/entryId. refreshKey reloads
@@ -93,6 +111,7 @@ export function Timeline({
   onPosted,
   showButtons = true,
   onComposerChange,
+  moves = OPPORTUNITY_STAGE_MOVES,
   ref,
 }: {
   timelineUrl: string
@@ -115,6 +134,9 @@ export function Timeline({
   showButtons?: boolean
   // The button whose composer is open, or null, for a bar shown elsewhere
   onComposerChange?: (buttonId: string | null) => void
+  // What stages holds and how a move is sent (a ticket's statuses); an
+  // opportunity's stages when left out
+  moves?: TimelineMoveConfig
   ref?: Ref<TimelineHandle>
 }) {
   const [entries, setEntries] = useState<TimelineEntryData[]>([])
@@ -263,7 +285,7 @@ export function Timeline({
         body: composer.html,
         attachmentIds: draft.attachmentIds,
         actionButtonId: composer.button.id,
-        ...(composer.stageId ? { stageId: composer.stageId } : {}),
+        ...(composer.stageId ? { [moves.field]: composer.stageId } : {}),
         // Only someone allowed to choose sends a pick; anyone else always
         // sends from their default
         ...(email.options?.canChooseSender && draft.fromId ? { sendAsConnectionId: draft.fromId } : {}),
@@ -290,7 +312,7 @@ export function Timeline({
       body: JSON.stringify({
         body: composer.html,
         actionButtonId: composer.button.id,
-        ...(composer.stageId ? { stageId: composer.stageId } : {}),
+        ...(composer.stageId ? { [moves.field]: composer.stageId } : {}),
       }),
     })
     setPosting(false)
@@ -387,11 +409,11 @@ export function Timeline({
           )}
           <div className="flex flex-wrap items-end justify-between gap-3">
             {composer.button.opens.stageMode === "FIXED" ? (
-              <FixedStage stage={stages?.find((st) => st.id === composer.stageId) ?? null} />
+              <FixedStage stage={stages?.find((st) => st.id === composer.stageId) ?? null} moves={moves} />
             ) : composer.button.opens.stageMode === "CHOOSE" && stages && stages.length > 0 ? (
               <div className="w-full sm:w-64">
                 <label htmlFor="timeline-composer-stage" className="mb-1 block text-xs font-medium text-muted-foreground">
-                  Change stage to
+                  Change {moves.noun} to
                 </label>
                 <select
                   id="timeline-composer-stage"
@@ -400,10 +422,10 @@ export function Timeline({
                   className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                 >
                   <option value="">No change</option>
-                  {STAGE_GROUPS.map((category) => {
+                  {moves.groups.map(({ category, label }) => {
                     const inGroup = stages.filter((st) => st.category === category)
                     return inGroup.length === 0 ? null : (
-                      <optgroup key={category} label={CATEGORY_LABELS[category]}>
+                      <optgroup key={category} label={label}>
                         {inGroup.map((st) => (
                           <option key={st.id} value={st.id}>
                             {st.name}
@@ -470,7 +492,7 @@ export function Timeline({
                       {entry.kind === "NOTE" ? "Note" : entry.kind === "EMAIL_IN" ? "Email received" : "Email sent"}
                     </StatusPill>
                     <EntryButtonLabel data={entry.data} />
-                    <NoteStagePill data={entry.data} />
+                    <NoteStagePill data={entry.data} moves={moves} />
                     <span className="flex-1" />
                   {entry.kind === "NOTE" && canAddNotes && !!myUserId && entry.author?.id === myUserId && editing?.id !== entry.id && (
                     <div className="flex gap-3">
@@ -574,12 +596,18 @@ function EmailBody({ entry }: { entry: TimelineEntryData }) {
   )
 }
 
-// The stage a fixed stage button moves to, read only
-function FixedStage({ stage }: { stage: TimelineStageOption | null }) {
+// The stage (or status) a fixed button moves to, read only
+function FixedStage({ stage, moves }: { stage: TimelineStageOption | null; moves: TimelineMoveConfig }) {
   return (
     <div className="w-full sm:w-64">
-      <p className="mb-1 text-xs font-medium text-muted-foreground">Moves stage to</p>
-      {stage ? <StagePill name={stage.name} category={stage.category} /> : <p className="text-sm text-muted-foreground">Loading...</p>}
+      <p className="mb-1 text-xs font-medium text-muted-foreground">Moves {moves.noun} to</p>
+      {stage ? (
+        <StatusPill tone={toneFor(moves, stage.category)} title={stage.name}>
+          <span className="truncate">{stage.name}</span>
+        </StatusPill>
+      ) : (
+        <p className="text-sm text-muted-foreground">Loading...</p>
+      )}
     </div>
   )
 }
@@ -595,16 +623,15 @@ function EntryButtonLabel({ data }: { data: unknown }) {
   )
 }
 
-// A note posted with a stage change shows the move, for example "New to
-// Qualified", tinted by the stage it moved to
-function NoteStagePill({ data }: { data: unknown }) {
-  const change = noteStageChange(data)
+// A note or email posted with a stage (or status) change shows the move,
+// for example "New to Qualified", tinted by the stage it moved to
+function NoteStagePill({ data, moves }: { data: unknown; moves: TimelineMoveConfig }) {
+  const change = moves.field === "statusId" ? noteStatusChange(data) : noteStageChange(data)
   if (!change) return null
   const label = `${change.from.name} to ${change.to.name}`
-  const category = change.to.category
-  return category === "OPEN" || category === "WON" || category === "LOST" ? (
-    <StagePill name={label} category={category} />
-  ) : (
-    <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">{label}</span>
+  return (
+    <StatusPill tone={toneFor(moves, change.to.category)} title={label}>
+      <span className="truncate">{label}</span>
+    </StatusPill>
   )
 }

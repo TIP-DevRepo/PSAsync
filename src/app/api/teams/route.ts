@@ -15,7 +15,7 @@ import { userFacingError } from "@/lib/user-error"
 // manage teams.
 export async function GET() {
   const { ctx, response } = await requireAccess({
-    permission: ["settingsSections.teams", "pages.opportunities", "pages.settings"],
+    permission: ["settingsSections.teams", "pages.opportunities", "pages.tickets", "settingsSections.tickets", "pages.settings"],
     message: "You do not have permission to view teams",
   })
   if (response) return response
