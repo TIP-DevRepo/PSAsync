@@ -3367,7 +3367,12 @@ async function checkAuditRecording(prisma: PrismaClient, admin: Session, ctx: At
   const create = await admin.request("POST", "/api/opportunities", {
     json: { initialNote: OPP_NOTE, title: "Dev check audit opportunity", clientId: ctx.b.clientId, contactId: ctx.b.contactId },
   })
-  const opportunityId = create.status === 200 ? ((JSON.parse(create.text) as { id?: string }).id ?? null) : null
+  const createdJson = create.status === 200 ? (JSON.parse(create.text) as { id?: string; title?: string }) : null
+  const opportunityId = createdJson?.id ?? null
+  // The title as saved: the sample client has a prefix (TCB), so the server
+  // saves "<PREFIX> - <title>" (src/lib/record-title.ts). The entries must
+  // hold exactly what was saved, whatever the prefix.
+  const createdTitle = createdJson?.title ?? ""
   if (!opportunityId) {
     push("create an opportunity for the audit steps", "200", String(create.status), `got ${create.status}: ${errorText(create.text)}`)
     return null
@@ -3383,7 +3388,8 @@ async function checkAuditRecording(prisma: PrismaClient, admin: Session, ctx: At
   push("a title change records one field_changed entry with before and after", "field_changed:title", describe(title.rows),
     title.result.status !== 200 ? `got ${title.result.status}: ${errorText(title.result.text)}`
       : title.rows.length !== 1 || titleRow.field !== "title" ? `got ${describe(title.rows)}`
-        : titleRow.before !== "Dev check audit opportunity" || titleRow.after !== "Dev check audit renamed" ? "wrong before or after" : null)
+        : !createdTitle.endsWith("Dev check audit opportunity") ? `the create answered the title "${createdTitle}"`
+          : titleRow.before !== createdTitle || titleRow.after !== "Dev check audit renamed" ? "wrong before or after" : null)
 
   const same = await added(() => admin.request("PATCH", base, { json: { title: "Dev check audit renamed" } }))
   push("a PATCH that changes nothing records nothing", "none", describe(same.rows),
@@ -4014,7 +4020,12 @@ async function checkTicketAuditFlow(prisma: PrismaClient, admin: Session, basic:
     if (rename.status !== 200 || !entry) throw new HarnessBroken(`couldn't rename the ticket: ${rename.status} ${errorText(rename.text)}`)
     const undo = await admin.request("POST", `/api/audit-log/${entry.id}/undo`)
     const back = await prisma.ticket.findUniqueOrThrow({ where: { id: t.id }, select: { title: true } })
-    push("undo puts the title back", "200, the old title", String(undo.status), undo.status !== 200 ? errorText(undo.text) : back.title !== "Dev check ticket audit" ? "the title wasn't put back" : null)
+    // Exactly the title it was saved with, the sample client's prefix
+    // included (the create response's title)
+    push("undo puts the title back", "200, the old title", String(undo.status),
+      undo.status !== 200 ? errorText(undo.text)
+        : !t.title?.endsWith("Dev check ticket audit") ? `the create answered the title "${t.title}"`
+          : back.title !== t.title ? "the title wasn't put back" : null)
     const again = await admin.request("POST", `/api/audit-log/${entry.id}/undo`)
     push("undo twice is refused", "409", String(again.status), again.status !== 409 ? errorText(again.text) : null)
 
