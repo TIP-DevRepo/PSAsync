@@ -77,11 +77,16 @@ const readUrlId = (value: string | null) => (value && URL_ID.test(value) ? value
 // The same limit the list route has on its search text
 export const FILTER_SEARCH_MAX = 200
 
-// Reads the view, search, team, and owner from the URL. An unknown view
-// falls back to the board, overlong search text is cut to the API's limit,
-// and a team or owner that isn't an id is ignored.
-export function readOpportunityUrl(params: { get(name: string): string | null }): { view: OpportunityView; filters: OpportunityFilters } {
-  const view: OpportunityView = params.get("view") === "list" ? "list" : "board"
+// Reads the view, search, team, and owner from the URL. A missing or
+// unknown view falls back to the default view (the board, or the sidebar
+// layout's choice, src/lib/sidebar-layout.ts), overlong search text is cut
+// to the API's limit, and a team or owner that isn't an id is ignored.
+export function readOpportunityUrl(
+  params: { get(name: string): string | null },
+  defaultView: OpportunityView = "board"
+): { view: OpportunityView; filters: OpportunityFilters } {
+  const urlView = params.get("view")
+  const view: OpportunityView = urlView === "list" || urlView === "board" ? urlView : defaultView
   const q = (params.get("q") ?? "").trim()
   return {
     view,
@@ -89,12 +94,14 @@ export function readOpportunityUrl(params: { get(name: string): string | null })
   }
 }
 
-// The page's query string for a view and its filters ("" for the board with
-// none), the inverse of readOpportunityUrl. Column filters are left out, so
+// The page's query string for a view and its filters ("" for the default
+// view with none), the inverse of readOpportunityUrl. The view is written
+// whenever it isn't the default, so the board is written as view=board for
+// a user whose default is the list. Column filters are left out, so
 // changing view starts the list without them.
-export function opportunityUrlQuery(view: OpportunityView, filters: OpportunityFilters): string {
+export function opportunityUrlQuery(view: OpportunityView, filters: OpportunityFilters, defaultView: OpportunityView = "board"): string {
   const params = new URLSearchParams()
-  if (view === "list") params.set("view", "list")
+  if (view !== defaultView) params.set("view", view)
   if (filters.team) params.set("team", filters.team)
   if (filters.owner) params.set("owner", filters.owner)
   if (filters.q.trim()) params.set("q", filters.q.trim())
