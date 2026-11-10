@@ -98,6 +98,15 @@ model CompanySettings {
   // Off: every user sees the company theme and can't pick their own colors
   allowUserTheme Boolean            @default(true)
 
+  // The company's sidebar layout (src/lib/sidebar-layout.ts): the order of
+  // the pages in each section and of the teams in each folder, which
+  // folders start open, and the Opportunities and Tickets default views.
+  // Null means the PSAsync default. Read through the zod schema in
+  // src/lib/sidebar-layout-schema.ts, so unknown keys are ignored.
+  sidebarLayout    Json?
+  // Off: every user sees the company layout and can't save their own
+  allowUserSidebar Boolean @default(true)
+
   // Email settings
   microsoftClientId     String?
   microsoftTenantId     String?
@@ -196,15 +205,19 @@ model User {
 // null means use the company default (src/lib/theme.ts resolveTheme), and
 // the theme fields only count while the company allows personal colors.
 model UserPreferences {
-  id           String             @id @default(cuid())
-  userId       String             @unique
-  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
-  themeAccent  String?
-  themeSidebar ThemeSidebarStyle?
-  themeMode    ThemeMode?
-  rowDensity   RowDensity?
-  createdAt    DateTime           @default(now())
-  updatedAt    DateTime           @updatedAt
+  id            String             @id @default(cuid())
+  userId        String             @unique
+  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  themeAccent   String?
+  themeSidebar  ThemeSidebarStyle?
+  themeMode     ThemeMode?
+  rowDensity    RowDensity?
+  // The user's own sidebar layout, the same shape as
+  // CompanySettings.sidebarLayout; used only while the company allows it
+  // (CompanySettings.allowUserSidebar)
+  sidebarLayout Json?
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
 }
 
 enum ThemeSidebarStyle {
