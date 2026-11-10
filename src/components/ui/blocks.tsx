@@ -54,48 +54,35 @@ export function PriorityMarker({ tone, children, className }: { tone: Tone; chil
 }
 
 // ─── PsasyncMark ────────────────────────────────────────────────────────────
-// The real PSAsync logo (public/brand/psasync-mark.png, the favicon's mark
-// on a transparent background), used as a CSS mask and filled from the
-// accent, so it follows the company or user accent in both modes. The
-// mask uses the PNG's alpha, so its partly transparent layers stay partly
-// transparent. No tile behind it. Shown in the sidebar header when a
-// company has no logo and in the empty logo slot in Settings; never to
-// customers (they see the company name instead).
+// The PSAsync mark as the favicon (src/app/icon.png) draws it: a rounded
+// tile filled with the accent (--ps-acc), so it follows the company or user
+// accent in both modes, and the white artwork (public/brand/psasync-mark.png,
+// white with partly transparent squares) on top as a normal image, so the
+// accent shows through its faint squares. Proportions match icon.png: the
+// corners are 20% of the tile, and the artwork spans about 53% of it,
+// centred (the PNG's artwork fills 252 of its 288 pixels, so the image is
+// drawn at 60% of the tile). The image has fixed width and height, so
+// nothing shifts while it loads. Shown in the sidebar header and the phone
+// menu when a company has no logo, and in the empty logo slot in Settings;
+// never to customers (they see the company name instead).
 export const PSASYNC_MARK_SRC = "/brand/psasync-mark.png"
+const MARK_RADIUS = 0.2
+const MARK_IMAGE = 0.6
 
-// The mark's fill. "accent" (the default) is the plain accent, for light
-// surfaces like the Settings empty state. "sidebar" mixes the accent with
-// the sidebar's own text color, so it is lighter on dark and tinted
-// sidebars and darker on a light one: the solid square reaches at least
-// 4.5:1 and the middle square at least 3:1 on every sidebar style for
-// every accent preset. (The faintest square is only 25% opaque in the
-// artwork, so no fill can take it past about 1.8:1.)
-export const PSASYNC_MARK_FILL = {
-  accent: "var(--ps-acc)",
-  sidebar: "color-mix(in srgb, var(--ps-acc) 55%, var(--ps-sb-text))",
-} as const
-
-export function PsasyncMark({ size = 34, fill = "accent", className }: { size?: number; fill?: keyof typeof PSASYNC_MARK_FILL; className?: string }) {
-  const mask = `url(${PSASYNC_MARK_SRC})`
+export function PsasyncMark({ size = 34, className }: { size?: number; className?: string }) {
+  const image = Math.round(size * MARK_IMAGE)
   return (
     <span
       role="img"
       aria-label="PSAsync"
-      className={cn("inline-block shrink-0", className)}
-      style={{
-        width: size,
-        height: size,
-        backgroundColor: PSASYNC_MARK_FILL[fill],
-        maskImage: mask,
-        WebkitMaskImage: mask,
-        maskSize: "contain",
-        WebkitMaskSize: "contain",
-        maskRepeat: "no-repeat",
-        WebkitMaskRepeat: "no-repeat",
-        maskPosition: "center",
-        WebkitMaskPosition: "center",
-      }}
-    />
+      className={cn("flex shrink-0 items-center justify-center bg-acc", className)}
+      style={{ width: size, height: size, borderRadius: Math.round(size * MARK_RADIUS) }}
+    >
+      {/* A small static file; a plain img with its size set, like the
+          sidebar's logo, so it needs no image optimizer entry */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={PSASYNC_MARK_SRC} alt="" aria-hidden="true" width={image} height={image} draggable={false} className="block" />
+    </span>
   )
 }
 
