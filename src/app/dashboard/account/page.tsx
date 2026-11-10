@@ -1,6 +1,6 @@
 import Link from "next/link"
 import { redirect } from "next/navigation"
-import { ChevronRight, Palette } from "lucide-react"
+import { ChevronRight, PanelLeft, Palette } from "lucide-react"
 import { auth } from "@/auth"
 import { prisma } from "@/lib/prisma"
 import { usesMicrosoftSso } from "@/lib/sso-account"
@@ -63,6 +63,18 @@ export default async function AccountPage() {
         <span className="min-w-0 flex-1">
           <span className="block font-semibold text-foreground">Appearance</span>
           <span className="block text-sm text-muted-foreground">Accent color, sidebar style, light or dark mode, and row density</span>
+        </span>
+        <ChevronRight size={18} className="shrink-0 text-muted-foreground" aria-hidden="true" />
+      </Link>
+
+      <Link
+        href="/dashboard/account/sidebar"
+        className="flex items-center gap-3 rounded-lg border border-border bg-card p-4 shadow-card transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <IconTile icon={PanelLeft} size="md" />
+        <span className="min-w-0 flex-1">
+          <span className="block font-semibold text-foreground">Sidebar</span>
+          <span className="block text-sm text-muted-foreground">Page order, folders, and the views Opportunities and Tickets open on</span>
         </span>
         <ChevronRight size={18} className="shrink-0 text-muted-foreground" aria-hidden="true" />
       </Link>

@@ -2,11 +2,12 @@
 
 import { useState, useEffect, useLayoutEffect, useRef, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
-import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound, MousePointerClick, History, Palette, Ticket } from "lucide-react"
+import { ChevronDown, Building2, UserCog, FileText, Bell, Plug, ShieldCheck, Mail, ClipboardList, Briefcase, Tags, MapPin, Target, UsersRound, MousePointerClick, History, Palette, Ticket, PanelLeft } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Breadcrumbs } from "@/components/Breadcrumbs"
 import { CompanySettingsPanel } from "@/components/settings/CompanySettingsPanel"
 import { CompanyAppearancePanel } from "@/components/settings/CompanyAppearancePanel"
+import { SidebarSettingsPanel } from "@/components/settings/SidebarSettingsPanel"
 import { IndustriesSettingsPanel } from "@/components/settings/IndustriesSettingsPanel"
 import { CategoriesSettingsPanel } from "@/components/settings/CategoriesSettingsPanel"
 import { ContactTagsSettingsPanel } from "@/components/settings/ContactTagsSettingsPanel"
@@ -30,6 +31,7 @@ import { useAccess } from "@/components/AccessProvider"
 type PanelKey =
   | "company"
   | "appearance"
+  | "sidebar"
   | "users"
   | "roles"
   | "teams"
@@ -64,6 +66,7 @@ const settingsCategories: SettingsCategory[] = [
     items: [
       { key: "company", label: "Company Info & Branding", icon: Building2 },
       { key: "appearance", label: "Appearance", icon: Palette },
+      { key: "sidebar", label: "Sidebar", icon: PanelLeft },
     ],
   },
   {
@@ -131,6 +134,7 @@ const settingsCategories: SettingsCategory[] = [
 const PANEL_PERMISSION: Record<PanelKey, string | null> = {
   company: "settingsSections.company",
   appearance: "settingsSections.company",
+  sidebar: "settingsSections.company",
   users: "settingsSections.users",
   roles: "settingsSections.users",
   teams: "settingsSections.teams",
@@ -166,6 +170,8 @@ function renderPanel(key: PanelKey | null) {
       return <CompanySettingsPanel />
     case "appearance":
       return <CompanyAppearancePanel />
+    case "sidebar":
+      return <SidebarSettingsPanel />
     case "users":
       return <UsersSettingsPanel />
       case "roles":

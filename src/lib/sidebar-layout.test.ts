@@ -1,7 +1,9 @@
 import { test } from "node:test"
 import assert from "node:assert/strict"
 import {
+  diffSidebarLayout,
   layerOrder,
+  replaceVisibleOrder,
   layoutFromResolved,
   normalizeSidebarLayout,
   orderTeams,
@@ -245,4 +247,24 @@ test("an editor round trip keeps the resolved layout", () => {
   const resolved = resolveSidebarLayout({ company, user: null, allowUser: true })
   const again = resolveSidebarLayout({ company: layoutFromResolved(resolved), user: null, allowUser: true })
   assert.deepEqual(again, resolved)
+})
+
+// ─── Editor helpers ─────────────────────────────────────────────────────────
+
+test("diff: only what differs from the layer below is saved", () => {
+  const base = layoutFromResolved(PSASYNC_SIDEBAR_LAYOUT)
+  const next = layoutFromResolved(PSASYNC_SIDEBAR_LAYOUT)
+  assert.deepEqual(diffSidebarLayout(base, next), {})
+  next.sections!.work = ["tickets", "dashboard", "opportunities"]
+  next.folders!.opportunities = { teamOrder: [], openByDefault: true }
+  next.defaultViews = { opportunities: "board", tickets: "mine" }
+  assert.deepEqual(diffSidebarLayout(base, next), {
+    sections: { work: ["tickets", "dashboard", "opportunities"] },
+    folders: { opportunities: { openByDefault: true } },
+    defaultViews: { tickets: "mine" },
+  })
+})
+
+test("replaceVisibleOrder keeps hidden pages in their slots", () => {
+  assert.deepEqual(replaceVisibleOrder(["a", "hidden", "b", "c"], ["c", "a", "b"]), ["c", "hidden", "a", "b"])
 })

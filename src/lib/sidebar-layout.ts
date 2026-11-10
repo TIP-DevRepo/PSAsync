@@ -271,6 +271,51 @@ export function layoutFromResolved(resolved: ResolvedSidebarLayout): SidebarLayo
   }
 }
 
+const sameList = (a: readonly string[] | undefined, b: readonly string[] | undefined) =>
+  (a ?? []).length === (b ?? []).length && (a ?? []).every((key, i) => key === (b ?? [])[i])
+
+// Only the parts of `next` that differ from `base` (both full layouts, as
+// layoutFromResolved makes them), so a saved layout holds just what was
+// changed and everything else keeps following the layer below: a user who
+// only picks a default view still gets the company's later reorders.
+export function diffSidebarLayout(base: SidebarLayout, next: SidebarLayout): SidebarLayout {
+  const out: SidebarLayout = {}
+
+  const sections: Record<string, string[]> = {}
+  for (const [key, order] of Object.entries(next.sections ?? {})) {
+    if (order && !sameList(order, base.sections?.[key])) sections[key] = [...order]
+  }
+  if (Object.keys(sections).length > 0) out.sections = sections
+
+  const folders: Partial<Record<SidebarFolderKey, SidebarFolderLayout>> = {}
+  for (const key of SIDEBAR_FOLDER_KEYS) {
+    const was = base.folders?.[key]
+    const now = next.folders?.[key]
+    if (!now) continue
+    const folder: SidebarFolderLayout = {}
+    if (now.teamOrder && !sameList(now.teamOrder, was?.teamOrder)) folder.teamOrder = [...now.teamOrder]
+    if (typeof now.openByDefault === "boolean" && now.openByDefault !== (was?.openByDefault ?? false)) folder.openByDefault = now.openByDefault
+    if (Object.keys(folder).length > 0) folders[key] = folder
+  }
+  if (Object.keys(folders).length > 0) out.folders = folders
+
+  const views: Partial<SidebarDefaultViews> = {}
+  if (next.defaultViews?.opportunities && next.defaultViews.opportunities !== base.defaultViews?.opportunities) views.opportunities = next.defaultViews.opportunities
+  if (next.defaultViews?.tickets && next.defaultViews.tickets !== base.defaultViews?.tickets) views.tickets = next.defaultViews.tickets
+  if (Object.keys(views).length > 0) out.defaultViews = views
+
+  return out
+}
+
+// A new order for the keys a user can see, written back into the full list:
+// each visible key's slot takes the next key of `visibleOrder`, and keys the
+// user can't see stay where they were
+export function replaceVisibleOrder(full: readonly string[], visibleOrder: readonly string[]): string[] {
+  const visible = new Set(visibleOrder)
+  let next = 0
+  return full.map((key) => (visible.has(key) ? visibleOrder[next++] : key))
+}
+
 // A saved layout cleaned of everything this release doesn't know: unknown
 // sections and pages dropped, each page and team once, and only the folder
 // and view values that exist. The routes store layouts through it, so the
